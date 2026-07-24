@@ -5,7 +5,8 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { Container, SelectList, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import type { SelectItem } from "@earendil-works/pi-tui";
 
 type Status = "idle" | "inprogress" | "done";
 interface Task { id: number; text: string; status: Status; }
@@ -13,6 +14,9 @@ interface TaskDetails { action: string; tasks: Task[]; nextId: number; error?: s
 
 const NEXT: Record<Status, Status> = { idle: "inprogress", inprogress: "done", done: "idle" };
 const ICON: Record<Status, string> = { idle: "○", inprogress: "●", done: "✓" };
+// Max pending rows shown in the always-on widget (done is collapsed into the
+// count). Keeps the widget bounded; browse the full stack via the /tasks overlay.
+const MAX_VISIBLE = 4;
 
 const Params = Type.Object({
   action: Type.Union([
@@ -46,16 +50,29 @@ export default function (pi: ExtensionAPI) {
           return [theme.fg("muted", "📋 no tasks — use the task tool to add some")];
         const done = tasks.filter((t) => t.status === "done").length;
         const header = theme.fg("accent", `📋 tasks [${done}/${tasks.length}]`);
-        const rows = tasks.map((t) => {
-          const icon = theme.fg(
-            t.status === "done" ? "success" : t.status === "inprogress" ? "accent" : "dim",
-            ICON[t.status],
+        // Compact: show pending work only (done is collapsed into the count).
+        // in-progress first, then idle; cap rows so the widget never grows tall.
+        const pending = tasks
+          .filter((t) => t.status !== "done")
+          .sort(
+            (a, b) =>
+              Number(b.status === "inprogress") - Number(a.status === "inprogress") ||
+              a.id - b.id,
           );
+        if (pending.length === 0)
+          return [`${header}${theme.fg("success", " ✓ all done")}`];
+        const visible = pending.slice(0, MAX_VISIBLE);
+        const hidden = pending.length - visible.length;
+        const rows = visible.map((t) => {
+          const icon = theme.fg(t.status === "inprogress" ? "accent" : "dim", ICON[t.status]);
           const id = theme.fg("accent", `#${t.id}`);
-          const txt = theme.fg(t.status === "done" ? "dim" : "muted", t.text);
+          const txt = theme.fg(t.status === "inprogress" ? "text" : "muted", t.text);
           return truncateToWidth(`  ${icon} ${id} ${txt}`, width);
         });
-        return [header, ...rows];
+        const lines = [header, ...rows];
+        if (hidden > 0)
+          lines.push(theme.fg("dim", `  … +${hidden} more · /tasks to browse`));
+        return lines;
       },
     }));
     ctx.ui.setStatus("tasks", `📋 ${tasks.length} task(s)`);
@@ -226,6 +243,60 @@ export default function (pi: ExtensionAPI) {
             details: snapshot("list", "unknown"),
           };
       }
+    },
+  });
+
+  // /tasks — scrollable overlay to browse the FULL task stack. The always-on
+  // widget is capped at MAX_VISIBLE pending rows; this surfaces everything.
+  // Rationale: pi widgets (setWidget) are display-only and cannot take keyboard
+  // input, so browsing with ↑↓ lives here in a ctx.ui.custom() SelectList.
+  pi.registerCommand("tasks", {
+    description:
+      "Browse all session tasks in a scrollable overlay (↑↓ navigate, enter/esc to close).",
+    handler: async (_args, ctx) => {
+      if (tasks.length === 0) {
+        ctx.ui.notify("No tasks to browse", "info");
+        return;
+      }
+      const doneCount = tasks.filter((t) => t.status === "done").length;
+      const items: SelectItem[] = tasks.map((t) => ({
+        value: String(t.id),
+        label: `${ICON[t.status]} #${t.id} ${t.text}`,
+        description: t.status,
+      }));
+      await ctx.ui.custom<string | null>((tui, theme, _kb, doneCb) => {
+        const container = new Container();
+        container.addChild(
+          new Text(
+            theme.fg(
+              "accent",
+              theme.bold(
+                `📋 tasks [${doneCount}/${tasks.length}]   ↑↓ scroll · enter/esc close`,
+              ),
+            ),
+            1,
+            0,
+          ),
+        );
+        const list = new SelectList(items, Math.min(items.length, 8), {
+          selectedPrefix: (s: string) => theme.fg("accent", s),
+          selectedText: (s: string) => theme.fg("accent", s),
+          description: (s: string) => theme.fg("muted", s),
+          scrollInfo: (s: string) => theme.fg("dim", s),
+          noMatch: (s: string) => theme.fg("warning", s),
+        });
+        list.onSelect = () => doneCb(null);
+        list.onCancel = () => doneCb(null);
+        container.addChild(list);
+        return {
+          render: (w: number) => container.render(w),
+          invalidate: () => container.invalidate(),
+          handleInput: (data: string) => {
+            list.handleInput(data);
+            tui.requestRender();
+          },
+        };
+      });
     },
   });
 }
