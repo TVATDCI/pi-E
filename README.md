@@ -1,0 +1,333 @@
+# pi · agent (`~/.pi/agent`)
+
+> A **cost-disciplined, methodology-heavy personal system** built on the [Pi Coding Agent](https://github.com/earendil-works/pi) core. Philosophy: _ride pi's native features; add only what cost-discipline + the planning methodology need. Don't port other tools' machinery — adopt disciplines by fitness, reject the rest with stated reasons._ (See `AGENTS.md`.)
+
+This is **not** a showcase. It's a single-operator production config: narrow and deep where it matters (routing economics, safety policy, specialist prompts, governance), intentionally thin everywhere else (1 theme, no cosmetic widgets).
+
+---READ
+
+## At a glance
+
+|                        |                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| **Pi version**         | `0.82.0` (npm: `@earendil-works/pi-coding-agent`)                               |
+| **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (quota-based, **no** balance fallback)       |
+| **Default model**      | `glm-5.2` @ `medium` thinking, theme `encom`                                    |
+| **Extensions**         | 13 active (~5,300 LOC; 11 feature + 2 host hooks) + 2 disabled                                             |
+| **Agents**             | 14 (6 personas + 8 Matrix operatives; 0 model pins)                             |
+| **Governance**         | 13 ADRs in `decisions/`                                                         |
+| **Secondary provider** | `opencode` (FREE tier — `git-commit-message` category + gemini vision fallback) |
+
+---
+
+## Quick start
+
+```bash
+pi                         # launch (loads extensions from ~/.pi/agent/extensions/)
+dispatch …                 # delegate a sub-task (the core tool)
+                           #   dispatch(category="deep")                    → morpheus (auto-resolved; no agent=)
+                           #   dispatch(category="quick", agent="morpheus") → explicit agent wins (KEY INVARIANT)
+/team <name>               # select active roster for dispatch/chain
+/chain <name>              # select active sequential agent pipeline
+run_chain({ task: … })     # execute the active chain (e.g., commit-message)
+/tiers                     # see the 10 categories × model × REAL availability
+/routing-stats             # observability: aggregate dispatch-log across this project
+/persona-forge evolve <target>  # generate + momus-review a persona variant
+/persona-forge list        # list pending personas
+/persona-forge approve <new-id> # write agents/<new-id>.md + teams.yaml
+/persona-forge reject <new-id>  # discard a pending persona
+/dc-mode abort|continue    # toggle damage-control mode
+/note <text>               # persistent in-session note
+Remember that …          # persists a fact via memory_remember → ranked + injected next turn
+```
+
+---
+
+## Project structure
+
+```
+~/.pi/agent/
+├── AGENTS.md                 # lean always-on governance (every turn)
+├── settings.json             # defaultProvider/Model/thinking, theme, skills path
+├── models.json               # provider catalog overrides (currently empty — built-ins used)
+├── auth.json                 # provider keys: zai-coding-cn, opencode, openrouter
+├── mini-dc-rules.yaml        # GLOBAL safety floor (deny-additive; projects ADD, can't REMOVE)
+├── tsconfig.json
+├── bin/                      # vendored CLIs: fd, rg
+├── themes/encom.json         # the one theme
+├── agents/                   # 14 agents: 6 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
+├── decisions/                # 13 ADRs (architecture decision records)
+├── agent-chain.yaml        # global chain definitions (deny-additive)
+└── extensions/
+    ├── orchestration-engine/ # the dispatch tool + tier-map + functional-agent map + observability + team/chain (the core)
+    │   ├── index.ts                  # dispatch + /team + /team-list + /routing-stats + /tiers + Cost-Discipline hook
+    │   ├── spawn.ts                  # resolveAndSpawn + stable sessions + rotation + usage capture + signal/abort
+    │   ├── agent-map.ts              # category → functional-agent default (Tier 2)
+    │   ├── tier-map.ts               # category → model map (L2, sole model authority)
+    │   ├── routing-stats.ts          # pure aggregation incl. usage (unit-tested)
+    │   ├── test-routing-stats.ts     # 13/13 seed tests
+    │   ├── 3-LAYER-ROUTING-DESIGN.md # design doc (F1–F6 failure modes; F1 closed, F4/F6 shipped)
+    │   ├── HANDOFF.md                # decision/reversal log
+    │   └── PROBE-RESULTS.md          # empirical model/plan facts
+    ├── memory/                # structured cross-session memory (memory_remember tool + <memory-context> injection)
+    │   ├── index.ts                  # session_start hydrate + before_agent_start inject + memory_remember tool
+    │   ├── store.ts                  # JsonlMemoryStore: atomic writes, dedup, secret scan, provenance guard
+    │   ├── injection.ts              # pure pipeline: rank → budget → format
+    │   ├── {classifier,scanner,ranker,budget,formatter,normalizer,schema}.ts  # pure functions
+    │   └── test-*.ts                 # 147 assertions + smoke (all green)
+    ├── chain-runner.ts        # shared chain loader + runner (used by agent-chain and persona-forge)
+    ├── agent-chain.ts         # run_chain tool + /chain + /chain-list
+    ├── persona-forge.ts       # evolve personas, momus review, operator-approved roster writes
+    ├── statusline-encom.ts    # encom statusline footer: segment registry, config/presets, customItems, /encom-* commands
+    ├── mini-task-tracker.ts   # `task` tool + widget (bd replacement)
+    ├── mini-damage-control.ts # safety hooks (fail-closed + deny-additive)
+    ├── session-notes.ts       # add_note + /note widget
+    ├── mini-purpose-gate.ts   # boot intent gate
+    ├── bd-bridge.ts           # READ-ONLY sisyphus→pi memory bridge (before_agent_start; never writes bd)
+    ├── herdr-agent-state.ts   # herdr multiplexer integration (vendor-managed; pane state via unix socket)
+    └── *.ts.disabled          # parked experiments
+```
+
+---
+
+## Extensions
+
+| Extension                                                                  | LOC | Role                                                                                                                                                    |
+| -------------------------------------------------------------------------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `orchestration-engine/index.ts`                                            | 500 | `dispatch` (functional-agent resolution) + `/team` + `/team-list` + `/routing-stats` (F6) + `/tiers` (F4) + `before_agent_start` Cost-Discipline inject |
+| `orchestration-engine/tier-map.ts`                                         | 322 | Category→model map (sole model authority), peak/promo/availability logic, resolver                                                                      |
+| `orchestration-engine/agent-map.ts`                                        | 22  | Category→functional-agent DEFAULT + `resolveFunctionalAgent()` (Tier 2)                                                                                 |
+| `orchestration-engine/spawn.ts`                                            | 350 | `resolveAndSpawn` + stable sessions + rotation + usage capture + Esc/signal-abort                                                                       |
+| `chain-runner.ts`                                                          | 182 | Shared `loadChains()` + `runChainByName()` for chain consumers                                                                                          |
+| `agent-chain.ts`                                                           | 217 | `run_chain` tool + `/chain` + `/chain-list` (sequential pipelines)                                                                                      |
+| `persona-forge.ts`                                                         | 150 | `evolve` + `approve` + `list` + `reject` persona variants with provenance; pending personas persisted to disk                                           |
+| `statusline-encom.ts`                                                      | 877 | Encom statusline footer: segment registry, config/presets/customItems, 10-style separators, streaming ticker                                                                                                          |
+| `mini-task-tracker.ts`                                                     | 229 | `task` tool + widget; non-mutating tools (read/grep/find/ls/`memory_remember`) exempt from the task gate                                                |
+| `mini-damage-control.ts`                                                   | 168 | Safety: fail-closed + deny-additive + `/dc-mode`                                                                                                        |
+| `orchestration-engine/routing-stats.ts`                                    | 204 | Pure aggregation for `/routing-stats` incl. usage section (unit-tested)                                                                                 |
+| `session-notes.ts`                                                         | 133 | `add_note` + `/note` persistent widget                                                                                                                  |
+| `mini-purpose-gate.ts`                                                     | 126 | Boot intent gate                                                                                                                                        |
+| `orchestration-engine/test-routing-stats.ts`                               | 58  | Aggregator unit tests (13/13)                                                                                                                           |
+| `web-research.ts`                                                          | 311 | Keyless `search` (Wikipedia+DDG-IA+npm+GitHub) + `fetch` (curl+w3m→text, truncated, SSRF-hardened) tools                                                    |
+| `test-web-research.ts`                                                     | 107 | web-research logic tests (42/42 pass); main-guard + no-op default (ADR 0011)                                                                                 |
+| `memory/index.ts`                                                          | 127 | `memory_remember` tool + `session_start` hydrate + `before_agent_start` inject                                                                          |
+| `memory/store.ts`                                                          | 217 | `JsonlMemoryStore`: atomic temp+rename, dedup, secret scan, provenance guard+downgrade                                                                  |
+| `memory/injection.ts`                                                      | 40  | Pure pipeline: rank → budget → format `<memory-context>` block                                                                                          |
+| `memory/{classifier,scanner,ranker,budget,formatter,normalizer,schema}.ts` | 269 | Pure functions: classify, secret-scan, rank, budget, format, normalize                                                                                  |
+| `memory/test-*.ts`                                                         | 652 | Unit tests (147 assertions + smoke, all green)                                                                                                          |
+
+---
+
+## Statusline (`extensions/statusline-encom.ts`)
+
+Encom-themed single-line footer that **replaces Pi's built-in footer** via the canonical `ctx.ui.setFooter` API (not `setWidget`). Selectively ported (Strategy C) from `pi-powerline-footer` v0.7.0 — footer-relevant subsystems only; the fixed-editor cluster, bash-mode, editor stash, working-vibes, and welcome overlay are deliberately excluded (different surface). Unconfigured, it renders byte-identical to the prior hand-built footer.
+
+**Segments** (12, registry-driven; order is data):
+`dir` · `git`(+staged/unstaged/untracked) · `context %` · `tokens` · `cache_read` · `cache_write` · `model`(+thinking) · `tps` · `cost` · `time_spent` · `session` · `clock`
+(`cache_read`/`cache_write` hide until the model reports cached tokens; `subagents` deferred — Pi exposes no count.)
+
+**Commands**
+
+| Command | Effect |
+| --- | --- |
+| `/encom` | Show preset + active segments + custom-item count |
+| `/encom-preset <default\|minimal\|full>` | Switch segment set; persisted to `settings.json` (safe read-modify-write) |
+| `/encom-sep <style>` | Thin-path separator: `powerline-thin\|powerline\|chevron\|slash\|pipe\|dot\|star\|block\|none\|ascii` |
+| `/encom-style <solid\|thin>` | Render mode: filled bg-blocks vs separators |
+| `/encom-nerd <on\|off\|auto>` | Nerd-font glyphs + segment icons (live override; else auto-detect) |
+
+**Config** — `settings.json` key `encomStatusline` (project `.pi/settings.json` overrides global):
+
+```json
+"encomStatusline": {
+  "preset": "default",
+  "layout": { "left": ["dir", "git", "clock"] },
+  "disabledSegments": ["cost"],
+  "customItems": [{ "id": "ci", "statusKey": "ci-status", "prefix": "CI", "color": "warning" }]
+}
+```
+
+`customItems` is a **plugin surface**: any extension can `ctx.ui.setStatus("key", "val")` and you promote it to a footer segment (read via `footerData.getExtensionStatuses()`). Colors are theme tokens in this revision (hex is a follow-up).
+
+**Internals** — unified `SegmentContent` model (each segment emits thin + solid forms from one computation); streaming-aware render ticker (1 s idle → 250 ms while a response streams, so context/tokens move live); async `git status --porcelain` poll (2 s TTL, per-cwd cache). Pure helpers unit-tested in `extensions/tests/statusline-encom.test.ts` (10/10). Phased port record: `extensions/statusline-encom.PLAN.md`.
+
+---
+
+## Agents (14)
+
+Specialist system prompts in `agents/*.md` — **0 of 14 pin a `model:` frontmatter**; `tier-map.ts` is the sole model authority. Two classes:
+
+**Personas (6)** — invoked explicitly via `agent=`:
+
+| Persona             | Depth    | Tools          | Role                                                                                                                                |
+| ------------------- | -------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `momus`             | 73 lines | read-only      | ruthless PRD/plan gate (PASS/WARNING/FAIL)                                                                                          |
+| `reviewer`          | 60 lines | read-only      | post-change code review + pre-merge hygiene                                                                                         |
+| `reviewer-security` | 94 lines | read-only      | generated variant of `reviewer` — deep security review (threat modeling, vuln-class checklist, auth/session flow, dependency audit) |
+| `oracle`            | 30 lines | read-only      | architecture/debug reasoning consultant (persona-only; `ultrabrain` now maps to `neo`)                                              |
+| `librarian`         | 36 lines | read-only      | docs / external-reference specialist                                                                                                |
+| `archivist`         | 20 lines | **gated-bash** | file-operations executor                                                                                                            |
+
+**Matrix operatives (8)** — auto-resolved from the dispatch category when `agent=` (and `team=`) are omitted — see `agent-map.ts`:
+
+| Operative    | Category                          | Depth    | Tools                                     | Role                                                                        |
+| ------------ | --------------------------------- | -------- | ----------------------------------------- | --------------------------------------------------------------------------- |
+| `keymaker`   | `quick`                           | 31 lines | read, grep, find, ls                      | fast codebase recon — finds the path                                        |
+| `trinity`    | `unspecified-low` / `-high`       | 36 lines | read, bash, grep, edit, write             | general implementation — gets it done                                       |
+| `morpheus`   | `deep`                            | 36 lines | read, grep, find, ls, bash                | deep investigation — sees what others miss                                  |
+| `neo`        | `ultrabrain`                      | 54 lines | read, grep, find, ls, bash                | consistency guardian — surfaces hidden / conflicting decisions              |
+| `mouse`      | `writing`                         | 27 lines | read, bash, edit, write                   | prose/docs — creates content                                                |
+| `architect`  | `visual-engineering` / `artistry` | 32 lines | read, bash, grep, edit                    | UI/frontend — designs structure                                             |
+| `seraph`     | `git-commit-message`              | 32 lines | read, bash, grep                          | commit protection — seals the work                                          |
+| `researcher` | `research`                        | 40 lines | read, grep, find, ls, bash, search, fetch | web research — keyless composite (Wikipedia/DDG-IA/npm/GitHub + docs-fetch) |
+
+**Removed:** `builder` (role split across `trinity` + `architect`) and `explore` (evolved into `keymaker`). **Rosters** (`teams.yaml`): `matrix` (the 8 operatives), `all` (all 14), plus `build` / `research` / `review`. Generated variants live in `generated-reviewers` with `review_status: pending`.
+
+---
+
+## How routing works (the dispatch flow)
+
+The parent keeps **full tools**; `dispatch` is one optional tool. One focused objective per dispatch. A `before_agent_start` hook injects a `## Cost Discipline` stanza every turn, steering the parent to delegate grunt work to cheaper operatives.
+
+```
+parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIRED
+        │
+        ▼
+1. resolve agent:     explicit `agent=` wins (KEY INVARIANT); else if no `team=`,
+                      resolveFunctionalAgent(category) → Matrix operative (agent-map.ts)
+2. loadPersona(agent)        → persona.model (optional override); persona.tools / systemPrompt
+3. resolveModel(category)    → tier-map.ts TIERS[category] → {model, thinking}   (SOLE model authority)
+4. precedence:               persona.model  >  category tier  >  FALLBACK (opencode/glm-5.1)
+5. F4 availability precheck: getAvailable(); no key → downshift to FALLBACK (loud: notify+log)
+6. per-{agent,project} mutex → one writer per session file (delete-only-if-tail pattern)
+7. rotateIfNeeded:           session >100KB → rename to .archive.jsonl, start fresh (NOT truncate)
+8. spawn pi --mode json -p --no-extensions [--ext mini-damage-control if bash]
+            --session sub-<agent>--<gitRoot>.jsonl   ← STABLE per {agent, project} (was ephemeral)
+            --tools <agent> --thinking <level> --model <flag> --append-system-prompt <agent> <task>
+            Esc / abort → proc.kill SIGTERM (no orphan subprocess)
+9. parse JSON stream: text deltas + tool starts + message_end usage + error detection
+10. appendEntry("dispatch-log", {category, modelFlag, thinkingLevel, source, agent, outcome, elapsedMs, usage, …})
+    source ∈ {tier-map, persona-override, functional-agent, downshift-unavailable, downshift-exhausted}
+```
+
+**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. glm-5 is deprecated/broken on Z-AI, so pi uses tested-available models: `unspecified-high` & `visual-engineering` → **glm-5-turbo**, `artistry` → glm-5.1):
+
+| Category             | Model                           | Thinking | Quota                          | Functional agent | Fallback                        |
+| -------------------- | ------------------------------- | -------- | ------------------------------ | ---------------- | ------------------------------- |
+| `quick`              | glm-4.5-air                     | off      | 1×                             | keymaker         | opencode/deepseek-v4-flash-free |
+| `unspecified-low`    | glm-4.7                         | off      | 1×                             | trinity          | opencode/hy3-free               |
+| `unspecified-high`   | glm-5-turbo                     | high     | 1× promo → 2× after 2026-09-30 | trinity          | opencode/kimi-k2.7-code         |
+| `deep`               | glm-5.1                         | high     | 1×                             | morpheus         | opencode/glm-5.1                |
+| `ultrabrain`         | glm-5.1                         | high     | 1×                             | neo              | opencode/glm-5.1                |
+| `writing`            | glm-4.7                         | medium   | 1×                             | mouse            | opencode/hy3-free               |
+| `research`           | glm-4.7                         | medium   | 1×                             | researcher       | opencode/hy3-free               |
+| `visual-engineering` | glm-5-turbo                     | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode/glm-5.1                |
+| `artistry`           | glm-5.1                         | high     | 1×                             | architect        | opencode/glm-5.1                |
+| `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | —                               |
+
+Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary model returns an empty response (e.g., Z-AI Coding Plan quota exhausted). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
+
+---
+
+## Safety model (`mini-damage-control`)
+
+- **Fail-closed by default** — no rules loaded → bash DENIED (never open).
+- **Deny-additive global floor** — `mini-dc-rules.yaml` is a floor projects can _extend_ but never _weaken_.
+- **2 rule categories** implemented: `bashToolPatterns` (rm/git/sql/dd/mkfs…) + `zeroAccessPaths` (secrets). `git push`/`git commit` ASK; recursive `rm` hard-blocks.
+- **`/dc-mode abort|continue`** — inline toggle (disler splits this into two extensions; we fold it into one).
+- **Gap (cherry-pick target):** no cloud-native patterns (aws/gcp/firebase/vercel) and no `readOnlyPaths`/`noDeletePaths` — see `decisions/` + the comparison docs.
+
+---
+
+## Observability (F4 + F6 — shipped 2026-07-09)
+
+- **`/tiers`** — the 10 categories × model / thinking / quota× / **REAL availability** (key configured). Run before switching models.
+- **`/routing-stats`** — aggregates `dispatch-log` **cross-session / cwd-scoped**: per-category, per-model (with quota×), per-agent, routing-source views + threshold flags (fail-rate, override-rate, downshifts). Plus a **`▌ usage`** section (Tier 1): total/avg cost, turns, avg context-tokens — global and per-category. The tuning loop.
+- **Cost reads `$0` until provider pricing is configured** (`zai-coding-cn` isn't priced yet); tokens are tracked regardless. Oracle Q7 caveat: summed `input` over-counts across turns — rely on `cost` + `contextTokens`.
+
+---
+
+## Memory (`extensions/memory/`)
+
+Structured, persistent cross-session memory. The agent saves facts/constraints/decisions/conventions/preferences via the `memory_remember` tool; the extension classifies, ranks, and injects a budgeted `<memory-context>` block into the system prompt each turn.
+
+- **`memory_remember` tool** — agent supplies `key` (topic-based, e.g. `strict_no_any`) + `value` + `provenance` (`operator`|`inferred`). System auto-classifies the category from the value.
+- **Injection** — `before_agent_start` re-reads the store every turn, ranks by (category → provenance → recency), budgets to ~2000 tokens, appends a `<memory-context>` block to the system prompt.
+- **Defenses** — secret scan at the write boundary (refuse + surface); inferred→operator provenance write-guard + category downgrade; dedup by `{scope}:{key}`; atomic temp+rename writes; malformed-line skip (one bad line never unloads the store).
+- **Storage** — `~/.pi/agent/memory/{store.jsonl, audit.log}`. Coexists with (does not replace) `memory.md` handoff.
+- **3-tier design** — 7 pure functions (classify/normalize/scan/rank/budget/format) → `JsonlMemoryStore` → Pi entry (`session_start` hydrate + `before_agent_start` inject + tool). 147 assertions + smoke; live-verified end-to-end (write → inject → recall).
+
+---
+
+## Environment integrations
+
+Two extensions wire pi into its host environment. Both are load-bearing for *this* operator's laptop setup and are the first things to understand before changing them.
+
+### `bd-bridge.ts` — read-only sisyphus → pi memory bridge
+
+- **What:** At `before_agent_start`, reads `bridge/global-export.jsonl` (generated by `bridge/export-bd-global.sh` from the sibling opencode+sisyphus agent's `bd` store) and string-concatenates a labeled `[FROM bridge, exported <ts>]` block onto the system prompt.
+- **Filter:** keeps only bd categories `constraint` / `exact` / `preference` / `reason` / `decision`; skips sisyphus-internal prefixes (`session-*`, `pre-test:*`, `next-session:*`, `files:*`).
+- **Hard constraints (load-bearing):** READ-PATH ONLY — it **never writes to `bd`** and **never writes to `memory/store.jsonl`**. Bridged facts are *projected*, not merged into pi's own store.
+- **Security self-model:** this path **bypasses `memory_remember`'s secret scan** (it injects directly into the prompt, not through the scanned write boundary). The export is curated + read-only so practical risk is low — but do **not** assume every string in the system prompt was secret-scanned. If sensitive-looking material ever appears in a `[FROM bridge]` block, flag it to the operator rather than trusting it was filtered.
+- **Two schemas parsed:** Schema A (clean `category:content`) and Schema B (`bd_remember.py` pipe-delimited `scope=…|category=…|…`). Known gap: escaped pipes (`\|`) in Schema B values are not yet unescaped.
+
+### `herdr-agent-state.ts` — herdr multiplexer integration
+
+- **What:** Vendor-installed by **herdr** (the terminal multiplexer this agent runs inside, alongside the sibling opencode+sisyphus pane). Reports pi's pane/agent state to herdr over a unix-domain socket (`$HERDR_SOCKET_PATH`), keyed by `$HERDR_PANE_ID`.
+- **Managed file — do not hand-edit:** the header reads *managed by herdr; reinstalling or updating the integration overwrites this file*. `@ts-nocheck` is intentional. Add custom hooks in a **sibling** file, never inside this one.
+- **No-op off-host:** gated on `HERDR_ENV === "1"` + a socket path + a pane id; if any are absent it resolves `true` and does nothing. Safe to ship unchanged in a dotfiles repo — it stays dormant outside the herdr environment.
+
+---
+
+## Two-platform architecture (where pi sits)
+
+| Axis                                   | **pi** (this repo)                                                                                                                           | **opencode + sisyphus**                                         |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Role                                   | **micro** — frequent, cost-sensitive, bounded execution                                                                                      | **macro** — rare, expensive, high-stakes methodology            |
+| Standout                               | cost routing + availability + observability + Matrix functional agents                                                                       | ~41 planning skills (discovery→PRD→momus gate→plan→waves→close) |
+| Memory substrate                       | `memory.md` (handoff) + `memory/` ext (structured JSONL)                                                                                     | `bd` + `.sisyphus/*` (file contracts)                           |
+| Couplings to cut for full independence | (1) `settings.json skills → ~/.config/opencode/skills`; (2) `git-commit-message` → opencode provider; (3) auth.json opencode/openrouter keys | —                                                               |
+
+pi loads sisyphus skills from opencode's folder (shared vocabulary, by convention). Pi now ships its own **Matrix operatives** (functional agents auto-resolved from the dispatch category), reducing reliance on sisyphus skills for delegated grunt work. The category taxonomy is **already pi-owned**; names sync to `oh-my-openagent.json` only for shared-document consistency.
+
+---
+
+## Governance
+
+- **`decisions/`** — 13 ADRs (0001–0005: substrate · mini-dc · prometheus incompat · observability · availability precheck; 0006–0008: glob matcher · team selector · chain primitive; 0009 persona-forge · 0010 runtime fallback · 0011 extension loadtime no-side-effects · 0012 memory extension · 0013 AgentToolResult details contract).
+- **`extensions/orchestration-engine/`** — `3-LAYER-ROUTING-DESIGN.md` (F1–F6), `HANDOFF.md` (reversals), `PROBE-RESULTS.md` (empirical model facts).
+- Every load-bearing behavior is **verified on the pi version it shipped against** (behavioral re-verify evidence cited in the ADRs).
+
+---
+
+## Where we're heading (cherry-pick backlog, ranked)
+
+From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value ÷ effort × fit:
+
+1. **YAML-only safety additions** — cloud `bashToolPatterns` + richer `zeroAccessPaths` + git-history patterns. Zero code change. _(next)_
+2. **`readOnlyPaths` + `noDeletePaths`** rule categories — small code bump to the fail-closed hook.
+3. **`/sub` background sub-agents** — only if parallel micro fan-out is wanted.
+4. **`coms`/`coms-net`** — DEFER, gated on the handoff-vs-conversation question.
+
+**Shipped:**
+
+- Named `/team` + `/chain` primitives (2026-07-10). `dispatch` and `run_chain` share `resolveAndSpawn` for model resolution, availability precheck, and spawn. `git-commit-message` dogfoods the `commit-message` chain.
+- `persona-forge` meta-agent (2026-07-11). `evolve` → `generate` → `momus` review → operator `approve`/`reject` write with full provenance; pending personas persisted to `sessions/persona-forge/`.
+- F3 runtime retry with per-tier opencode fallback (2026-07-11). `resolveAndSpawn` retries once on empty primary output; surfaced in `/routing-stats` as `downshift-exhausted`.
+- Structured memory extension (2026-07-13). `memory_remember` tool + `before_agent_start` injection. 3-tier design (pure functions → JSONL store → Pi wiring) with secret scan, provenance write-guard, dedup, atomic writes. 147 assertions + live-verified.
+- **Persistent sub-agent sessions + usage + functional agents** (2026-07-15, “the bridge”). Tier 0: stable `{agent,project}` session files (`sub-<agent>--<gitRoot>.jsonl`) + rotation at 100KB (not truncation) + Esc/signal-abort + per-`{agent,project}` mutex (delete-only-if-tail). Tier 1: `message_end` usage capture (cost/tokens/turns) into `dispatch-log` + a `▌ usage` view in `/routing-stats`; latent error-path bug fixed (`ev.message.stopReason`, not `ev.stopReason`). Tier 2: `agent-map.ts` auto-resolves a Matrix operative per category when `agent=` is omitted (explicit agent always wins). 6 personas + 8 operatives; 0 model pins.
+
+**Deferred by design (not gaps):** F1 LLM intent-classifier (🔒 CLOSED — explicit-category chosen; reopen only on `/routing-stats` evidence). F2 peak-hour auto-downshift — still open.
+
+---
+
+## Reference
+
+- **Pi core docs** — `~/.nvm/.../pi-coding-agent/docs/{extensions,sdk,models,providers,skills,settings,compaction}.md`
+- **This system's design** — `extensions/orchestration-engine/3-LAYER-ROUTING-DESIGN.md`
+- **Comparison vs disler** — `~/developer/yt-dlp/about-pi/pi-claude-style-setup/SYSTEM-COMPARISON-OURS-vs-DISLER.md` + `current-pi-vs-disler.md`
+- **Always-on rules** — `AGENTS.md`
+
+---
+
+_Living doc — update when topology changes. Last revised: 2026-07-24._

@@ -1,0 +1,50 @@
+# ── CREDENTIALS — never commit ──────────────────────────────────
+auth.json
+.env
+.env.*
+.env.local
+
+# ── SESSION HISTORY — private conversation logs ─────────────────
+sessions/
+
+# ── NODE_MODULES — symlink to global Pi install (machine-specific)
+# Plus any future npm deps. Recreate via symlink or `npm install` per machine.
+node_modules/
+
+# ── BUNDLED BINARIES — platform-specific, shipped by Pi ─────────
+bin/
+
+# ── RUNTIME SETTINGS — transient state + personal prefs ─────────
+# lastChangelogVersion changes on update; skills path is machine-specific.
+# Un-ignore if you want to share your full Pi config as a dotfiles repo.
+settings.json
+memory.md.bak
+models-store.json
+
+# ── BRIDGE — sisyphus export, machine-specific + regenerable ────
+# Projected read-only copy of the sibling agent's memory. Regenerable via
+# bridge/export-bd-global.sh; paths/contents are host-specific.
+/bridge/
+
+# ── STRUCTURED MEMORY — private facts + audit log ──────────────
+# store.jsonl holds personal constraints/decisions/preferences;
+# audit.log records every write to it. Secret-scanned at write-time
+# but still private operator context.
+/memory/
+
+# ── NARRATIVE MEMORY — compaction handoff, private context ──────
+# Freeform handoff/compaction-preserve. Personal; ignore unless you
+# want a fully portable config.
+/memory.md
+
+# ── Disabled files — for testing, debugging, or future use ───────────────
+extensions/*.disabled
+# ── EDITOR / OS CRUFT ───────────────────────────────────────────
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.log
+*.tsbuildinfo

@@ -1,0 +1,125 @@
+# ~/.pi/agent/agent-chain.yaml — global chain definitions
+# Projects may ADD chains via .pi/agent-chain.yaml (deny-additive, same policy as teams/mini-dc).
+
+version: "1.0"
+
+chains:
+  commit-message:
+    description: "Cost-efficient commit message pipeline (draft → review)"
+    default_category: "unspecified-low"
+    steps:
+      - name: "draft"
+        agent: "seraph"
+        category: "git-commit-message"
+        prompt: |
+          Run `git diff --cached`, then draft a conventional commit message
+          following this format:
+
+          <type>(<scope>): <short description>
+
+          <body explaining what and why>
+
+          Return ONLY the message text. Do not run `git commit`.
+
+          Context: $ORIGINAL
+      - name: "review"
+        agent: "reviewer"
+        category: "unspecified-low"
+        prompt: |
+          Review the commit message below. Check:
+          - Subject ≤ 50 chars
+          - Type matches the change (feat/fix/refactor/docs/chore/test)
+          - Body wrapped at 72 chars
+          - One coherent concern
+          Return the corrected message or "PASS" if it is already correct.
+
+          Message:
+          $INPUT
+
+          Original request: $ORIGINAL
+
+  plan-build-review:
+    description: "Plan, implement, and review — standard development cycle"
+    default_category: "deep"
+    steps:
+      - name: "explore"
+        agent: "keymaker"
+        category: "unspecified-low"
+        prompt: "Explore the codebase and report what is relevant to: $ORIGINAL"
+      - name: "plan"
+        agent: "oracle"
+        category: "ultrabrain"
+        prompt: "Based on this analysis, create a concise implementation plan:\n\n$INPUT"
+      - name: "build"
+        agent: "trinity"
+        category: "unspecified-high"
+        prompt: "Implement this plan:\n\n$INPUT"
+      - name: "review"
+        agent: "reviewer"
+        category: "unspecified-high"
+        prompt: "Review this implementation for correctness, security, and style:\n\n$INPUT"
+
+  scout-twice:
+    description: "Explore, then cross-check the exploration"
+    default_category: "unspecified-low"
+    steps:
+      - name: "scout"
+        agent: "keymaker"
+        prompt: "Explore the codebase and investigate: $ORIGINAL\n\nReport findings with file paths and line numbers."
+      - name: "verify"
+        agent: "keymaker"
+        prompt: "Cross-check the following analysis for anything missed or incorrect. Original request: $ORIGINAL\n\nAnalysis:\n$INPUT"
+
+  persona-forge-evolve:
+    description: "Generate + review a specialized persona variant (primary owns the writes)"
+    default_category: "unspecified-low"
+    steps:
+      - name: "analyze"
+        agent: "oracle"
+        category: "ultrabrain"
+        prompt: |
+          A user wants to evolve an existing persona into a more specialized variant.
+          Read the target persona file described in the evidence, then identify one clear gap or specialization.
+
+          EVIDENCE:
+          $ORIGINAL
+
+          Return a concise gap statement (3-5 sentences): what is missing, what the specialized variant should do, and why it would help.
+      - name: "generate"
+        agent: "mouse"
+        category: "unspecified-high"
+        prompt: |
+          Draft a new persona markdown file. The persona must be a specialized variant of an existing one.
+          Use the exact frontmatter format:
+
+          ---
+          name: <id>
+          description: <one-line role>
+          tools: <comma-separated tool list>
+          ---
+          <system prompt>
+
+          Return ONLY the full markdown file content. Do not include any commentary outside the file.
+
+          GAP ANALYSIS:
+          $INPUT
+      - name: "review"
+        agent: "momus"
+        category: "ultrabrain"
+        prompt: |
+          Review the generated persona file below. Start your response with exactly one of these lines, alone:
+
+          VERDICT: PASS
+          VERDICT: WARNING
+          VERDICT: FAIL
+
+          Then add a short justification.
+
+          Checks:
+          - Scope: does it overlap with an existing agent? Is it too broad?
+          - Tools: are the declared tools appropriate and safe?
+          - Model tier: if a model is pinned, is it justified?
+          - Safety: does the system prompt contain any harmful or over-empowered instructions?
+
+          PERSONA TO REVIEW:
+          $INPUT

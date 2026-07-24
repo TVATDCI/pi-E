@@ -1,0 +1,103 @@
+version: "1.0"
+teams:
+  all:
+    description: Every agent available in this workspace
+    members:
+      - id: momus
+        file: agents/momus.md
+      - id: reviewer
+        file: agents/reviewer.md
+      - id: reviewer-security
+        file: agents/reviewer-security.md
+      - id: oracle
+        file: agents/oracle.md
+      - id: librarian
+        file: agents/librarian.md
+      - id: archivist
+        file: agents/archivist.md
+      - id: keymaker
+        file: agents/keymaker.md
+      - id: trinity
+        file: agents/trinity.md
+      - id: morpheus
+        file: agents/morpheus.md
+      - id: neo
+        file: agents/neo.md
+      - id: mouse
+        file: agents/mouse.md
+      - id: architect
+        file: agents/architect.md
+      - id: seraph
+        file: agents/seraph.md
+
+  matrix:
+    description: Matrix operatives — functional agents auto-resolved from categories
+    members:
+      - id: keymaker
+        file: agents/keymaker.md
+      - id: trinity
+        file: agents/trinity.md
+      - id: morpheus
+        file: agents/morpheus.md
+      - id: neo
+        file: agents/neo.md
+      - id: mouse
+        file: agents/mouse.md
+      - id: architect
+        file: agents/architect.md
+      - id: seraph
+        file: agents/seraph.md
+
+  review:
+    description: PRD/plan review and code-review team
+    default_category: deep
+    members:
+      - id: momus
+        file: agents/momus.md
+        category: ultrabrain
+      - id: reviewer
+        file: agents/reviewer.md
+        category: unspecified-high
+      - id: oracle
+        file: agents/oracle.md
+        category: unspecified-high
+
+  build:
+    description: Implementation and file-operations team
+    default_category: deep
+    members:
+      - id: trinity
+        file: agents/trinity.md
+        category: unspecified-high
+      - id: architect
+        file: agents/architect.md
+        category: unspecified-high
+      - id: archivist
+        file: agents/archivist.md
+        category: unspecified-high
+
+  research:
+    description: Read-only research and docs team — local recon + local docs + local deep + web research
+    default_category: research
+    members:
+      - id: keymaker
+        file: agents/keymaker.md
+      - id: librarian
+        file: agents/librarian.md
+      - id: morpheus
+        file: agents/morpheus.md
+      - id: researcher
+        file: agents/researcher.md
+
+  generated-reviewers:
+    description: Generated variants of the review team (pending approval)
+    default_category: deep
+    members:
+      - id: reviewer-security
+        file: agents/reviewer-security.md
+        category: deep
+        provenance:
+          source: generated
+          generated_by: persona-forge@v1
+          review_status: pending
+          parent: reviewer

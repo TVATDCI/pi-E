@@ -1,0 +1,237 @@
+// Tier 2 test for store.ts. Run: node --experimental-strip-types test-store.ts
+// Exercises: insert/recall, dedup, persistence (two-session E2E), secret rejection,
+// inferred->fact downgrade, provenance write-guard (plain + downgrade+guard), trust
+// upgrade (asymmetry), rename-failure self-heal, malformed-line skip, audit log,
+// forget, snapshot/search.
+import { promises as fs } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { JsonlMemoryStore, SecretDetectedError } from "./store.ts";
+import type { StoreOptions } from "./store.ts";
+import type { MemoryRecord } from "./schema.ts";
+
+let pass = 0, fail = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { pass++; console.log(`  \u2713 ${name}`); }
+  else { fail++; console.log(`  \u2717 ${name}`); }
+}
+
+function rec(partial: Partial<MemoryRecord> & { key: string; value: string }): MemoryRecord {
+  return {
+    schemaVersion: 1, scope: "global", category: "fact", provenance: "operator",
+    turn: 1, recordedAt: 1000, ...partial,
+  };
+}
+
+async function fresh(suffix: string, opts?: { rename?: StoreOptions["rename"] }) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mem-"));
+  const filePath = path.join(dir, `s-${suffix}.jsonl`);
+  const auditLogPath = path.join(dir, `a-${suffix}.log`);
+  const store = new JsonlMemoryStore({ filePath, auditLogPath, rename: opts?.rename });
+  return { store, filePath, auditLogPath, dir };
+}
+
+async function main() {
+  // --- 1. insert + recall ---
+  {
+    const { store } = await fresh("insert");
+    await store.init();
+    await store.remember(rec({ key: "uses_jwt", value: "Auth uses JWT." }));
+    const got = await store.recall("global", "fact", "uses_jwt");
+    check("insert + recall returns the record", got !== null && got.value === "Auth uses JWT.");
+    check("recall miss returns null", (await store.recall("global", "fact", "nope")) === null);
+  }
+
+  // --- 2. dedup / update (keyed upsert superpower) ---
+  {
+    const { store } = await fresh("dedup");
+    await store.init();
+    const r1 = await store.remember(rec({ key: "k", value: "first", recordedAt: 1000 }));
+    const r2 = await store.remember(rec({ key: "k", value: "second", recordedAt: 2000 }));
+    check("dedup: first insert -> inserted", r1.action === "inserted");
+    check("dedup: second write -> updated", r2.action === "updated");
+    const snap = await store.snapshot({ scopes: ["global"] });
+    check("dedup: exactly one record", snap.length === 1);
+    check("dedup: value is the latest", snap[0].value === "second");
+  }
+
+  // --- 3. persistence: two-session E2E (close -> new store -> init -> snapshot) ---
+  {
+    const { store, filePath } = await fresh("persist");
+    await store.init();
+    await store.remember(rec({ key: "a", value: "alpha", category: "constraint" }));
+    await store.remember(rec({ key: "b", value: "beta", category: "fact" }));
+    await store.close();
+    // Simulate a new session opening the same file.
+    const session2 = new JsonlMemoryStore({ filePath });
+    await session2.init();
+    const snap = await session2.snapshot({ scopes: ["global"] });
+    check("persistence: both records survive restart", snap.length === 2);
+    const a = await session2.recall("global", "constraint", "a");
+    check("persistence: record a intact", a !== null && a.value === "alpha");
+    const b = await session2.recall("global", "fact", "b");
+    check("persistence: record b intact", b !== null && b.value === "beta");
+  }
+
+  // --- 4. secret rejection (E1) ---
+  {
+    const { store } = await fresh("secret");
+    await store.init();
+    let threw = false;
+    try {
+      await store.remember(rec({ key: "creds", value: "aws key AKIAIOSFODNN7EXAMPLE here" }));
+    } catch (e) {
+      threw = e instanceof SecretDetectedError;
+    }
+    check("secret: SecretDetectedError thrown", threw);
+    const snap = await store.snapshot({ scopes: ["global"] });
+    check("secret: nothing stored", snap.length === 0);
+  }
+
+  // --- 5. inferred->fact downgrade (E2.1) ---
+  {
+    const { store } = await fresh("downgrade");
+    await store.init();
+    const outcome = await store.remember(
+      rec({ key: "no_any", value: "never use any", category: "constraint", provenance: "inferred" }),
+    );
+    check("downgrade: outcome is inserted/updated", outcome.action === "inserted" || outcome.action === "updated");
+    const stored = outcome.action === "inserted" ? outcome.record : (outcome as { record: MemoryRecord }).record;
+    check("downgrade: stored category is fact", stored.category === "fact");
+    check("downgrade: stored provenance stays inferred", stored.provenance === "inferred");
+    const got = await store.recall("global", "fact", "no_any");
+    check("downgrade: recall under fact key works", got !== null);
+    const underConstraint = await store.recall("global", "constraint", "no_any");
+    check("downgrade: nothing under constraint key", underConstraint === null);
+  }
+
+  // --- 6. provenance write-guard: inferred cannot overwrite operator (plain) ---
+  {
+    const { store } = await fresh("guard");
+    await store.init();
+    await store.remember(rec({ key: "k", value: "operator truth", category: "fact", provenance: "operator" }));
+    const result = await store.remember(
+      rec({ key: "k", value: "inferred attempt", category: "fact", provenance: "inferred" }),
+    );
+    check("guard: inferred-over-operator is skipped", result.action === "skipped_inferred_over_operator");
+    const got = await store.recall("global", "fact", "k");
+    check("guard: operator record unchanged", got !== null && got.value === "operator truth" && got.provenance === "operator");
+  }
+
+  // --- 7. write-guard with downgrade interaction: inferred constraint (->fact) cannot overwrite operator fact ---
+  {
+    const { store } = await fresh("guard-dg");
+    await store.init();
+    await store.remember(rec({ key: "k", value: "operator fact", category: "fact", provenance: "operator" }));
+    const result = await store.remember(
+      rec({ key: "k", value: "inferred never", category: "constraint", provenance: "inferred" }),
+    );
+    check("guard+downgrade: inferred constraint over operator fact skipped", result.action === "skipped_inferred_over_operator");
+    const got = await store.recall("global", "fact", "k");
+    check("guard+downgrade: operator fact intact", got !== null && got.value === "operator fact");
+  }
+
+  // --- 8. trust upgrade (asymmetry): operator CAN overwrite inferred ---
+  {
+    const { store } = await fresh("upgrade");
+    await store.init();
+    await store.remember(rec({ key: "k", value: "guessed", category: "fact", provenance: "inferred" }));
+    const result = await store.remember(
+      rec({ key: "k", value: "confirmed", category: "fact", provenance: "operator" }),
+    );
+    check("upgrade: operator-over-inferred allowed (updated)", result.action === "updated");
+    const got = await store.recall("global", "fact", "k");
+    check("upgrade: record now operator-confirmed", got !== null && got.value === "confirmed" && got.provenance === "operator");
+  }
+
+  // --- 9. rename-failure self-heal (spine test #2) ---
+  {
+    const { store: s1, filePath } = await fresh("crash");
+    await s1.init();
+    await s1.remember(rec({ key: "persisted", value: "before crash" }));
+    await s1.close();
+    // Open with a rename that always throws.
+    const failing = new JsonlMemoryStore({
+      filePath,
+      rename: async () => { throw new Error("rename failed (simulated)"); },
+    });
+    await failing.init();
+    let threw = false;
+    try {
+      await failing.remember(rec({ key: "lost", value: "this write will fail" }));
+    } catch {
+      threw = true;
+    }
+    check("rename-failure: remember throws", threw);
+    // Self-heal: a fresh store re-reads disk (old file) -> 'lost' is NOT present.
+    const healed = new JsonlMemoryStore({ filePath });
+    await healed.init();
+    const snap = await healed.snapshot({ scopes: ["global"] });
+    check("rename-failure: only pre-crash record on disk", snap.length === 1);
+    const got = await healed.recall("global", "fact", "persisted");
+    check("rename-failure: pre-crash record survived", got !== null && got.value === "before crash");
+    const lost = await healed.recall("global", "fact", "lost");
+    check("rename-failure: failed write not persisted", lost === null);
+  }
+
+  // --- 10. malformed-line skip+log (Momus M4) ---
+  {
+    const { dir } = await fresh("malformed");
+    const filePath = path.join(dir, "mixed.jsonl");
+    // One good line, one garbage line, one good line.
+    const good1 = JSON.stringify(rec({ key: "g1", value: "good one" }));
+    const good2 = JSON.stringify(rec({ key: "g2", value: "good two" }));
+    await fs.writeFile(filePath, `${good1}\nTHIS IS GARBAGE\n${good2}\n`, "utf8");
+    const store = new JsonlMemoryStore({ filePath });
+    await store.init();
+    const snap = await store.snapshot({ scopes: ["global"] });
+    check("malformed: 2 good records loaded", snap.length === 2);
+    check("malformed: g1 present", (await store.recall("global", "fact", "g1")) !== null);
+    check("malformed: g2 present", (await store.recall("global", "fact", "g2")) !== null);
+  }
+
+  // --- 11. audit log written ---
+  {
+    const { store, auditLogPath } = await fresh("audit");
+    await store.init();
+    await store.remember(rec({ key: "k", value: "audited value" }));
+    const log = await fs.readFile(auditLogPath, "utf8");
+    check("audit: contains INSERT action", log.includes("INSERT"));
+    check("audit: contains the key", log.includes("global:fact:k"));
+    check("audit: contains (truncated) value", log.includes("audited value"));
+  }
+
+  // --- 12. forget ---
+  {
+    const { store } = await fresh("forget");
+    await store.init();
+    await store.remember(rec({ key: "temp", value: "bye" }));
+    const removed = await store.forget("global", "fact", "temp");
+    check("forget: returns true when removed", removed === true);
+    check("forget: recall returns null", (await store.recall("global", "fact", "temp")) === null);
+    const removedAgain = await store.forget("global", "fact", "temp");
+    check("forget: returns false when absent", removedAgain === false);
+  }
+
+  // --- 13. snapshot + search ---
+  {
+    const { store } = await fresh("query");
+    await store.init();
+    await store.remember(rec({ key: "a", value: "Auth uses JWT" }));
+    await store.remember(rec({ key: "b", value: "DB is postgres" }));
+    const snap = await store.snapshot({ scopes: ["global"] });
+    check("snapshot: 2 records", snap.length === 2);
+    const hits = await store.search("jwt", { scopes: ["global"] });
+    check("search: 'jwt' matches 1", hits.length === 1 && hits[0].key === "a");
+    const none = await store.search("redis", { scopes: ["global"] });
+    check("search: 'redis' matches 0", none.length === 0);
+  }
+}
+
+main().then(() => {
+  console.log(`\n${pass} passed, ${fail} failed`);
+  if (fail > 0) process.exit(1);
+}).catch((e) => {
+  console.error("TEST CRASHED:", e);
+  process.exit(1);
+});
