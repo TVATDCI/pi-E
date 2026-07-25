@@ -9,6 +9,9 @@ description: |
   loop across turns; sub-agents are fresh-context, read-only for review or
   narrow-writer for fixes. Triggers: "review this", "review loop", "parallel
   review", "iterate until clean", "multi-angle review", "parallel research".
+  Do NOT use for: a single one-pass review (use `reviewer` directly), a security
+  review (use `reviewer-security`), or implementing code as the primary task (use
+  `trinity` — review-loop's fix step only follows a review synthesis).
 ---
 
 # review-loop (pi-native)

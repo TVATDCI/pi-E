@@ -5,7 +5,10 @@ description: |
   when: (1) running cp, mv, rm, scp, ssh, apt-get, brew, or any command that may
   prompt for confirmation, (2) writing scripts with file operations, (3) setting
   up CI/CD commands. Triggers: cp, mv, rm, scp, ssh, apt-get, brew,
-  non-interactive, shell safety, batch mode.
+  non-interactive, shell safety, batch mode. Do NOT use for: general shell
+  commands that never prompt (ls, grep, cat, git status — no flag needed),
+  writing application code, or interactive/TUI usage questions — this skill is
+  specifically for commands that may hang on a confirmation prompt.
 ---
 
 # Shell Safety — Non-Interactive Commands
