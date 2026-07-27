@@ -15,26 +15,26 @@ Put workflow specifics in skills, persona in templates, and any machinery in ext
 
 ## Memory & compaction
 
-**Two durable substrates** (different roles, both file-based + auditable):
-- `~/.pi/agent/memory.md` — handoff + compaction-preserve (freeform markdown; the 5 loss categories below go here).
-- `~/.pi/agent/memory/store.jsonl` — structured facts via the `memory_remember` tool (classified, ranked, auto-injected each turn as a `<memory-context>` block; own `audit.log`). Use for durable constraints/decisions/conventions/preferences the agent should recall across sessions.
+**Two durable substrates — distinct roles, both file-based + auditable:**
+- `~/.pi/agent/memory.md` — **session-narrative log** (the arc: what happened, what's next). Freeform markdown, read on `continue` / `where was I`. Bounded by `scripts/rotate-memory-md.ts` (active-KB budget + month-granular archives). Auto-fed by the `compaction-capture` extension.
+- `~/.pi/agent/memory/store.jsonl` — **structured atomic facts** via the `memory_remember` tool (constraints/decisions/conventions/preferences/facts), classified, ranked, auto-injected each turn as a `<memory-context>` block; own `audit.log`. **This is the durable memory for facts the agent must recall.** (`memory_forget` corrects stale ones.)
 
 Not the session JSONL, not `/note`, not compaction summaries — those are ephemeral or lossy. (Trust files over generated summaries.)
 
 **pi already does ~80%:** auto-compaction (and `/compact`) emits a structured summary — `## Goal` / `## Constraints & Preferences` / `## Progress` (Done·InProgress·Blocked) / `## Key Decisions` / `## Next Steps` / `## Critical Context` + cumulative `<read-files>` / `<modified-files>` — a near-superset of any handoff schema. Tool results are truncated to ~2000 chars during summarization, so large outputs are *already* lossy.
 
-**Cooperate with the compactor — preserve what it drops.** Summarization reliably destroys five fact categories; persist them to `memory.md` before they're at risk:
+**Cooperate with the compactor — preserve what it drops, in the RIGHT place.** Summarization reliably destroys five fact categories; persist them via `memory_remember` → `store.jsonl` (NOT memory.md — memory.md is for narrative):
 1. **Exact values** — ports, timeouts, version pins, token counts, thresholds.
 2. **Hard constraints** — forbidden actions, must/must-not rules.
 3. **Decision reasoning** — *why* X over Y (only the *what* survives otherwise).
 4. **Cross-task dependencies** — "file A changed; file B depends on it."
 5. **Confirmed preferences** — style/tone/format the user actually stated. (Don't persist merely inferred habits.)
 
-**Integrity:** never report a fact as "remembered"/"saved" unless it's actually in `memory.md` or `memory/store.jsonl`. Confirming persistence you didn't perform is lying to the operator.
+**Integrity:** never report a fact as "remembered"/"saved" unless it's actually in `store.jsonl` (or `memory.md` for narrative). Confirming persistence you didn't perform is lying to the operator.
 
-**Phasing:** Phase 1 = write to `memory.md` by hand before risky/long tasks; accept pi's default compaction as real-but-lossy. Phase 2 = the `session_before_compact` extension auto-extracts the five categories and injects `memory.md`'s active section into every summary's `## Critical Context`. Don't skip Phase 2 — the default compactor will drop the five categories without it.
+**Compaction capture (Phase 2 — built):** the `compaction-capture` extension hooks pi's `session_compact` event and appends pi's generated summary to `memory.md` as a dated block — *before* compaction discards it. This realizes "preserve what the compactor drops" for the NARRATIVE arc (pi already emits the summary; we persist it). Atomic facts still go to `store.jsonl` via `memory_remember`. Bound growth with `scripts/rotate-memory-md.ts [activeKB]` (default 12).
 
-**Security:** never store secrets, keys, tokens, or sensitive personal data in `memory.md`, `memory/store.jsonl`, or any context file — redact first. (The structured store auto-scans + refuses secrets at the write boundary, but that's a backstop, not license to try.)
+**Security:** never store secrets, keys, tokens, or sensitive personal data in `memory.md`, `memory/store.jsonl`, or any context file — redact first. (Both the structured store AND the compaction-capture hook run `scanSecrets` at the write boundary and refuse on a hit — but that's a backstop, not license to try.)
 
 ## Verification & anti-confabulation
 
