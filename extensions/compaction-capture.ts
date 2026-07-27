@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { scanSecrets } from "./memory/scanner.ts";
+import { withFileLock } from "./memory/lock.ts";
 
 const AGENT_DIR = join(os.homedir(), ".pi", "agent");
 const MEMORY_MD = join(AGENT_DIR, "memory.md");
@@ -68,18 +69,24 @@ export default function (pi: ExtensionAPI) {
     ].join("\n");
 
     try {
-      mkdirSync(AGENT_DIR, { recursive: true });
-      let content = existsSync(MEMORY_MD) ? readFileSync(MEMORY_MD, "utf-8") : "";
-      // Insert right after the header rule so captures land newest-first in the
-      // active region. Fall back to prepend if no boundary found (fresh file).
-      const idx = content.indexOf(HEADER_BOUNDARY);
-      if (idx !== -1) {
-        const insertAt = idx + HEADER_BOUNDARY.length;
-        content = content.slice(0, insertAt) + block + content.slice(insertAt);
-      } else {
-        content = block + content;
-      }
-      writeFileSync(MEMORY_MD, content, "utf-8");
+      // Cross-process lock (W8): serialize this read→write window against
+      // scripts/rotate-memory-md.ts (separate process) and any other pi process's
+      // capture, so a concurrent writer can't lose this update or be lost to it.
+      // Best-effort — a lock timeout falls through to the catch below.
+      await withFileLock(MEMORY_MD, async () => {
+        mkdirSync(AGENT_DIR, { recursive: true });
+        let content = existsSync(MEMORY_MD) ? readFileSync(MEMORY_MD, "utf-8") : "";
+        // Insert right after the header rule so captures land newest-first in the
+        // active region. Fall back to prepend if no boundary found (fresh file).
+        const idx = content.indexOf(HEADER_BOUNDARY);
+        if (idx !== -1) {
+          const insertAt = idx + HEADER_BOUNDARY.length;
+          content = content.slice(0, insertAt) + block + content.slice(insertAt);
+        } else {
+          content = block + content;
+        }
+        writeFileSync(MEMORY_MD, content, "utf-8");
+      });
     } catch (e) {
       // Best-effort — never let memory capture break or delay a compaction.
       console.warn(`[compaction-capture] failed to write memory.md: ${(e as Error).message}`);
