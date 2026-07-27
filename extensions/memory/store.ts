@@ -51,6 +51,8 @@ export class JsonlMemoryStore {
   private readonly auditLogPath: string | undefined;
   private readonly auditLogMaxBytes: number;
   private readonly rename: (oldPath: string, newPath: string) => Promise<void>;
+  /** Write-mutex: chains concurrent flush() calls so they don't race on the shared `.tmp` (W18). */
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(opts: StoreOptions) {
     this.filePath = opts.filePath;
@@ -180,8 +182,29 @@ export class JsonlMemoryStore {
   /** Write-through: nothing buffered. True no-op. */
   async close(): Promise<void> {}
 
-  /** Serialize the Map to JSONL via atomic rename (tmp -> real). */
+  /**
+   * Serialize the Map to JSONL via atomic rename (tmp -> real).
+   *
+   * Serialized across concurrent calls: remember()/forget() may run in parallel (e.g. two
+   * memory_remember tool calls in one turn). Without serialization they race on the shared
+   * `.tmp` — one rename consumes it and the others hit ENOENT (spurious failure + a skipped
+   * audit line), or under adverse scheduling the last writer's stale Map snapshot wins and
+   * records are lost (W18). The queue chains each flush after the previous; a rejection
+   * propagates to that caller while `.then(noop, noop)` on the stored queue keeps it alive
+   * for the next writer (one failed flush must not poison the whole store).
+   */
   private async flush(): Promise<void> {
+    const run = this.writeQueue.then(() => this.flushOnce());
+    // Swallow for chain continuity only — `run` still rejects for its own awaiter.
+    this.writeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /** Single atomic write. Caller is responsible for serialization (see flush()). */
+  private async flushOnce(): Promise<void> {
     const lines = [...this.map.values()].map((r) => JSON.stringify(r));
     const data = lines.join("\n") + (lines.length > 0 ? "\n" : "");
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });

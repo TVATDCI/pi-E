@@ -226,6 +226,32 @@ async function main() {
     const none = await store.search("redis", { scopes: ["global"] });
     check("search: 'redis' matches 0", none.length === 0);
   }
+
+  // --- 14. concurrent writes are serialized (W18: no .tmp race, no data loss) ---
+  {
+    const N = 25;
+    const { store, filePath } = await fresh("concurrent");
+    await store.init();
+    // Fire N parallel remembers — under the old code these raced on the shared `.tmp`
+    // (spurious ENOENT + possible stale-content loss). The write-mutex in flush() serializes them.
+    const outcomes = await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        store.remember(rec({ key: `k${i}`, value: `value-${i}` })),
+      ),
+    );
+    check("concurrent: Promise.all resolves (no throw)", outcomes.length === N);
+    const snap = await store.snapshot({ scopes: ["global"] });
+    check(`concurrent: all ${N} records in memory`, snap.length === N);
+    // Persistence: re-open from disk and confirm every record survived the writes.
+    const reopened = new JsonlMemoryStore({ filePath });
+    await reopened.init();
+    let allOnDisk = true;
+    for (let i = 0; i < N; i++) {
+      const got = await reopened.recall("global", "fact", `k${i}`);
+      if (got === null || got.value !== `value-${i}`) { allOnDisk = false; break; }
+    }
+    check("concurrent: all records persisted to disk", allOnDisk);
+  }
 }
 
 main().then(() => {
