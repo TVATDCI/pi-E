@@ -14,6 +14,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync, existsSync, statSync, appendFileSync } from "node:fs";
+import { scanSecrets } from "../memory/scanner.ts";
 import { join } from "node:path";
 import * as os from "node:os";
 
@@ -76,13 +77,13 @@ interface BridgeEntry {
     value: string;
 }
 
-function readBridgeExport(): { entries: BridgeEntry[]; exportTimestamp: string | null; telemetry: { read: number; parsed: number; dropped: number } } {
-    if (!existsSync(BRIDGE_FILE)) return { entries: [], exportTimestamp: null, telemetry: { read: 0, parsed: 0, dropped: 0 } };
+function readBridgeExport(): { entries: BridgeEntry[]; exportTimestamp: string | null; telemetry: { read: number; parsed: number; dropped: number; secret: number } } {
+    if (!existsSync(BRIDGE_FILE)) return { entries: [], exportTimestamp: null, telemetry: { read: 0, parsed: 0, dropped: 0, secret: 0 } };
 
     const content = readFileSync(BRIDGE_FILE, "utf-8");
     const entries: BridgeEntry[] = [];
     let exportTimestamp: string | null = null;
-    let read = 0, parsed = 0, dropped = 0;
+    let read = 0, parsed = 0, dropped = 0, secret = 0;
 
     for (const line of content.split("\n")) {
         if (!line.trim()) continue;
@@ -91,11 +92,18 @@ function readBridgeExport(): { entries: BridgeEntry[]; exportTimestamp: string |
             const raw = JSON.parse(line) as BridgeEntry;
             if (!exportTimestamp) exportTimestamp = raw.export_timestamp;
             const result = parseBridgeEntry(raw);
-            if (result) { parsed++; entries.push(result); }
+            if (result) {
+                // W3: secret-scan bridged values at inject. The bridge bypasses memory_remember's
+                // write-boundary scan, so scan here and refuse + log on a hit (never inject a likely
+                // secret into the system prompt). Curated export keeps practical risk low; defense-in-depth.
+                const scan = scanSecrets(result.value);
+                if (scan.detected) { secret++; dropped++; }
+                else { parsed++; entries.push(result); }
+            }
             else dropped++;
         } catch { dropped++; }
     }
-    return { entries, exportTimestamp, telemetry: { read, parsed, dropped } };
+    return { entries, exportTimestamp, telemetry: { read, parsed, dropped, secret } };
 }
 
 function checkStale(_exportTimestamp: string): string | null {
@@ -153,7 +161,7 @@ export default function (pi: ExtensionAPI) {
         const TELEMETRY_FILE = join(os.homedir(), ".pi", "agent", "bridge", "telemetry.log");
         try {
             appendFileSync(TELEMETRY_FILE,
-                `${new Date().toISOString()} read=${telemetry.read} parsed=${telemetry.parsed} dropped=${telemetry.dropped} injected=${injected} omitted_budget=${omittedBudget}\n`);
+                `${new Date().toISOString()} read=${telemetry.read} parsed=${telemetry.parsed} dropped=${telemetry.dropped} secret=${telemetry.secret} injected=${injected} omitted_budget=${omittedBudget}\n`);
         } catch { /* non-critical */ }
 
         return { systemPrompt: event.systemPrompt + "\n\n" + header + "\n" + block };

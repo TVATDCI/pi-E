@@ -10,7 +10,7 @@ This is **not** a showcase. It's a single-operator production config: narrow and
 
 |                        |                                                                                 |
 | ---------------------- | ------------------------------------------------------------------------------- |
-| **Pi version**         | `0.82.0` (npm: `@earendil-works/pi-coding-agent`)                               |
+| **Pi version**         | `0.82.1` (npm: `@earendil-works/pi-coding-agent`)                               |
 | **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (quota-based, **no** balance fallback)       |
 | **Default model**      | `glm-5.2` @ `medium` thinking, theme `encom`                                    |
 | **Extensions**         | 13 active (~5,300 LOC; 11 feature + 2 host hooks) + 2 disabled                                             |
@@ -197,7 +197,7 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
                       resolveFunctionalAgent(category) → Matrix operative (agent-map.ts)
 2. loadPersona(agent)        → persona.model (optional override); persona.tools / systemPrompt
 3. resolveModel(category)    → tier-map.ts TIERS[category] → {model, thinking}   (SOLE model authority)
-4. precedence:               persona.model  >  category tier  >  FALLBACK (opencode/glm-5.1)
+4. precedence:               persona.model  >  category tier  >  FALLBACK (opencode-go/glm-5.1)
 5. F4 availability precheck: getAvailable(); no key → downshift to FALLBACK (loud: notify+log)
 6. per-{agent,project} mutex → one writer per session file (delete-only-if-tail pattern)
 7. rotateIfNeeded:           session >100KB → rename to .archive.jsonl, start fresh (NOT truncate)
@@ -214,18 +214,18 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
 
 | Category             | Model                           | Thinking | Quota                          | Functional agent | Fallback                        |
 | -------------------- | ------------------------------- | -------- | ------------------------------ | ---------------- | ------------------------------- |
-| `quick`              | glm-4.5-air                     | off      | 1×                             | keymaker         | opencode/deepseek-v4-flash-free |
-| `unspecified-low`    | glm-4.7                         | off      | 1×                             | trinity          | opencode/hy3-free               |
-| `unspecified-high`   | glm-5-turbo                     | high     | 1× promo → 2× after 2026-09-30 | trinity          | opencode/kimi-k2.7-code         |
-| `deep`               | glm-5.1                         | high     | 1×                             | morpheus         | opencode/glm-5.1                |
-| `ultrabrain`         | glm-5.1                         | high     | 1×                             | neo              | opencode/glm-5.1                |
-| `writing`            | glm-4.7                         | medium   | 1×                             | mouse            | opencode/hy3-free               |
-| `research`           | glm-4.7                         | medium   | 1×                             | researcher       | opencode/hy3-free               |
-| `visual-engineering` | glm-5-turbo                     | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode/glm-5.1                |
-| `artistry`           | glm-5.1                         | high     | 1×                             | architect        | opencode/glm-5.1                |
-| `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | —                               |
+| `quick`              | zai-coding-cn/glm-4.5-air       | off      | 1×                             | keymaker         | opencode/deepseek-v4-flash-free |
+| `unspecified-low`    | zai-coding-cn/glm-4.7           | off      | 1×                             | trinity          | opencode-go/hy3                 |
+| `unspecified-high`   | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | trinity          | opencode-go/kimi-k2.7-code      |
+| `deep`               | zai-coding-cn/glm-5.1           | high     | 1×                             | morpheus         | opencode-go/glm-5.1             |
+| `ultrabrain`         | opencode-go/kimi-k3             | high     | —                              | neo              | zai-coding-cn/glm-5.2           |
+| `writing`            | zai-coding-cn/glm-4.7           | medium   | 1×                             | mouse            | opencode-go/hy3                 |
+| `research`           | zai-coding-cn/glm-4.7           | medium   | 1×                             | researcher       | opencode-go/minimax-m2.7        |
+| `visual-engineering` | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1             |
+| `artistry`           | zai-coding-cn/glm-5.1           | high     | 1×                             | architect        | opencode-go/glm-5.1             |
+| `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | opencode-go/minimax-m2.7        |
 
-Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary model returns an empty response (e.g., Z-AI Coding Plan quota exhausted). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
+Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary model returns an empty response (e.g., Z-AI Coding Plan quota exhausted). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
 
 ---
 
@@ -233,9 +233,9 @@ Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by
 
 - **Fail-closed by default** — no rules loaded → bash DENIED (never open).
 - **Deny-additive global floor** — `mini-dc-rules.yaml` is a floor projects can _extend_ but never _weaken_.
-- **2 rule categories** implemented: `bashToolPatterns` (rm/git/sql/dd/mkfs…) + `zeroAccessPaths` (secrets). `git push`/`git commit` ASK; recursive `rm` hard-blocks.
+- **3 rule categories** implemented: `bashToolPatterns` (rm/git/sql/dd/mkfs/aws/gcp…) + `zeroAccessPaths` (secrets) + `readOnlyPaths` (lockfiles/build output). `git push`/`git commit` ASK; recursive `rm` hard-blocks.
 - **`/dc-mode abort|continue`** — inline toggle (disler splits this into two extensions; we fold it into one).
-- **Gap (cherry-pick target):** no cloud-native patterns (aws/gcp/firebase/vercel) and no `readOnlyPaths`/`noDeletePaths` — see `decisions/` + the comparison docs.
+- **Remaining gap (cherry-pick target):** no `noDeletePaths` category yet. Cloud-native patterns (aws/gcp/firebase/vercel) + `readOnlyPaths` are **shipped** — see `mini-dc-rules.yaml`.
 
 ---
 
@@ -261,6 +261,8 @@ Structured, persistent cross-session memory. The agent saves facts/constraints/d
 
 ## Environment integrations
 
+**System dependencies:** `w3m` (HTML→text for the `fetch` tool — without it, `fetch` silently returns empty), plus `rg` + `fd` (vendored in `bin/`). Install: `apt-get install w3m`.
+
 Two extensions wire pi into its host environment. Both are load-bearing for *this* operator's laptop setup and are the first things to understand before changing them.
 
 ### `bd-bridge.ts` — read-only sisyphus → pi memory bridge
@@ -268,8 +270,8 @@ Two extensions wire pi into its host environment. Both are load-bearing for *thi
 - **What:** At `before_agent_start`, reads `bridge/global-export.jsonl` (generated by `bridge/export-bd-global.sh` from the sibling opencode+sisyphus agent's `bd` store) and string-concatenates a labeled `[FROM bridge, exported <ts>]` block onto the system prompt.
 - **Filter:** keeps only bd categories `constraint` / `exact` / `preference` / `reason` / `decision`; skips sisyphus-internal prefixes (`session-*`, `pre-test:*`, `next-session:*`, `files:*`).
 - **Hard constraints (load-bearing):** READ-PATH ONLY — it **never writes to `bd`** and **never writes to `memory/store.jsonl`**. Bridged facts are *projected*, not merged into pi's own store.
-- **Security self-model:** this path **bypasses `memory_remember`'s secret scan** (it injects directly into the prompt, not through the scanned write boundary). The export is curated + read-only so practical risk is low — but do **not** assume every string in the system prompt was secret-scanned. If sensitive-looking material ever appears in a `[FROM bridge]` block, flag it to the operator rather than trusting it was filtered.
-- **Two schemas parsed:** Schema A (clean `category:content`) and Schema B (`bd_remember.py` pipe-delimited `scope=…|category=…|…`). Known gap: escaped pipes (`\|`) in Schema B values are not yet unescaped.
+- **Security self-model:** bridged values are **secret-scanned at inject** (`scanSecrets` from the memory extension); a hit is skipped + logged to `bridge/telemetry.log`. The bridge still bypasses the structured-store *write* boundary — bridged facts are *projected*, never stored in `store.jsonl` — and it never writes to `bd`. If sensitive-looking material ever appears in a `[FROM bridge]` block, flag it to the operator.
+- **Two schemas parsed:** Schema A (clean `category:content`) and Schema B (`bd_remember.py` pipe-delimited `scope=…|category=…|…`). Escaped pipes (`\|`) in Schema B values **are** unescaped (`replace(/\\\|/g, "|")`).
 
 ### `herdr-agent-state.ts` — herdr multiplexer integration
 

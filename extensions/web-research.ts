@@ -195,6 +195,12 @@ export async function fetchText(rawUrl: string, maxChars = FETCH_MAX_CHARS): Pro
     timeout: 15000,
     maxBuffer: 16 * 1024 * 1024,
   });
+  // W17: `w3m` is an undeclared system dependency for HTML→text. If it's missing, spawnSync returns
+  // status:null + error:ENOENT and stdout is empty — without this guard fetchText silently returns
+  // "" for EVERY url (the test suite's 1 failure + a production diagnosability gap). Surface it.
+  if (w3m.error || (w3m.status === null && !w3m.stdout)) {
+    return "(fetch unavailable: `w3m` is not installed — HTML→text conversion needs it. Install: apt-get install w3m)";
+  }
   let txt = (w3m.stdout ?? "").replace(/\n{3,}/g, "\n\n").trim();
   if (txt.length > maxChars) txt = txt.slice(0, maxChars) + `\n…[truncated ${txt.length - maxChars} chars]`;
   return txt;

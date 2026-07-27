@@ -308,9 +308,17 @@ export default function (pi: ExtensionAPI) {
       return { block: true, reason };
     }
 
+    // W2: rules === null (no global + no project rules loaded) — bash is DENIED above. For
+    // read/write/edit, no patterns can be enforced, so policy = ALLOW (read/write/edit are
+    // non-destructive; bash is the catastrophic surface). Explicit return prevents the uncaught
+    // throw that `const r = rules!` would cause on a null rules object (emitToolCall has no
+    // try/catch — see audit W1/W2). Tighten to fail-closed here if secret-integrity-on-no-rules
+    // is later desired (note: with no rules, zeroAccessPaths can't protect .env/creds).
+    if (rules === null) return { block: false };
+
     let violation: string | null = null;
     let ask = false;
-    const r = rules!; // safe — bash is blocked above if null; read/write/edit with null rules → no patterns → allow
+    const r = rules; // non-null after the guard above
 
     // Tier 1: zero-access paths on read/write/edit (blocks read AND write)
     if (

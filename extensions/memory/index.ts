@@ -23,6 +23,8 @@ import * as os from "node:os";
 import { JsonlMemoryStore, SecretDetectedError } from "./store.ts";
 import { classifyCategory } from "./classifier.ts";
 import { buildInjection } from "./injection.ts";
+import { normalizeKey } from "./normalizer.ts";
+import type { Category } from "./schema.ts";
 
 const STORE_DIR = path.join(os.homedir(), ".pi", "agent", "memory");
 const STORE_FILE = path.join(STORE_DIR, "store.jsonl");
@@ -125,6 +127,33 @@ export default function (pi: ExtensionAPI) {
         }
         throw e;
       }
+    },
+  });
+
+  // memory_forget: remove a persisted fact by key (+ optional category). store.forget() existed
+  // but was never exposed — facts had no agent-driven correction path (B6).
+  pi.registerTool({
+    name: "memory_forget",
+    label: "Forget",
+    description:
+      "Remove a persisted fact/constraint/decision by key. Use to correct stale or wrong facts. " +
+      "Category is optional — if omitted, ALL categories for that key are removed. " +
+      "Read the category from the <memory-context> block when known (e.g. 'strict_no_any' may be [constraint]).",
+    parameters: Type.Object({
+      key: Type.String({ description: "Topic-based key to remove (e.g. strict_no_any)" }),
+      category: Type.Optional(Type.String({ description: "Optional category (constraint/decision/convention/preference/fact). If omitted, removes across all categories." })),
+    }),
+    async execute(_toolCallId, params) {
+      const scope = "global";
+      const nk = normalizeKey(params.key);
+      if (params.category) {
+        const removed = await store.forget(scope, params.category as Category, nk);
+        return { content: [{ type: "text" as const, text: removed ? `Forgot [${params.category}] ${nk}` : `No record found for [${params.category}] ${nk}` }], details: {} };
+      }
+      const records = await store.snapshot({ scopes: [scope] });
+      const matches = records.filter((r) => r.key === nk);
+      for (const r of matches) await store.forget(scope, r.category, nk);
+      return { content: [{ type: "text" as const, text: matches.length ? `Forgot ${matches.length} record(s) for key ${nk}` : `No records found for key ${nk}` }], details: {} };
     },
   });
 }

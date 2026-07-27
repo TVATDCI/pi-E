@@ -261,7 +261,7 @@ export default function (pi: ExtensionAPI) {
       "quick→keymaker, unspecified→trinity, deep→morpheus, ultrabrain→neo, writing→mouse, visual-engineering/artistry→architect, research→researcher, git-commit-message→seraph. " +
       "Explicit agent= overrides the default (e.g. agent='momus' for a PRD gate, agent='oracle' for architecture reasoning). " +
       "Categories (tier-map.ts is authoritative): quick (glm-4.5-air), unspecified-low (glm-4.7), unspecified-high (glm-5-turbo), " +
-      "deep (glm-5.1), ultrabrain (glm-5.1), writing (glm-4.7), visual-engineering (glm-5-turbo), artistry (glm-5.1), research (glm-4.7), git-commit-message (deepseek-v4-flash-free/FREE). " +
+      "deep (glm-5.1), ultrabrain (opencode-go/kimi-k3), writing (glm-4.7), visual-engineering (glm-5-turbo), artistry (glm-5.1), research (glm-4.7), git-commit-message (deepseek-v4-flash-free/FREE). " +
       "0 of 14 agents pin a model — category is the sole model authority. " +
       "One focused objective per dispatch.",
     parameters: Type.Object({
@@ -464,7 +464,7 @@ export default function (pi: ExtensionAPI) {
   // categories × model / thinking / quota× / REAL availability (key configured).
   // Run before switching models so you know what actually has a key.
   pi.registerCommand("tiers", {
-    description: "Setup tool (F4): the 9 dispatch categories × model / thinking / quota× / REAL availability (key configured)",
+    description: "Setup tool (F4): the 10 dispatch categories × model / thinking / quota× / REAL availability (key configured)",
     handler: async (_args, ctx) => {
       const available = ctx.modelRegistry.getAvailable();
       const isAvail = (mf: string) => {
@@ -478,7 +478,7 @@ export default function (pi: ExtensionAPI) {
         return (t.length > w ? t.slice(0, Math.max(1, w - 1)) + "…" : t).padEnd(w);
       };
       const lines = [
-        `/tiers · 9 categories · availability = key configured (getAvailable)`,
+        `/tiers · 10 categories · availability = key configured (getAvailable)`,
         `peak=${peak} · promo=${promo}`,
         "",
         pad("category", 20) + pad("model", 26) + pad("think", 7) + pad("quota", 6) + "avail",
@@ -490,7 +490,7 @@ export default function (pi: ExtensionAPI) {
       }
       const table = lines.join("\n");
       if (ctx.hasUI) {
-        ctx.ui.notify("9 categories + real availability", "info");
+        ctx.ui.notify("10 categories + real availability", "info");
         await ctx.ui.editor("/tiers", table);
       } else {
         console.log(table);

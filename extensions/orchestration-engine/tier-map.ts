@@ -121,7 +121,7 @@ export function isPeakHours(now = new Date()): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The map (Layer 2 data) — 8/9 categories Z-AI-plan-primary; git-commit-message on FREE opencode tier (LR-0019)
+// The map (Layer 2 data) — 8 of 10 categories Z-AI-plan-primary; ultrabrain (opencode-go/kimi-k3) + git-commit-message (opencode/deepseek-v4-flash-free) are opencode-primary.
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Quota cost legend: 1× = standard, 2× = post-promo off-peak (5.2/5-turbo),
@@ -139,16 +139,16 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "unspecified-low": {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode",
-    fallbackId: "hy3-free",
+    fallbackProvider: "opencode-go",
+    fallbackId: "hy3",
     thinkingLevel: "off",
     rationale:
-      "1× plan tier; routine low-effort work. FAQ:29 'sufficient for daily dev'. Fallback to FREE opencode/hy3-free to preserve quota.",
+      "1× plan tier; routine low-effort work. FAQ:29 'sufficient for daily dev'. Fallback to opencode-go/hy3 to preserve quota.",
   },
   "unspecified-high": {
     provider: "zai-coding-cn",
     id: "glm-5-turbo",
-    fallbackProvider: "opencode",
+    fallbackProvider: "opencode-go",
     fallbackId: "kimi-k2.7-code",
     thinkingLevel: "high",
     rationale:
@@ -159,43 +159,43 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   deep: {
     provider: "zai-coding-cn",
     id: "glm-5.1",
-    fallbackProvider: "opencode",
+    fallbackProvider: "opencode-go",
     fallbackId: "glm-5.1",
     thinkingLevel: "high",
     rationale:
       "Deep codebase investigation/execution; glm-5.1 per OmO (LR-0019). OmO consolidated 5.2→4 primary agents + unspecified-high (concurrency 2 saturated), so deep follows 5.1 to avoid overloading 5.2.",
   },
   ultrabrain: {
-    provider: "zai-coding-cn",
-    id: "glm-5.1",
-    fallbackProvider: "opencode",
-    fallbackId: "glm-5.1",
+    provider: "opencode-go",
+    id: "kimi-k3",
+    fallbackProvider: "zai-coding-cn",
+    fallbackId: "glm-5.2",
     thinkingLevel: "high",
     rationale:
-      "Hardest logic; glm-5.1 @high per OmO (LR-0019). OmO variant=high. 5.2 reserved for the 4 reasoning agents + unspecified-high.",
+      "Hardest logic. Primary opencode-go/kimi-k3 (reasoning model); per-tier fallback zai-coding-cn/glm-5.2. OmO variant=high. (Earlier glm-5.1 assignment superseded — see README table + PROBE-RESULTS.)",
   },
   writing: {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode",
-    fallbackId: "hy3-free",
+    fallbackProvider: "opencode-go",
+    fallbackId: "hy3",
     thinkingLevel: "medium",
     rationale:
-      "Prose/docs; glm-4.7 per OmO (LR-0019). Always 1×. Downshifted from 5.1 — 4.7 is capable for writing and conserves 5.1 concurrency. Fallback to FREE opencode/hy3-free to preserve quota.",
+      "Prose/docs; glm-4.7 per OmO (LR-0019). Always 1×. Downshifted from 5.1 — 4.7 is capable for writing and conserves 5.1 concurrency. Fallback to opencode-go/hy3 to preserve quota.",
   },
   "visual-engineering": {
     provider: "zai-coding-cn",
     id: "glm-5-turbo",
-    fallbackProvider: "opencode",
+    fallbackProvider: "opencode-go",
     fallbackId: "glm-5.1",
     thinkingLevel: "high",
     rationale:
-      "UI/frontend/styling code = text work; glm-5.1 @high per OmO (LR-0019). OmO moved this off glm-5v-turbo (vision model, NOT on Coding Plan — standard-API-only) to the on-plan text model — category is mostly code, not images. multimodal-looker agent now routes to opencode/gemini-3.1-pro for true vision (LR-0019).",
+      "UI/frontend/styling code = text work; glm-5.1 @high per OmO (LR-0019). OmO moved this off glm-5v-turbo (vision model, NOT on Coding Plan — standard-API-only) to the on-plan text model — category is mostly code, not images.",
   },
   artistry: {
     provider: "zai-coding-cn",
     id: "glm-5.1",
-    fallbackProvider: "opencode",
+    fallbackProvider: "opencode-go",
     fallbackId: "glm-5.1",
     thinkingLevel: "high",
     rationale:
@@ -204,8 +204,8 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   research: {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode",
-    fallbackId: "hy3-free",
+    fallbackProvider: "opencode-go",
+    fallbackId: "minimax-m2.7",
     thinkingLevel: "medium",
     rationale:
       "Web/docs/package research (athena-equivalent). glm-4.7 per athena parity — NOT quick/keymaker (glm-4.5-air). Keyless composite search (Wikipedia+DDG-IA+npm+GitHub+docs-fetch via the web-research extension); general free-text web is a known gap. Always 1× plan tier.",
@@ -213,6 +213,8 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "git-commit-message": {
     provider: "opencode",
     id: "deepseek-v4-flash-free",
+    fallbackProvider: "opencode-go",
+    fallbackId: "minimax-m2.7",
     thinkingLevel: "off",
     rationale:
       "FREE external tier; preserves plan quota entirely for trivial git work. OmO keeps this category opencode-primary by design (the one category not on Z AI plan) — matches OmO after operator reverted an interim glm-4.5-air assignment.",
@@ -221,7 +223,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
 
 export const DEFAULT_CATEGORY: TaskCategory = "unspecified-low";
 
-export const FALLBACK = { provider: "opencode", id: "glm-5.1" } as const;
+export const FALLBACK = { provider: "opencode-go", id: "glm-5.1" } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resolver (Layer 2 logic)

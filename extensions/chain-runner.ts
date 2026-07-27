@@ -163,7 +163,13 @@ export async function runChainByName(
       };
     }
 
-    input = result.output;
+    // W6: bound inter-step context. A verbose middle step must not inflate every downstream
+    // step's prompt. finalOutput keeps the FULL last-step output for the return value; only the
+    // chain-propagated $INPUT is capped. (Caller can request returnAllSteps for full per-step output.)
+    const STEP_INPUT_MAX = 20000;
+    input = result.output.length > STEP_INPUT_MAX
+      ? result.output.slice(0, STEP_INPUT_MAX) + `\n…[chain input truncated ${result.output.length - STEP_INPUT_MAX} chars]`
+      : result.output;
     finalOutput = result.output;
   }
 
