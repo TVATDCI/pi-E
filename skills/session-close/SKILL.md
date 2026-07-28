@@ -76,7 +76,11 @@ the history). Create `exports/` if absent. Use this schema EXACTLY (spec lines 3
   `scope=global | category=<cat> | key=<key> | value="<fact>"`. Accepted categories:
   `exact, constraint, reason, dependency, preference` (loss) or
   `intent, files, decision, next` (compaction). Only propose facts genuinely worth
-  persisting cross-session — sisyphus reviews before promoting. Don't escape pipes in
+  persisting cross-session — sisyphus reviews before promoting. **Do NOT propose
+  pi-self-constraints** (pi's own behavioral rules, e.g. plan-first) — bd is for
+  cross-agent + operator-originated facts only (operator policy
+  `bd_clean_of_agent_self_constraints`); keep pi's self-discipline local in
+  store.jsonl/memory.md (already enforced on pi). Don't escape pipes in
   values; sisyphus handles that.
 - **Decisions made** — capture the *why*, not just the *what* (only the what survives
   compaction otherwise).
