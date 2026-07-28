@@ -415,6 +415,7 @@ export default function (pi: ExtensionAPI) {
       // session in the current working directory, not just this one. Session-
       // scope (v1) was too sparse — see Decision 0004 ("cross-session").
       const entries: DispatchLogEntry[] = [];
+      const driftHashes: string[] = [];
       let sessionCount = 0;
       try {
         const sessions = await SessionManager.list(ctx.cwd);
@@ -429,6 +430,9 @@ export default function (pi: ExtensionAPI) {
             for (const e of parsed) {
               if (e.type === "custom" && e.customType === "dispatch-log") {
                 entries.push((e.data ?? {}) as DispatchLogEntry);
+              } else if (e.type === "custom" && e.customType === "prompt-composition") {
+                const d = (e.data ?? {}) as { drift?: boolean; hash?: string };
+                if (d.drift && d.hash) driftHashes.push(d.hash);
               }
             }
           } catch {
@@ -441,16 +445,27 @@ export default function (pi: ExtensionAPI) {
         for (const e of ctx.sessionManager.getEntries()) {
           if (e.type === "custom" && e.customType === "dispatch-log") {
             entries.push((e.data ?? {}) as DispatchLogEntry);
+          } else if (e.type === "custom" && e.customType === "prompt-composition") {
+            const d = (e.data ?? {}) as { drift?: boolean; hash?: string };
+            if (d.drift && d.hash) driftHashes.push(d.hash);
           }
         }
       }
       const stats = aggregateDispatchLog(entries, { peak: isPeakHours(), promo: isPromoActive() });
       const scope = `${sessionCount} session${sessionCount === 1 ? "" : "s"} scanned (cwd-scoped)`;
-      const table = stats.lines.join("\n") + `\n\n(${scope})`;
+      // D1 observer (partial-revert v1.3): surface prompt-composition drift hashes.
+      const uniqueDrift = [...new Set(driftHashes)];
+      const driftSection = uniqueDrift.length > 0
+        ? `\n\n▌ prompt drift (${uniqueDrift.length} unknown hash${uniqueDrift.length === 1 ? "" : "es"}) — composed prompt changed:\n` +
+          uniqueDrift.map((h) => `  ⚠ ${h}`).join("\n") +
+          `\n  intended? add to KNOWN_GOOD_HASHES in extensions/prompt-hash.ts; otherwise investigate.`
+        : "";
+      const table = stats.lines.join("\n") + driftSection + `\n\n(${scope})`;
+      const totalFlags = stats.flags.length + uniqueDrift.length;
       const headline =
-        stats.n === 0
-          ? `no dispatch-log entries across ${sessionCount} session${sessionCount === 1 ? "" : "s"}`
-          : `${stats.n} dispatches · ${stats.fails} errors · ${stats.flags.length} flag${stats.flags.length === 1 ? "" : "s"} · ${scope}`;
+        stats.n === 0 && uniqueDrift.length === 0
+          ? `no dispatch-log or prompt-drift entries across ${sessionCount} session${sessionCount === 1 ? "" : "s"}`
+          : `${stats.n} dispatches · ${stats.fails} errors · ${totalFlags} flag${totalFlags === 1 ? "" : "s"}${uniqueDrift.length > 0 ? ` (incl. ${uniqueDrift.length} prompt-drift)` : ""} · ${scope}`;
       if (ctx.hasUI) {
         ctx.ui.notify(headline, "info");
         await ctx.ui.editor("/routing-stats", table);
