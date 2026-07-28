@@ -1,25 +1,34 @@
-// JsonlMemoryStore (Fork D, Option C write-through) + write-boundary defenses.
+// JsonlMemoryStore — append-only JSONL log, dedup-on-read (W8b fix 2026-07-28).
 //
 // Architecture:
 //   - In-memory Map<string, MemoryRecord> keyed by "scope:category:key", hydrated at init().
-//   - JSONL file on disk; every mutating op updates the Map THEN flushes (write-through).
-//   - Flush is atomic: write to `${path}.tmp`, then fs.rename (crash leaves complete-old or
-//     complete-new, never a corrupt hybrid).
-//   - close() is a true no-op (nothing buffered).
+//   - Disk = append-only JSONL: remember() appends ONE line; init() dedups by key keeping
+//     the LATEST line (iterates + map.set overwrites). No whole-file rewrite on the write
+//     path → no clobber across processes (W8b fixed) and no shared-.tmp rename race (W18 retired).
+//   - forget() is rare → compaction: under withFileLock, read all → dedup-drop-key →
+//     tmp+rename. Both append and compaction serialize via the SAME lock, so an append
+//     can't land inside forget's read→rename window (the v1 blocker, closed).
+//   - All mutations under withFileLock (extensions/memory/lock.ts). Assumes a LOCAL fs
+//     (O_EXCL lockfile is unreliable on NFS).
+//   - close() is a true no-op.
 //
-// Write pipeline (remember()) enforces defenses at the storage boundary:
+// Defenses at the storage boundary (remember()):
 //   E1  secret scan -> throw SecretDetectedError (refuse + surface)
 //   E2.1 inferred + constraint -> downgrade to fact (defense-in-depth)
 //   B2  provenance write-guard: inferred cannot overwrite operator (asymmetric)
 //
-// DI seam: `rename` is injectable so the rename-failure test can force a throw
-// (no vitest/vi.mock available in this environment).
+// Failure modes: remember()/forget() may throw LockTimeoutError if another writer holds
+// the lock >timeoutMs (10s default; practically never uncontended). Callers tolerate it
+// (surface a warning, do not crash the agent).
+//
+// DI seam: `rename` is injectable so the rename-failure test can force a throw in compactDrop.
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import type { Category, MemoryRecord, Scope } from "./schema.ts";
 import { scanSecrets } from "./scanner.ts";
 import { normalizeKey } from "./normalizer.ts";
+import { withFileLock } from "./lock.ts";
 
 export const DEFAULT_AUDIT_LOG_MAX_BYTES = 10 * 1024 * 1024; // ~10MB (Momus m3)
 
@@ -36,7 +45,7 @@ export interface StoreOptions {
   filePath: string;
   auditLogPath?: string;
   auditLogMaxBytes?: number;
-  /** DI seam: override fs.rename for the rename-failure test. Defaults to fs.rename. */
+  /** DI seam: override fs.rename for the rename-failure test (compactDrop). Defaults to fs.rename. */
   rename?: (oldPath: string, newPath: string) => Promise<void>;
 }
 
@@ -51,8 +60,6 @@ export class JsonlMemoryStore {
   private readonly auditLogPath: string | undefined;
   private readonly auditLogMaxBytes: number;
   private readonly rename: (oldPath: string, newPath: string) => Promise<void>;
-  /** Write-mutex: chains concurrent flush() calls so they don't race on the shared `.tmp` (W18). */
-  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(opts: StoreOptions) {
     this.filePath = opts.filePath;
@@ -65,8 +72,9 @@ export class JsonlMemoryStore {
     return `${scope}:${category}:${key}`;
   }
 
-  /** Hydrate the Map from the JSONL file. Missing file = empty store (no throw).
-   *  Malformed lines are skipped + warned (Momus M4): one truncated line must not unload the store. */
+  /** Hydrate the Map from the JSONL file (append-only: dedups by key, LATEST line wins).
+   *  Missing file = empty store (no throw). Malformed lines are skipped + warned (Momus M4):
+   *  one truncated/torn trailing line must not unload the store (crash-safe). */
   async init(): Promise<void> {
     let text: string;
     try {
@@ -138,7 +146,7 @@ export class JsonlMemoryStore {
     }
 
     this.map.set(mk, finalRecord);
-    await this.flush();
+    await this.appendRecord(finalRecord);
 
     const outcome: RememberOutcome = existing
       ? { action: "updated", record: finalRecord, previous: existing }
@@ -152,12 +160,12 @@ export class JsonlMemoryStore {
     return this.map.get(this.mapKey(scope, category, normalizeKey(key))) ?? null;
   }
 
-  /** Hard delete. Returns whether a record was removed. */
+  /** Hard delete via compaction. Returns whether a record was removed. */
   async forget(scope: Scope, category: Category, key: string): Promise<boolean> {
     const mk = this.mapKey(scope, category, normalizeKey(key));
     const existed = this.map.delete(mk);
     if (existed) {
-      await this.flush();
+      await this.compactDrop(mk);
       await this.audit("FORGET", mk, "deleted", {
         schemaVersion: 1, scope, category, key, value: "", provenance: "operator", turn: 0, recordedAt: 0,
       });
@@ -179,38 +187,66 @@ export class JsonlMemoryStore {
     );
   }
 
-  /** Write-through: nothing buffered. True no-op. */
+  /** Nothing buffered. True no-op. */
   async close(): Promise<void> {}
 
   /**
-   * Serialize the Map to JSONL via atomic rename (tmp -> real).
-   *
-   * Serialized across concurrent calls: remember()/forget() may run in parallel (e.g. two
-   * memory_remember tool calls in one turn). Without serialization they race on the shared
-   * `.tmp` — one rename consumes it and the others hit ENOENT (spurious failure + a skipped
-   * audit line), or under adverse scheduling the last writer's stale Map snapshot wins and
-   * records are lost (W18). The queue chains each flush after the previous; a rejection
-   * propagates to that caller while `.then(noop, noop)` on the stored queue keeps it alive
-   * for the next writer (one failed flush must not poison the whole store).
+   * Append one record line under the cross-process lock. Append-only (W8b): no whole-file
+   * rewrite, so no clobber across processes and no shared-.tmp race (W18 retired). The same
+   * lock as compactDrop() → an append can't land inside forget's read→rename window.
+   * LockTimeoutError propagates if the lock is held >timeoutMs (callers tolerate).
    */
-  private async flush(): Promise<void> {
-    const run = this.writeQueue.then(() => this.flushOnce());
-    // Swallow for chain continuity only — `run` still rejects for its own awaiter.
-    this.writeQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+  private async appendRecord(rec: MemoryRecord): Promise<void> {
+    await withFileLock(this.filePath, async () => {
+      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+      await fs.appendFile(this.filePath, JSON.stringify(rec) + "\n", "utf8");
+    });
   }
 
-  /** Single atomic write. Caller is responsible for serialization (see flush()). */
-  private async flushOnce(): Promise<void> {
-    const lines = [...this.map.values()].map((r) => JSON.stringify(r));
-    const data = lines.join("\n") + (lines.length > 0 ? "\n" : "");
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const tmp = `${this.filePath}.tmp`;
-    await fs.writeFile(tmp, data, "utf8");
-    await this.rename(tmp, this.filePath);
+  /**
+   * Compaction delete under the cross-process lock (forget is rare). Reads all lines, dedups
+   * keeping the latest per key while dropping `dropKey`, then rewrites via tmp+rename. Same
+   * lock as appendRecord() → the two cannot interleave (closes the v1 forget-vs-append race).
+   * On rename failure: the lock is released (finally) and the file is left at its pre-call
+   * state (the tmp is orphaned, harmless; the real file is untouched).
+   */
+  private async compactDrop(dropKey: string): Promise<void> {
+    await withFileLock(this.filePath, async () => {
+      let text: string;
+      try {
+        text = await fs.readFile(this.filePath, "utf8");
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") return; // nothing to compact
+        throw e;
+      }
+      const latest = new Map<string, MemoryRecord>();
+      let malformed = 0;
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed === "") continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (!this.isValidRecord(parsed)) {
+            malformed++;
+            continue;
+          }
+          const mk = this.mapKey(parsed.scope, parsed.category, parsed.key);
+          if (mk === dropKey) continue; // drop
+          latest.set(mk, parsed); // last write wins (matches init())
+        } catch {
+          malformed++;
+        }
+      }
+      if (malformed > 0) {
+        console.warn(`[memory] compactDrop: skipped ${malformed} malformed line(s) from ${this.filePath}`);
+      }
+      const lines = [...latest.values()].map((r) => JSON.stringify(r));
+      const data = lines.join("\n") + (lines.length > 0 ? "\n" : "");
+      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+      const tmp = `${this.filePath}.tmp`;
+      await fs.writeFile(tmp, data, "utf8");
+      await this.rename(tmp, this.filePath);
+    });
   }
 
   private async audit(action: string, mk: string, detail: string, rec: MemoryRecord): Promise<void> {

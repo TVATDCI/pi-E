@@ -1,9 +1,11 @@
 // Tier 2 test for store.ts. Run: node --experimental-strip-types test-store.ts
 // Exercises: insert/recall, dedup, persistence (two-session E2E), secret rejection,
 // inferred->fact downgrade, provenance write-guard (plain + downgrade+guard), trust
-// upgrade (asymmetry), rename-failure self-heal, malformed-line skip, audit log,
-// forget, snapshot/search.
+// upgrade (asymmetry), rename-failure self-heal (compactDrop), malformed-line skip,
+// audit log, forget, snapshot/search, in-process parallel appends, append-only dedup-on-read,
+// and cross-PROCESS survival (W8b acceptance: two writers, both survive).
 import { promises as fs } from "node:fs";
+import { spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { JsonlMemoryStore, SecretDetectedError } from "./store.ts";
@@ -31,7 +33,41 @@ async function fresh(suffix: string, opts?: { rename?: StoreOptions["rename"] })
   return { store, filePath, auditLogPath, dir };
 }
 
+/** Spawn a `node` subprocess running procPath with args; resolve trimmed stdout. */
+function runProc(procPath: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const p = spawn("node", ["--experimental-strip-types", procPath, ...args], {});
+    let out = "", err = "";
+    p.stdout.on("data", (d) => { out += d; });
+    p.stderr.on("data", (d) => { err += d; });
+    p.on("error", reject);
+    p.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`proc exit ${code}: ${err.trim()}`))));
+  });
+}
+
 async function main() {
+  // Cross-process helper script (subprocess tests §15/§16). Written once to a temp file;
+  // each subprocess test uses a FRESH data filePath (isolation, no cross-test contamination).
+  const STORE_ABS = new URL("./store.ts", import.meta.url).pathname;
+  const procDir = await fs.mkdtemp(path.join(os.tmpdir(), "w8b-proc-"));
+  const procPath = path.join(procDir, "proc.ts");
+  const procSrc = `import { JsonlMemoryStore } from ${JSON.stringify(STORE_ABS)};
+const a = process.argv.slice(2);
+const s = new JsonlMemoryStore({ filePath: a[1] });
+await s.init();
+if (a[0] === 'write') {
+  await s.remember({ schemaVersion: 1, scope: 'global', category: 'fact', key: a[2], value: a[3], provenance: 'operator', turn: 1, recordedAt: Date.now() });
+  console.log('OK ' + a[2]);
+} else if (a[0] === 'forget') {
+  await s.forget('global', 'fact', a[2]);
+  console.log('FORGOT ' + a[2]);
+} else if (a[0] === 'read') {
+  const snap = await s.snapshot({ scopes: ['global'] });
+  console.log(JSON.stringify(snap.map(function (r) { return r.key + '=' + r.value; }).sort()));
+}
+`;
+  await fs.writeFile(procPath, procSrc, "utf8");
+
   // --- 1. insert + recall ---
   {
     const { store } = await fresh("insert");
@@ -144,13 +180,14 @@ async function main() {
     check("upgrade: record now operator-confirmed", got !== null && got.value === "confirmed" && got.provenance === "operator");
   }
 
-  // --- 9. rename-failure self-heal (spine test #2) ---
+  // --- 9. rename-failure self-heal (RETARGETED: the rename now lives in compactDrop/forget, not remember) ---
   {
     const { store: s1, filePath } = await fresh("crash");
     await s1.init();
     await s1.remember(rec({ key: "persisted", value: "before crash" }));
+    await s1.remember(rec({ key: "keeper", value: "survives" }));
     await s1.close();
-    // Open with a rename that always throws.
+    // Open with a rename that always throws. forget() -> compactDrop -> tmp+rename throws.
     const failing = new JsonlMemoryStore({
       filePath,
       rename: async () => { throw new Error("rename failed (simulated)"); },
@@ -158,20 +195,21 @@ async function main() {
     await failing.init();
     let threw = false;
     try {
-      await failing.remember(rec({ key: "lost", value: "this write will fail" }));
+      await failing.forget("global", "fact", "persisted");
     } catch {
       threw = true;
     }
-    check("rename-failure: remember throws", threw);
-    // Self-heal: a fresh store re-reads disk (old file) -> 'lost' is NOT present.
+    check("rename-failure: forget throws", threw);
+    // Self-heal: the compaction rewrite did not land -> disk unchanged. A fresh store sees
+    // BOTH records (forget not persisted); the lock was released via finally (no orphan .lock).
     const healed = new JsonlMemoryStore({ filePath });
     await healed.init();
     const snap = await healed.snapshot({ scopes: ["global"] });
-    check("rename-failure: only pre-crash record on disk", snap.length === 1);
+    check("rename-failure: disk unchanged (both records present)", snap.length === 2);
     const got = await healed.recall("global", "fact", "persisted");
-    check("rename-failure: pre-crash record survived", got !== null && got.value === "before crash");
-    const lost = await healed.recall("global", "fact", "lost");
-    check("rename-failure: failed write not persisted", lost === null);
+    check("rename-failure: target survived (forget not persisted)", got !== null && got.value === "before crash");
+    const lockOrphan = await fs.stat(`${filePath}.lock`).then(() => true).catch(() => false);
+    check("rename-failure: lock released (no orphan .lock)", !lockOrphan);
   }
 
   // --- 10. malformed-line skip+log (Momus M4) ---
@@ -227,13 +265,13 @@ async function main() {
     check("search: 'redis' matches 0", none.length === 0);
   }
 
-  // --- 14. concurrent writes are serialized (W18: no .tmp race, no data loss) ---
+  // --- 14. in-process parallel appends (W18 race retired via append-only + lock) ---
   {
     const N = 25;
     const { store, filePath } = await fresh("concurrent");
     await store.init();
-    // Fire N parallel remembers — under the old code these raced on the shared `.tmp`
-    // (spurious ENOENT + possible stale-content loss). The write-mutex in flush() serializes them.
+    // Fire N parallel remembers. Append-only + withFileLock serializes them (no shared .tmp
+    // on the write path; W18's rename race is retired). All appends land.
     const outcomes = await Promise.all(
       Array.from({ length: N }, (_, i) =>
         store.remember(rec({ key: `k${i}`, value: `value-${i}` })),
@@ -251,6 +289,57 @@ async function main() {
       if (got === null || got.value !== `value-${i}`) { allOnDisk = false; break; }
     }
     check("concurrent: all records persisted to disk", allOnDisk);
+  }
+
+  // --- 15. append-only dedup-on-read (latest line wins at init) ---
+  {
+    const { store, filePath } = await fresh("dedup-read");
+    await store.init();
+    await store.remember(rec({ key: "k", value: "first", recordedAt: 1000 }));
+    await store.remember(rec({ key: "k", value: "second", recordedAt: 2000 }));
+    // Two append lines for key k; a fresh init must keep the LATEST (second).
+    const reread = new JsonlMemoryStore({ filePath });
+    await reread.init();
+    const got = await reread.recall("global", "fact", "k");
+    check("dedup-on-read: fresh init keeps the latest line (second)", got !== null && got.value === "second");
+    const snap = await reread.snapshot({ scopes: ["global"] });
+    check("dedup-on-read: exactly one record for k", snap.length === 1);
+  }
+
+  // --- 16. cross-PROCESS survival (THE W8b acceptance: two writers, both survive) ---
+  // In-process Promise.all cannot exercise cross-PID lock behavior; these spawn real `node`
+  // subprocesses, each its own JsonlMemoryStore on the SAME fresh filePath.
+  {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "w8b-cross-")); // fresh per test (isolation)
+    const filePath = path.join(dir, "cross.jsonl");
+    const [out1, out2] = await Promise.all([
+      runProc(procPath, ["write", filePath, "z", "from-A"]),
+      runProc(procPath, ["write", filePath, "w", "from-B"]),
+    ]);
+    const readOut = await runProc(procPath, ["read", filePath]);
+    const keys = JSON.parse(readOut) as string[];
+    check("cross-process: writer A reported OK", out1 === "OK z");
+    check("cross-process: writer B reported OK", out2 === "OK w");
+    check("cross-process: BOTH z and w survive in store.jsonl (acceptance #5)", keys.includes("z=from-A") && keys.includes("w=from-B"));
+  }
+
+  // --- 17. forget-vs-append across processes (deterministic: both lock -> no clobber) ---
+  // The v1 lockless-append design flaked here (append could land in forget's read->rename
+  // window). With both paths under withFileLock, serialization makes it deterministic.
+  {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "w8b-fa-")); // fresh per test (isolation)
+    const filePath = path.join(dir, "fa.jsonl");
+    await runProc(procPath, ["write", filePath, "k", "seed"]);
+    await runProc(procPath, ["write", filePath, "keep", "keeper"]);
+    await Promise.all([
+      runProc(procPath, ["forget", filePath, "k"]), // compaction (locked)
+      runProc(procPath, ["write", filePath, "w", "concurrent"]), // append (locked)
+    ]);
+    const readOut = await runProc(procPath, ["read", filePath]);
+    const keys = JSON.parse(readOut) as string[];
+    check("forget-vs-append: 'w' survived (not clobbered by compaction)", keys.includes("w=concurrent"));
+    check("forget-vs-append: 'k' was forgotten", !keys.includes("k=seed"));
+    check("forget-vs-append: 'keep' survived", keys.includes("keep=keeper"));
   }
 }
 

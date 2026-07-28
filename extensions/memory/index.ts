@@ -25,6 +25,7 @@ import { classifyCategory } from "./classifier.ts";
 import { buildInjection } from "./injection.ts";
 import { normalizeKey } from "./normalizer.ts";
 import type { Category } from "./schema.ts";
+import { LockTimeoutError } from "./lock.ts";
 
 const STORE_DIR = path.join(os.homedir(), ".pi", "agent", "memory");
 const STORE_FILE = path.join(STORE_DIR, "store.jsonl");
@@ -125,6 +126,12 @@ export default function (pi: ExtensionAPI) {
             details: {},
           };
         }
+        if (e instanceof LockTimeoutError) {
+          return {
+            content: [{ type: "text" as const, text: `Warning: memory store was locked by another writer for >10s; fact NOT saved. Retry, or check for a stale ${STORE_FILE}.lock.` }],
+            details: {},
+          };
+        }
         throw e;
       }
     },
@@ -146,14 +153,21 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params) {
       const scope = "global";
       const nk = normalizeKey(params.key);
-      if (params.category) {
-        const removed = await store.forget(scope, params.category as Category, nk);
-        return { content: [{ type: "text" as const, text: removed ? `Forgot [${params.category}] ${nk}` : `No record found for [${params.category}] ${nk}` }], details: {} };
+      try {
+        if (params.category) {
+          const removed = await store.forget(scope, params.category as Category, nk);
+          return { content: [{ type: "text" as const, text: removed ? `Forgot [${params.category}] ${nk}` : `No record found for [${params.category}] ${nk}` }], details: {} };
+        }
+        const records = await store.snapshot({ scopes: [scope] });
+        const matches = records.filter((r) => r.key === nk);
+        for (const r of matches) await store.forget(scope, r.category, nk);
+        return { content: [{ type: "text" as const, text: matches.length ? `Forgot ${matches.length} record(s) for key ${nk}` : `No records found for key ${nk}` }], details: {} };
+      } catch (e) {
+        if (e instanceof LockTimeoutError) {
+          return { content: [{ type: "text" as const, text: `Warning: memory store was locked by another writer for >10s; forget NOT completed. Retry, or check for a stale ${STORE_FILE}.lock.` }], details: {} };
+        }
+        throw e;
       }
-      const records = await store.snapshot({ scopes: [scope] });
-      const matches = records.filter((r) => r.key === nk);
-      for (const r of matches) await store.forget(scope, r.category, nk);
-      return { content: [{ type: "text" as const, text: matches.length ? `Forgot ${matches.length} record(s) for key ${nk}` : `No records found for key ${nk}` }], details: {} };
     },
   });
 }
