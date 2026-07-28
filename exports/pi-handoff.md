@@ -1,42 +1,36 @@
-# Pi Handoff — audit + memory hardening (W18/W8) + reverse-bridge writer shipped; round-trip test (2026-07-28)
+# Pi Handoff — W8b shipped (append-only store.jsonl); memory-hardening arc complete (2026-07-28)
 
-**Written at:** 2026-07-28T01:01:36Z
+**Written at:** 2026-07-28T17:11:01Z
 **Pi session:** 019fa3a0-e473-7770-9888-361e4a418a6d
 **Original intent:** Perform a 10-phase architecture audit of the pi agent harness and execute the agreed fixes.
 
 ## Summary
-Completed a full audit (composite 7.3/10) and shipped five commits: doc reconciliation + code fixes (`0f394e8`), the compaction-capture hook + memory.md rotation (`e0e7a37`), the `flush()` write-mutex for parallel-`memory_remember` races (`2b047b9`, W18), the cross-process `withFileLock` for memory.md (`3e25cf2`, W8), and the reverse-bridge writer side (`cdef57e` — a `session-close` skill + this `exports/` dir, the first `pi:`-prefixed commit). A mid-stream process failure (implementing W18/W8 without a plan and without consulting the shared-memory bridge) was corrected with a hard plan-first constraint. **This handoff is the round-trip test payload** — written by invoking the `session-close` skill so sisyphus can confirm it surfaces as `[FROM pi]` and the proposed facts are promotable.
+W8b (store.jsonl cross-process) is shipped: append-only JSONL log, dedup-on-read, both `remember()` (append) and `forget()` (compaction) under the same `withFileLock`. This **completes the memory-hardening arc** from this session — audit doc reconciliation (`0f394e8`), compaction-capture hook + rotation (`e0e7a37`), `flush()` write-mutex for parallel-`memory_remember` races (`2b047b9`, W18 — now **retired** by W8b's append-only write path), cross-process `withFileLock` for memory.md (`3e25cf2`, W8), the reverse-bridge writer (`cdef57e`, **verified end-to-end**), and now W8b. The plan was Oracle-reviewed (one revision: locked-append, not lockless) before implementation.
 
-## Files touched
-- `AGENTS.md`, `README.md`, `agents/reviewer-security.md`, several extensions — audit doc reconciliation (`0f394e8`)
-- `extensions/compaction-capture.ts` (new), `scripts/rotate-memory-md.ts` (new) — compaction-capture hook + rotation (`e0e7a37`)
-- `extensions/memory/store.ts`, `extensions/memory/test-store.ts` — `flush()` write-mutex, W18 (`2b047b9`)
-- `extensions/memory/lock.ts` (new), `extensions/memory/test-lock.ts` (new) — cross-process `withFileLock`, W8 (`3e25cf2`)
-- `skills/session-close/SKILL.md` (new), `exports/pi-handoff.md` (new), `planning/reverse-bridge-writer.PLAN.md` (new) — reverse-bridge writer side (`cdef57e`)
-- `extensions/memory/store.jsonl` (gitignored, local) — facts: `memory_store_parallel_write_race` (FIXED), `store_jsonl_cross_process_race` (W8b, deferred), `plan_before_nontrivial_implementation` (constraint)
+## Files touched (this W8b commit)
+- `extensions/memory/store.ts` — append-only rewrite: `appendRecord()` + `compactDrop()`, both under `withFileLock`; removed `flush()`/`flushOnce()`/`writeQueue` (W18 retired).
+- `extensions/memory/index.ts` — `LockTimeoutError` catch in `memory_remember` + `memory_forget` (surfaces a warning, does not crash).
+- `extensions/memory/test-store.ts` — §16 cross-process survival (subprocess), §17 forget-vs-append (subprocess), §15 dedup-on-read, §9 retargeted to `compactDrop`, §14 retained (49/0).
+- `planning/w8b-store-jsonl-cross-process.PLAN.md` — the reviewed plan.
 
 ## Decisions made
-- **Plan-first is now a hard constraint** — any non-trivial change gets a persisted plan + operator go before code; no freelancing, no implementing backlog items unprompted.
-- **Keep the 4 Jul-28 fix commits** — sound + tested; reverting good work to atone for a process gap would be theatre.
-- **Adopt `pi:` commit prefix** for new commits only (don't rewrite the existing ones) — instant cross-repo attribution in `git log --oneline`.
-- **Skill-primary, not an auto-hook**, for the handoff — `session_shutdown` payload is bare `{type,reason}` and fires on reload; can't author the judgment sections. Stub-hook DEFERRED.
-- **Reverse-bridge scope locked**: IN = session-close skill + `exports/`; OUT = forward bridge, sisyphus's reader, bd, store.jsonl merge, doctor-check.
+- **Append-only over read-modify-write merge** — root-cause fix (the bug *is* the whole-file rewrite); retires W18 + W8b together; `init()` already dedups last-wins so the read path is unchanged.
+- **Locked-append, not lockless** (Oracle revision) — the v1 lockless design had a forget-vs-append race; both paths now lock the same file.
+- **`O_APPEND` demoted** to belt-and-suspenders; the lock is the primary guarantee. Design **assumes a local filesystem** (O_EXCL unreliable on NFS).
 
 ## Dead ends
-- **`session_shutdown` auto-hook for the handoff → abandoned.** The payload is `{type, reason}` only (no summary/files/decisions) and the event fires on `reload` as well as real close, so a hook cannot author `Summary` / `Dead ends` / `Decisions` / `Proposed bd facts`. A stub-only handoff would also fail acceptance #1/#3/#4 *while looking complete* — sisyphus surfaces `[FROM pi]` with empty high-value sections and silently promotes nothing. Skill-primary instead. Do NOT revisit a hook unless a doctor-check demands a freshness backstop.
-- **Pure-append `compaction-capture` to dodge W8 → abandoned.** memory.md is newest-first; a capture must insert right after the header boundary, so it must read-modify-write (not append). A cross-process lock serializing both writers is the correct fix — not an append-only redesign of memory.md.
+- **v1 lockless-append → abandoned (Oracle-caught).** I reasoned `O_APPEND` atomicity made lockless writes safe — true for append-vs-append, but **not append-vs-rewrite**: a lockless `remember()` append could land inside `forget()`'s locked read→tmp→rename window, and the rename would then replace the file with a snapshot omitting the append → silent data loss, *with the writer reporting success*. Same data-loss class W8b exists to fix. Lesson (for any agent/store): **if any mutation path rewrites the file, ALL writers must take the same lock** — advisory locks protect only against co-lockers. Fixed by wrapping `appendRecord` in `withFileLock` too.
+- (Earlier this session) **`session_shutdown` auto-hook for the handoff → abandoned** — bare `{type,reason}` payload, fires on reload; can't author the judgment sections. Skill-primary.
 
 ## Incomplete work
-- **Round-trip test IN PROGRESS** (acceptance #5): this handoff was written by invoking the `session-close` skill precisely so sisyphus can verify the reverse bridge end-to-end (Step 4 surfaces `[FROM pi]`; Step 5 promotes the proposed facts). Not closed until that passes.
-- **`store.jsonl` cross-process hazard (W8b)** — two pi instances each rewrite the whole file from their own Map → last-writer clobbers the other's new facts. Deferred (needs read-modify-write MERGE in `flush()`, or an append-only redesign). Separate plan.
-- **Dotfiles `doctor.sh` freshness check** for the handoff (bead `brain-6bf`) — sisyphus-side, future; the right "forgot to invoke the skill" mitigation.
+- **Round-trip for THIS handoff** — sisyphus's next session-begin must surface `[FROM pi]` (Step 4) and the proposed decision fact below must be promotable (Step 5). (Per `bd_clean_of_agent_self_constraints`, only decision/exact facts are proposed — no self-constraints.)
+- **Dotfiles `doctor.sh` freshness check** (bead `brain-6bf`) — still deferred (sisyphus-side); the machine-checkable "forgot to invoke the skill" guard.
+- **Map-staleness cross-process** — a process's in-memory Map sees another's appends only at its next `init()` (accepted; strictly better than today's clobber). Fresh cross-process reads (snapshot re-reads disk) = possible future enhancement.
 
 ## Proposed bd facts
-- scope=global | category=decision | key=reverse_bridge_pi_writer_implemented_2026_07_28 | value="pi implemented its writer side of the reverse bridge per PI-HANDOFF-SPEC.md (commit cdef57e): a session-close skill (~/.pi/agent/skills/session-close/SKILL.md) authors ~/.pi/agent/exports/pi-handoff.md at close. sisyphus session-begin Step 4 surfaces a [FROM pi] block; Step 5 promotes ## Proposed bd facts. pi NEVER writes bd. pi: commit prefix adopted for new commits only. Round-trip test handoff written 2026-07-28T01:01:36Z."
-- scope=global | category=constraint | key=plan_before_nontrivial_implementation | value="pi operates plan-first: any non-trivial change (multi-file, new module, semantic) gets a persisted plan + the operator's explicit go before code; no freelancing; no implementing backlog items unprompted from a status/clarification question. Mechanical/trivial edits stay inline."
+- scope=global | category=decision | key=store_jsonl_append_only_2026_07_28 | value="pi's store.jsonl (~/.pi/agent/memory/store.jsonl) is now an append-only JSONL log, dedup-on-read (W8b fix, shipped 2026-07-28). remember() appends one line under withFileLock (extensions/memory/lock.ts); forget() compacts (read->dedup-drop-key->tmp+rename) under the SAME lock; init() dedups keeping the latest line per key. W18's whole-file flush/flushOnce/writeQueue are removed (no .tmp on the write path -> rename race retired). Fixes the cross-process last-writer-clobbers hazard (two pi instances no longer drop each other's facts). Design assumes a local fs (O_EXCL unreliable on NFS). Caller (index.ts) tolerates LockTimeoutError. Tested: cross-process survival (two subprocess writers + third reader, both survive), forget-vs-append deterministic, full memory suite 168/0."
 
 ## Next steps for opencode
-- **Consume THIS handoff as the round-trip test** (acceptance #5): confirm session-begin Step 4 surfaces `[FROM pi]`, and Step 5 can promote the two proposed facts above. If promotion succeeds, the reverse bridge is closed end-to-end.
-- **Promote the 4 Jul-28 fix commits' facts to bd** (one-time catch-up, Layer 1 — already operator-greenlit); they shipped before pi's writer side existed, so they're in git not a handoff.
-- **Consider the dotfiles `doctor.sh` freshness check** (bead `brain-6bf`) — the machine-checkable guard against the "forgot to invoke the skill" drift.
-- **store.jsonl cross-process (W8b)** is a pi-side follow-up under a separate plan; not blocking.
+- **Consume THIS handoff as the W8b round-trip** — confirm `[FROM pi]` + that the decision fact above is promotable.
+- **Consider the dotfiles `doctor.sh` freshness check** (bead `brain-6bf`) — the guard against "forgot to invoke session-close."
+- The memory-hardening arc (W18/W8/W8b + reverse bridge) is now complete; no pi-side follow-ups blocking except the (optional) doctor-check and the (accepted) Map-staleness property.
