@@ -7,6 +7,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { Container, SelectList, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { SelectItem } from "@earendil-works/pi-tui";
+import { isHumanTurn } from "./upstream-adapter.ts";
 
 type Status = "idle" | "inprogress" | "done";
 interface Task { id: number; text: string; status: Status; }
@@ -160,7 +161,7 @@ export default function (pi: ExtensionAPI) {
   // on pi 0.80.x — resetting here would defeat the guard and loop forever.
   // (Regression from 0.79.9, where `input` only fired for human prompts — LR-0009.)
   pi.on("input", async (event) => {
-    if (event.source === "interactive") nudgedThisCycle = false;
+    if (isHumanTurn(event)) nudgedThisCycle = false; // D6: the 0.79.9→0.80.x seam lives in upstream-adapter.ts
     return { action: "continue" as const };
   });
 
