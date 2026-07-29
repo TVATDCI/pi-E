@@ -14,24 +14,36 @@
 
 import { createHash } from "node:crypto";
 
-/** 16-hex sha256 of a prompt string. Content-addressed; assembly-order-independent. */
+/**
+ * Strip the VOLATILE, by-design-changing blocks before hashing, so drift fires only on real
+ * system-prompt composition changes — not on memory growth or bridge re-exports. Volatile
+ * blocks are XML-tagged by convention: <memory-context> (memory/formatter.ts) and
+ * <bridge-context> (bd-bridge.ts). Absent tags ⇒ no-op (safe). Non-greedy + multiline.
+ */
+export function stableParts(prompt: string): string {
+  return prompt
+    .replace(/<memory-context>[\s\S]*?<\/memory-context>/g, "")
+    .replace(/<bridge-context>[\s\S]*?<\/bridge-context>/g, "");
+}
+
+/** 16-hex sha256 of the STABLE parts of a prompt (volatile blocks stripped first). */
 export function hashPrompt(prompt: string): string {
-  return createHash("sha256").update(prompt, "utf8").digest("hex").slice(0, 16);
+  return createHash("sha256").update(stableParts(prompt), "utf8").digest("hex").slice(0, 16);
 }
 
 /**
- * Known-good composed-prompt hashes (curated). A hash NOT in this set = drift — either an
- * intended composition change (add the hash here, reviewed) or an unintended one
- * (investigate). Seeded EMPTY: after the first post-revert boot, copy the live-verified
- * hash from the session's `prompt-composition` log entry into this set. (See
- * prompt-hash.test.ts for the canonical-prompt golden.)
+ * Known-good STABLE-parts hashes (curated). hashPrompt() strips the volatile blocks
+ * (<memory-context>, <bridge-context>) first, so this set tracks the STABLE composition:
+ * AGENTS.md base + <purpose> + the `## Cost Discipline` / `## Session notes` sections (those
+ * are markdown headings, NOT XML blocks). A hash NOT in this set = drift — an unintended
+ * composition change (investigate) or a legit one (add the hash here, reviewed).
+ *
+ * Seeded with the post-strip STABLE-parts hash (2026-07-30, captured live from the
+ * prompt-composition warning after the volatile-block stripping landed). Re-seed only when the
+ * STABLE composition legitimately changes (AGENTS.md edit, <purpose> change, a section added).
  */
 export const KNOWN_GOOD_HASHES: Set<string> = new Set<string>([
-  // Live-verified composed-prompt hash (2026-07-29, post partial-revert + observer boot).
-  // Confirmed via the session's prompt-composition log entry. Drift fires only when the
-  // composed prompt (AGENTS.md base + purpose + bridge + memory-context + cost + notes)
-  // actually changes — re-seed legitimate changes here after review.
-  "fd6891a5f489e8a4",
+  "c2bfe1b57f74616f", // stable-parts (post memory+bridge strip), captured 2026-07-30
 ]);
 
 export function isKnownGood(hash: string): boolean {

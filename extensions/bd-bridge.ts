@@ -164,6 +164,8 @@ export default function (pi: ExtensionAPI) {
                 `${new Date().toISOString()} read=${telemetry.read} parsed=${telemetry.parsed} dropped=${telemetry.dropped} secret=${telemetry.secret} injected=${injected} omitted_budget=${omittedBudget}\n`);
         } catch { /* non-critical */ }
 
-        return { systemPrompt: event.systemPrompt + "\n\n" + header + "\n" + block };
+        // XML-tagged so prompt-hash.ts can strip this VOLATILE block (timestamp/entries/stale
+        // change every re-export) before hashing — keeps drift detection meaningful.
+        return { systemPrompt: event.systemPrompt + "\n\n<bridge-context>\n" + header + "\n" + block + "\n</bridge-context>" };
     });
 }
