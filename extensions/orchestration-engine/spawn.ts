@@ -308,7 +308,7 @@ export async function resolveAndSpawn(
   let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal);
 
   // Cross-provider fallback when the primary model silently returns empty (e.g., quota exhausted).
-  if (output.length === 0 && tierDefault.fallbackFlag && tierDefault.fallbackFlag !== modelFlag && isAvail(tierDefault.fallbackFlag)) {
+  if (output.length === 0 && !signal?.aborted && tierDefault.fallbackFlag && tierDefault.fallbackFlag !== modelFlag && isAvail(tierDefault.fallbackFlag)) {
     const fbDownshiftedFrom = modelFlag;
     const fb = tierDefault.fallbackFlag;
     modelFlag = fb;

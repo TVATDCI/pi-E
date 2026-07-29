@@ -1,10 +1,11 @@
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { loadChains, runChainByName, type Chain, type ChainOverrides } from "./chain-runner.ts";
+import { loadChains, runChainByName, type Chain, type ChainOverrides, type ChainRunResult } from "./chain-runner.ts";
 import { clarifyChain } from "./chain-clarify.ts";
 import type { UsageStats, SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { StepAcceptance } from "./acceptance.ts";
+import { resolveBgStatus, formatBgToast, type BgStatus } from "./background-helpers.ts";
 
 interface StepState {
   name: string;
@@ -26,11 +27,13 @@ interface ChainState {
   steps: StepState[];
   startedAt: number;
   elapsed: number;
+  background?: boolean;
 }
 
 const RUNNING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_WIDGET_JOBS = 6;
 const PROGRESSIVE_LIMIT = 3;
+const MAX_BACKGROUND = 3; // Group 3: concurrency cap on background runs
 
 const fmtTokens = (n?: number): string => {
   if (!n) return "";
@@ -39,8 +42,6 @@ const fmtTokens = (n?: number): string => {
   return String(n);
 };
 const fmtCost = (c?: number): string => {
-  // Hide when not reported (undefined/0/NaN) or when it would round to "$0.0000" — otherwise the
-  // widget shows a misleading "$0.0000" for providers that omit cost in streaming usage events.
   if (!c || c < 0.00005) return "";
   return `$${c.toFixed(c < 0.01 ? 4 : 3)}`;
 };
@@ -51,6 +52,9 @@ export default function (pi: ExtensionAPI) {
   let widgetCtx: ExtensionContext | undefined;
   let nextId = 1;
   const running = new Map<number, ChainState>();
+  // Group 3: per-job AbortController registry keyed by runId. Decouples background jobs from the
+  // (turn-coupled) tool-call signal and backs /stop. Entry removed when the run settles.
+  const bgRegistry = new Map<number, { controller: AbortController; stopped: boolean }>();
   let tick: ReturnType<typeof setInterval> | undefined;
   let frameIdx = 0;
 
@@ -83,26 +87,41 @@ export default function (pi: ExtensionAPI) {
             : [theme.fg("muted", "chain: idle")];
         }
 
-        const chains = [...running.values()];
+        // Group 3: split FOREGROUND vs BACKGROUND. Background jobs render as ONE compact dimmed
+        // line and are EXCLUDED from MAX_WIDGET_JOBS so they don't collapse the foreground's rich line.
+        const all = [...running.values()];
+        const foreground = all.filter((c) => !c.background);
+        const background = all.filter((c) => c.background);
+        const bgLine = (): string | null => {
+          const live = background.filter((c) => c.status === "running");
+          if (live.length === 0) return null;
+          return theme.fg("dim", `⟳ bg: ${live.length} running (${live[live.length - 1]!.chainName})`);
+        };
 
-        // Adaptive tier 1: narrow terminal OR too many concurrent jobs → single-line summary.
-        if (width < 60 || chains.length > MAX_WIDGET_JOBS) {
-          const runningN = chains.filter((c) => c.status === "running").length;
-          const cur = chains.find((c) => c.status === "running");
+        if (foreground.length === 0) {
+          const bl = bgLine();
+          return bl ? [truncateToWidth(bl, width)] : [theme.fg("muted", "chain: idle")];
+        }
+
+        // Foreground tier 1: narrow terminal OR too many FOREGROUND jobs → single-line summary.
+        if (width < 60 || foreground.length > MAX_WIDGET_JOBS) {
+          const runningN = foreground.filter((c) => c.status === "running").length;
+          const cur = foreground.find((c) => c.status === "running");
+          let line: string;
           if (cur) {
             const step = cur.steps.find((s) => s.status === "running");
             const idx = step ? cur.steps.indexOf(step) + 1 : 0;
             const stepPart = step && idx ? theme.fg("dim", ` · ${step.name} (${idx}/${cur.steps.length})`) : "";
-            return [truncateToWidth(
-              theme.fg("accent", `${glyph("running")} #${cur.id} ${cur.chainName}`) + stepPart + theme.fg("dim", ` · ${runningN} running`),
-              width,
-            )];
+            line = theme.fg("accent", `${glyph("running")} #${cur.id} ${cur.chainName}`) + stepPart + theme.fg("dim", ` · ${runningN} running`);
+          } else {
+            line = theme.fg("dim", `chain · ${runningN} running`);
           }
-          return [truncateToWidth(theme.fg("dim", `chain · ${runningN} running`), width)];
+          const bl = bgLine();
+          return bl ? [truncateToWidth(line, width), truncateToWidth(bl, width)] : [truncateToWidth(line, width)];
         }
 
         const rows: string[] = [];
-        const show = chains.length > PROGRESSIVE_LIMIT ? chains.slice(0, PROGRESSIVE_LIMIT) : chains;
+        const show = foreground.length > PROGRESSIVE_LIMIT ? foreground.slice(0, PROGRESSIVE_LIMIT) : foreground;
         for (const c of show) {
           const color = c.status === "running" ? "accent" : c.status === "done" ? "success" : "error";
           const chainCost = c.steps.reduce((a, s) => a + (s.usage?.cost ?? 0), 0);
@@ -133,14 +152,14 @@ export default function (pi: ExtensionAPI) {
             }
           }
         }
-
-        // Adaptive tier 2: more than PROGRESSIVE_LIMIT jobs → collapse the rest into a count.
-        if (chains.length > PROGRESSIVE_LIMIT) {
-          const rest = chains.slice(PROGRESSIVE_LIMIT);
+        if (foreground.length > PROGRESSIVE_LIMIT) {
+          const rest = foreground.slice(PROGRESSIVE_LIMIT);
           const rN = rest.filter((c) => c.status === "running").length;
           const dN = rest.filter((c) => c.status === "done").length;
           rows.push(theme.fg("dim", `+${rest.length} more (${rN} running, ${dN} done)`));
         }
+        const bl = bgLine();
+        if (bl) rows.push(truncateToWidth(bl, width));
         return rows;
       },
     }));
@@ -148,9 +167,6 @@ export default function (pi: ExtensionAPI) {
 
   const startTick = () => {
     if (tick) return;
-    // 180ms: drives both the elapsed timer and the braille spinner frame. One tick instead of
-    // two (1A+1C) — pi coalesces renders; stopped on idle via stopTickIfIdle. (Was 120ms; slowed
-    // per operator feedback — tune here if needed.)
     tick = setInterval(() => {
       for (const c of running.values()) if (c.status === "running") c.elapsed = Date.now() - c.startedAt;
       frameIdx = (frameIdx + 1) % RUNNING_FRAMES.length;
@@ -163,7 +179,8 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  // Shared widget+run core used by both the run_chain tool and the /chain-clarify slash command.
+  // Shared widget+run core. opts.id lets a background caller pre-allocate the runId (so it can
+  // register the controller before the async run starts); opts.background marks the chainState.
   const runWithWidget = async (
     ctx: ExtensionContext,
     chainName: string,
@@ -172,10 +189,11 @@ export default function (pi: ExtensionAPI) {
     returnAllSteps: boolean | undefined,
     signal: AbortSignal | undefined,
     overrides: ChainOverrides | undefined,
-  ) => {
+    opts?: { background?: boolean; id?: number },
+  ): Promise<ChainRunResult> => {
     widgetCtx = ctx;
     const chain = chains.get(chainName);
-    const id = nextId++;
+    const id = opts?.id ?? nextId++;
     const chainState: ChainState = {
       id,
       chainName,
@@ -183,6 +201,7 @@ export default function (pi: ExtensionAPI) {
       steps: (chain?.steps ?? []).map((s) => ({ name: s.name, status: "pending" as const, output: "", elapsedMs: 0 })),
       startedAt: Date.now(),
       elapsed: 0,
+      ...(opts?.background ? { background: true } : {}),
     };
     running.set(id, chainState); render(); startTick();
 
@@ -224,6 +243,56 @@ export default function (pi: ExtensionAPI) {
     chainState.elapsed = Date.now() - chainState.startedAt;
     render(); stopTickIfIdle();
     return result;
+  };
+
+  // ── Group 3: background dispatch (in-parent) ──────────────────────────────────────────
+  const bgToast = (ctx: ExtensionContext, chainName: string, status: BgStatus, durationMs: number, preview: string): void => {
+    ctx.ui.notify(formatBgToast(chainName, status, durationMs, preview), status === "completed" ? "info" : "warning");
+  };
+
+  const onBgSettle = (
+    ctx: ExtensionContext,
+    id: number,
+    chainName: string,
+    result: ChainRunResult | undefined,
+    threw: unknown,
+  ): void => {
+    const entry = bgRegistry.get(id);
+    const stopped = entry?.stopped ?? false;
+    const cs = running.get(id);
+    const durationMs = cs?.elapsed ?? 0;
+    bgRegistry.delete(id);
+    running.delete(id); // background chain leaves the widget once settled (toast + log are the record)
+    render();
+    if (threw || !result) {
+      bgToast(ctx, chainName, "failed", durationMs, `unexpected: ${String(threw).slice(0, 200)}`);
+      pi.appendEntry("dispatch-log", { kind: "background-result", runId: id, chain: chainName, status: "failed", durationMs, error: String(threw).slice(0, 500) });
+      return;
+    }
+    const status = resolveBgStatus(stopped, result.ok);
+    const preview = (result.ok ? result.finalOutput : result.error?.output ?? "").slice(0, 600);
+    bgToast(ctx, chainName, status, durationMs, preview);
+    pi.appendEntry("dispatch-log", { kind: "background-result", runId: id, chain: chainName, status, durationMs, finalOutput: preview });
+  };
+
+  // Returns {runId} on accept, or {error:"cap"} when the concurrency cap is hit.
+  const runBackground = (
+    ctx: ExtensionContext,
+    chainName: string,
+    task: string,
+    cwd: string | undefined,
+    overrides: ChainOverrides | undefined,
+  ): { runId: number } | { error: "cap" } => {
+    const activeBg = [...running.values()].filter((c) => c.background && c.status === "running").length;
+    if (activeBg >= MAX_BACKGROUND) return { error: "cap" };
+    const id = nextId++;
+    const controller = new AbortController();
+    bgRegistry.set(id, { controller, stopped: false });
+    // controller.signal — NOT the tool-call signal (that is turn-coupled). Voided: returns immediately.
+    void runWithWidget(ctx, chainName, task, cwd, false, controller.signal, overrides, { background: true, id })
+      .then((result) => onBgSettle(ctx, id, chainName, result, undefined))
+      .catch((err) => onBgSettle(ctx, id, chainName, undefined, err));
+    return { runId: id };
   };
 
   pi.on("session_start", async (_e, ctx) => {
@@ -296,6 +365,20 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("stop", {
+    description: "Stop a background chain run: /stop <runId>",
+    handler: async (args, ctx) => {
+      const raw = (args ?? "").trim();
+      if (!raw || !/^\d+$/.test(raw)) { ctx.ui.notify("Usage: /stop <runId>  (runId from `run_chain({background:true})`)", "warning"); return; }
+      const id = Number(raw);
+      const entry = bgRegistry.get(id);
+      if (!entry) { ctx.ui.notify(`No active background run #${id}.`, "warning"); return; }
+      entry.stopped = true; // distinct from a natural failure
+      entry.controller.abort(); // → SIGTERM via the existing spawn path
+      ctx.ui.notify(`Stopping background run #${id}…`, "info");
+    },
+  });
+
   pi.registerTool({
     name: "run_chain",
     label: "Run Chain",
@@ -309,6 +392,7 @@ export default function (pi: ExtensionAPI) {
       cwd: Type.Optional(Type.String({ description: "Working directory for all chain steps. Defaults to the parent's cwd." })),
       returnAllSteps: Type.Optional(Type.Boolean({ description: "Return every step's output in the response text (default: false, only final step returned)." })),
       clarify: Type.Optional(Type.Boolean({ description: "If true, show a preview/edit overlay (task + per-step model/thinking/prompt) before running. TUI mode only; no-op otherwise. Esc/abort cancels with no spawn." })),
+      background: Type.Optional(Type.Boolean({ description: "If true, run in the background (fire-and-forget): returns immediately with a runId, shows in the widget, notifies on completion. TUI mode only. /stop <runId> cancels. Max " + MAX_BACKGROUND + " concurrent." })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       widgetCtx = ctx;
@@ -329,7 +413,7 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // Clarify-before-launch (TUI only). Esc/abort ⇒ cancelled, no spawn.
+      // Clarify BEFORE background (clarify is foreground-blocking; then background the resolved run).
       let overrides: ChainOverrides | undefined;
       if (params.clarify && ctx.mode === "tui") {
         const clarified = await clarifyChain(ctx, chainName, chain, params.task, signal);
@@ -340,6 +424,21 @@ export default function (pi: ExtensionAPI) {
           };
         }
         overrides = { ...(clarified.task ? { task: clarified.task } : {}), ...(clarified.steps ? { steps: clarified.steps } : {}) };
+      }
+
+      // Background (fire-and-forget). Returns immediately with a runId; completion → toast + dispatch-log.
+      if (params.background && ctx.mode === "tui") {
+        const bg = runBackground(ctx, chainName, params.task, params.cwd, overrides);
+        if ("error" in bg) {
+          return {
+            content: [{ type: "text" as const, text: `Background cap reached (${MAX_BACKGROUND} concurrent). Wait for one to finish or /stop one, then retry.` }],
+            details: { error: "background-cap", cap: MAX_BACKGROUND },
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `Backgrounded chain '${chainName}' — runId #${bg.runId}. You'll be notified when it completes. Cancel with: /stop ${bg.runId}` }],
+          details: { background: true, runId: bg.runId, chain: chainName },
+        };
       }
 
       const result = await runWithWidget(ctx, chainName, params.task, params.cwd, params.returnAllSteps, signal, overrides);
