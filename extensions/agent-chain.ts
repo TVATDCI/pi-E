@@ -2,12 +2,18 @@ import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-cod
 import { Type } from "typebox";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { loadChains, runChainByName, type Chain } from "./chain-runner.ts";
+import type { UsageStats, SpawnProgress } from "./orchestration-engine/spawn.ts";
 
 interface StepState {
   name: string;
   status: "pending" | "running" | "done" | "error";
   output: string;
   elapsedMs: number;
+  toolCount?: number;
+  modelFlag?: string;
+  thinkingLevel?: string;
+  currentChunk?: string;
+  usage?: UsageStats;
 }
 
 interface ChainState {
@@ -19,6 +25,23 @@ interface ChainState {
   elapsed: number;
 }
 
+const RUNNING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const MAX_WIDGET_JOBS = 6;
+const PROGRESSIVE_LIMIT = 3;
+
+const fmtTokens = (n?: number): string => {
+  if (!n) return "";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+};
+const fmtCost = (c?: number): string => {
+  // Hide when not reported (undefined/0/NaN) or when it would round to "$0.0000" — otherwise the
+  // widget shows a misleading "$0.0000" for providers that omit cost in streaming usage events.
+  if (!c || c < 0.00005) return "";
+  return `$${c.toFixed(c < 0.01 ? 4 : 3)}`;
+};
+
 export default function (pi: ExtensionAPI) {
   const chains = new Map<string, Chain>();
   let activeChainName = "";
@@ -26,6 +49,7 @@ export default function (pi: ExtensionAPI) {
   let nextId = 1;
   const running = new Map<number, ChainState>();
   let tick: ReturnType<typeof setInterval> | undefined;
+  let frameIdx = 0;
 
   const refreshChains = (ctx: ExtensionContext) => {
     const loaded = loadChains(ctx);
@@ -43,25 +67,71 @@ export default function (pi: ExtensionAPI) {
     widgetCtx.ui.setWidget("chain", (_tui, theme) => ({
       invalidate() {},
       render(width: number): string[] {
+        const glyph = (status: StepState["status"]): string =>
+          status === "running" ? RUNNING_FRAMES[frameIdx] : status === "done" ? "✓" : status === "error" ? "✗" : "○";
+        const stepColor = (status: StepState["status"]) =>
+          status === "running" ? "accent" : status === "done" ? "success" : status === "error" ? "error" : "muted";
+
         if (running.size === 0) {
           return activeChainName
             ? [theme.fg("muted", `chain: ${activeChainName}`)]
             : [theme.fg("muted", "chain: idle")];
         }
+
+        const chains = [...running.values()];
+
+        // Adaptive tier 1: narrow terminal OR too many concurrent jobs → single-line summary.
+        if (width < 60 || chains.length > MAX_WIDGET_JOBS) {
+          const runningN = chains.filter((c) => c.status === "running").length;
+          const cur = chains.find((c) => c.status === "running");
+          if (cur) {
+            const step = cur.steps.find((s) => s.status === "running");
+            const idx = step ? cur.steps.indexOf(step) + 1 : 0;
+            const stepPart = step && idx ? theme.fg("dim", ` · ${step.name} (${idx}/${cur.steps.length})`) : "";
+            return [truncateToWidth(
+              theme.fg("accent", `${glyph("running")} #${cur.id} ${cur.chainName}`) + stepPart + theme.fg("dim", ` · ${runningN} running`),
+              width,
+            )];
+          }
+          return [truncateToWidth(theme.fg("dim", `chain · ${runningN} running`), width)];
+        }
+
         const rows: string[] = [];
-        for (const c of running.values()) {
+        const show = chains.length > PROGRESSIVE_LIMIT ? chains.slice(0, PROGRESSIVE_LIMIT) : chains;
+        for (const c of show) {
           const color = c.status === "running" ? "accent" : c.status === "done" ? "success" : "error";
-          const icon = c.status === "running" ? "●" : c.status === "done" ? "✓" : "✗";
+          const chainCost = c.steps.reduce((a, s) => a + (s.usage?.cost ?? 0), 0);
           rows.push(truncateToWidth(
-            theme.fg(color, `${icon} #${c.id} ${c.chainName}`) +
-            theme.fg("dim", ` · ${Math.round(c.elapsed / 1000)}s`),
+            theme.fg(color, `${glyph(c.status)} #${c.id} ${c.chainName}`) +
+            theme.fg("dim", ` · ${Math.round(c.elapsed / 1000)}s`) +
+            (chainCost > 0 ? theme.fg("dim", ` · ${fmtCost(chainCost)}`) : ""),
             width,
           ));
           for (const s of c.steps) {
-            const sc = s.status === "running" ? "accent" : s.status === "done" ? "success" : s.status === "error" ? "error" : "muted";
-            const si = s.status === "running" ? "●" : s.status === "done" ? "✓" : s.status === "error" ? "✗" : "○";
-            rows.push(truncateToWidth(theme.fg(sc, `  ${si} ${s.name}`), width));
+            const meta: string[] = [];
+            if (s.modelFlag) {
+              const slash = s.modelFlag.indexOf("/");
+              meta.push(slash >= 0 ? s.modelFlag.slice(slash + 1) : s.modelFlag);
+            }
+            if (s.toolCount) meta.push(`${s.toolCount}🛠`);
+            const tok = fmtTokens(s.usage?.contextTokens);
+            if (tok) meta.push(`${tok} tok`);
+            const cost = fmtCost(s.usage?.cost);
+            if (cost) meta.push(cost);
+            const metaStr = meta.length ? ` · ${meta.join(" · ")}` : "";
+            rows.push(truncateToWidth(theme.fg(stepColor(s.status), `  ${glyph(s.status)} ${s.name}${metaStr}`), width));
+            if (s.status === "running" && s.currentChunk && s.currentChunk.trim()) {
+              rows.push(truncateToWidth(theme.fg("dim", `    ⎿ ${s.currentChunk.replace(/\s+/g, " ").trim()}`), width));
+            }
           }
+        }
+
+        // Adaptive tier 2: more than PROGRESSIVE_LIMIT jobs → collapse the rest into a count.
+        if (chains.length > PROGRESSIVE_LIMIT) {
+          const rest = chains.slice(PROGRESSIVE_LIMIT);
+          const rN = rest.filter((c) => c.status === "running").length;
+          const dN = rest.filter((c) => c.status === "done").length;
+          rows.push(theme.fg("dim", `+${rest.length} more (${rN} running, ${dN} done)`));
         }
         return rows;
       },
@@ -70,10 +140,14 @@ export default function (pi: ExtensionAPI) {
 
   const startTick = () => {
     if (tick) return;
+    // 180ms: drives both the elapsed timer and the braille spinner frame. One tick instead of
+    // two (1A+1C) — pi coalesces renders; stopped on idle via stopTickIfIdle. (Was 120ms; slowed
+    // per operator feedback — tune here if needed.)
     tick = setInterval(() => {
       for (const c of running.values()) if (c.status === "running") c.elapsed = Date.now() - c.startedAt;
+      frameIdx = (frameIdx + 1) % RUNNING_FRAMES.length;
       render();
-    }, 1000);
+    }, 180);
   };
   const stopTickIfIdle = () => {
     if (tick && ![...running.values()].some((c) => c.status === "running")) {
@@ -143,7 +217,7 @@ export default function (pi: ExtensionAPI) {
       cwd: Type.Optional(Type.String({ description: "Working directory for all chain steps. Defaults to the parent's cwd." })),
       returnAllSteps: Type.Optional(Type.Boolean({ description: "Return every step's output in the response text (default: false, only final step returned)." })),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       widgetCtx = ctx;
       refreshChains(ctx);
       const chainName = params.chain ?? activeChainName;
@@ -188,9 +262,23 @@ export default function (pi: ExtensionAPI) {
             s.status = r.code === 0 ? "done" : "error";
             s.output = r.output;
             s.elapsedMs = r.elapsedMs;
+            s.toolCount = r.toolCount;
+            s.modelFlag = r.modelFlag;
+            s.thinkingLevel = r.thinkingLevel;
+            if (r.usage) s.usage = r.usage;
             render();
           }
         },
+        (name: string, p: SpawnProgress) => {
+          // State-only update — no render(). The 120ms tick refreshes the widget, avoiding
+          // per-delta render spam.
+          const s = stepStatusMap.get(name);
+          if (!s) return;
+          s.toolCount = p.toolCount;
+          if (p.chunk) s.currentChunk = p.chunk;
+          if (p.modelFlag) s.modelFlag = p.modelFlag;
+        },
+        signal,
       );
 
       chainState.status = result.ok ? "done" : "error";

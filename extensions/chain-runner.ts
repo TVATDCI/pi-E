@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
-import { resolveAndSpawn } from "./orchestration-engine/spawn.ts";
+import { resolveAndSpawn, type UsageStats, type SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { TaskCategory } from "./orchestration-engine/tier-map.ts";
 
 export interface ChainStep {
@@ -29,6 +29,10 @@ export interface ChainStepResult {
   output: string;
   code: number;
   elapsedMs: number;
+  toolCount?: number;
+  modelFlag?: string;
+  thinkingLevel?: string;
+  usage?: UsageStats;
 }
 
 export interface ChainRunResult {
@@ -108,6 +112,8 @@ export async function runChainByName(
   returnAllSteps?: boolean,
   onStepStart?: (name: string) => void,
   onStepEnd?: (name: string, result: ChainStepResult) => void,
+  onStepProgress?: (name: string, p: SpawnProgress) => void,
+  signal?: AbortSignal,
 ): Promise<ChainRunResult> {
   const chains = loadChains(ctx);
   const chain = chains.get(chainName);
@@ -143,12 +149,25 @@ export async function runChainByName(
       .replace(/\$ORIGINAL/g, original);
 
     onStepStart?.(step.name);
-    const result = await resolveAndSpawn(pi, prompt, category, step.agent, cwd, ctx);
+    const result = await resolveAndSpawn(
+      pi,
+      prompt,
+      category,
+      step.agent,
+      cwd,
+      ctx,
+      onStepProgress ? (p) => onStepProgress(step.name, p) : undefined,
+      signal,
+    );
     const stepResult: ChainStepResult = {
       name: step.name,
       output: result.output,
       code: result.code,
       elapsedMs: result.elapsedMs,
+      toolCount: result.toolCount,
+      modelFlag: result.modelFlag,
+      thinkingLevel: result.thinkingLevel,
+      ...(result.usage ? { usage: result.usage } : {}),
     };
     onStepEnd?.(step.name, stepResult);
     stepResults.push(stepResult);

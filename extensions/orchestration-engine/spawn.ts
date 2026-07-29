@@ -116,6 +116,7 @@ export function loadPersona(name: string): Persona | undefined {
 export interface SpawnProgress {
   chunk: string;
   toolCount: number;
+  modelFlag?: string;
 }
 
 export function spawnSub(
@@ -294,7 +295,11 @@ export async function resolveAndSpawn(
     }
   }
 
-  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, onProgress, signal);
+  // Inject the resolved modelFlag into every progress emission so the parent widget can show
+  // the active model during a run (reads the live `modelFlag` let, so a fallback/downshift is
+  // reflected on the retried spawn). spawnSub itself stays unchanged.
+  const progressWithModel = onProgress ? (p: SpawnProgress) => onProgress({ ...p, modelFlag }) : undefined;
+  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal);
 
   // Cross-provider fallback when the primary model silently returns empty (e.g., quota exhausted).
   if (output.length === 0 && tierDefault.fallbackFlag && tierDefault.fallbackFlag !== modelFlag && isAvail(tierDefault.fallbackFlag)) {
@@ -305,7 +310,7 @@ export async function resolveAndSpawn(
     source = "downshift-exhausted";
     rationale = `${fbDownshiftedFrom} returned empty (likely quota exhausted) → retried with ${fb}`;
     if (ctx.hasUI) ctx.ui.notify(`⚠ ${fbDownshiftedFrom} exhausted → retried with ${fb}`, "info");
-    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, onProgress, signal);
+    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal);
     output = fbResult.output;
     code = fbResult.code;
     elapsedMs = fbResult.elapsedMs;
