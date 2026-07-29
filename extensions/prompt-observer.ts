@@ -13,7 +13,7 @@
 // (v1.2: live-verified failure via `pi_extension_module_isolation`).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { hashPrompt, isKnownGood } from "./prompt-hash.ts";
+import { hashPrompt, isKnownGood } from "./lib/prompt-hash.ts";
 
 export default function (pi: ExtensionAPI) {
   let lastHash = "";
@@ -45,7 +45,7 @@ export default function (pi: ExtensionAPI) {
     if (drift && ctx.hasUI) {
       ctx.ui.notify(
         `⚠ prompt drift: composed-prompt hash ${hash} not in known-good set — ` +
-          `intended? (add to KNOWN_GOOD_HASHES in prompt-hash.ts) or investigate. See /routing-stats.`,
+          `intended? (add to KNOWN_GOOD_HASHES in lib/prompt-hash.ts) or investigate. See /routing-stats.`,
         "warning",
       );
     }

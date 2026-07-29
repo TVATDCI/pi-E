@@ -1,8 +1,8 @@
-// D1 observer golden snapshot test. Run: node --experimental-strip-types prompt-hash.test.ts
+// D1 observer golden snapshot test. Run: node --experimental-strip-types tests/prompt-hash.test.ts
 // The golden: a fixed canonical composed prompt → a fixed hash. Any change to the composed
 // prompt (a block added/removed/reordered/edited) changes the hash → drift detected.
 import { createHash } from "node:crypto";
-import { hashPrompt, isKnownGood, KNOWN_GOOD_HASHES } from "./prompt-hash.ts";
+import { hashPrompt, isKnownGood, KNOWN_GOOD_HASHES } from "../lib/prompt-hash.ts";
 
 let pass = 0,
   fail = 0;

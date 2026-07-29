@@ -1,7 +1,7 @@
 // D6 adapter tests + growth-policy LOC-budget enforcement.
-// Run: node --experimental-strip-types upstream-adapter.test.ts
+// Run: node --experimental-strip-types tests/upstream-adapter.test.ts
 import { readFileSync } from "node:fs";
-import { isHumanTurn, probeDialogApi, ADAPTER_FORK_THRESHOLDS } from "./upstream-adapter.ts";
+import { isHumanTurn, probeDialogApi, ADAPTER_FORK_THRESHOLDS } from "../lib/upstream-adapter.ts";
 
 let pass = 0,
   fail = 0;
@@ -42,7 +42,7 @@ check("unknown source is not human", isHumanTurn({ source: "rpc" }) === false);
 // Breaching the budget fails the build → forces the fork conversation rather than
 // silent growth into a fork.
 {
-  const lines = readFileSync(new URL("./upstream-adapter.ts", import.meta.url), "utf-8")
+  const lines = readFileSync(new URL("../lib/upstream-adapter.ts", import.meta.url), "utf-8")
     .split("\n")
     .filter((l) => l.trim() !== "" && !l.trim().startsWith("//")).length;
   check(

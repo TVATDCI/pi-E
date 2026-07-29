@@ -458,7 +458,7 @@ export default function (pi: ExtensionAPI) {
       const driftSection = uniqueDrift.length > 0
         ? `\n\n▌ prompt drift (${uniqueDrift.length} unknown hash${uniqueDrift.length === 1 ? "" : "es"}) — composed prompt changed:\n` +
           uniqueDrift.map((h) => `  ⚠ ${h}`).join("\n") +
-          `\n  intended? add to KNOWN_GOOD_HASHES in extensions/prompt-hash.ts; otherwise investigate.`
+          `\n  intended? add to KNOWN_GOOD_HASHES in extensions/lib/prompt-hash.ts; otherwise investigate.`
         : "";
       const table = stats.lines.join("\n") + driftSection + `\n\n(${scope})`;
       const totalFlags = stats.flags.length + uniqueDrift.length;
