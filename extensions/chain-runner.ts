@@ -3,14 +3,25 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
-import { resolveAndSpawn, type UsageStats, type SpawnProgress } from "./orchestration-engine/spawn.ts";
+import { resolveAndSpawn, loadPersona, type UsageStats, type SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { TaskCategory } from "./orchestration-engine/tier-map.ts";
+import {
+  coerceAcceptance,
+  resolveAcceptance,
+  formatAcceptancePrompt,
+  evaluateAcceptance,
+  stripAcceptanceReport,
+  inferDefaultLevel,
+  type AcceptanceInput,
+  type StepAcceptance,
+} from "./acceptance.ts";
 
 export interface ChainStep {
   name: string;
   agent: string;
   category?: TaskCategory;
   prompt: string;
+  acceptance?: AcceptanceInput;
 }
 
 export interface Chain {
@@ -33,6 +44,7 @@ export interface ChainStepResult {
   modelFlag?: string;
   thinkingLevel?: string;
   usage?: UsageStats;
+  acceptance?: StepAcceptance;
 }
 
 export interface ChainRunResult {
@@ -75,12 +87,17 @@ function mergeChains(global: ChainsFile | null, project: ChainsFile | null): Cha
 function normalizeChainsFile(raw: ChainsFile): ChainsFile {
   const chains: Record<string, Chain> = {};
   for (const [name, chain] of Object.entries(raw.chains ?? {})) {
-    const steps = (chain.steps ?? []).map((s) => ({
-      name: String((s as unknown as Record<string, unknown>).name ?? ""),
-      agent: String((s as unknown as Record<string, unknown>).agent ?? ""),
-      category: (s as unknown as Record<string, unknown>).category as TaskCategory | undefined,
-      prompt: String((s as unknown as Record<string, unknown>).prompt ?? ""),
-    }));
+    const steps = (chain.steps ?? []).map((s) => {
+      const sr = s as unknown as Record<string, unknown>;
+      const acceptance = coerceAcceptance(sr.acceptance);
+      return {
+        name: String(sr.name ?? ""),
+        agent: String(sr.agent ?? ""),
+        category: sr.category as TaskCategory | undefined,
+        prompt: String(sr.prompt ?? ""),
+        ...(acceptance ? { acceptance } : {}),
+      };
+    });
     chains[name] = {
       description: String(chain.description ?? ""),
       default_category: chain.default_category as TaskCategory | undefined,
@@ -144,9 +161,11 @@ export async function runChainByName(
   for (let i = 0; i < chain.steps.length; i++) {
     const step = chain.steps[i];
     const category = step.category ?? chain.default_category ?? "unspecified-low";
-    const prompt = step.prompt
-      .replace(/\$INPUT/g, input)
-      .replace(/\$ORIGINAL/g, original);
+    const persona = step.agent ? loadPersona(step.agent) : undefined;
+    const resolvedAcceptance = resolveAcceptance(step.acceptance, inferDefaultLevel(persona?.tools));
+    const prompt =
+      step.prompt.replace(/\$INPUT/g, input).replace(/\$ORIGINAL/g, original) +
+      (resolvedAcceptance ? formatAcceptancePrompt(resolvedAcceptance) : "");
 
     onStepStart?.(step.name);
     const result = await resolveAndSpawn(
@@ -159,26 +178,55 @@ export async function runChainByName(
       onStepProgress ? (p) => onStepProgress(step.name, p) : undefined,
       signal,
     );
+
+    let stepCode = result.code;
+    let stepAcceptance: StepAcceptance | undefined;
+    if (resolvedAcceptance && result.code === 0) {
+      stepAcceptance = await evaluateAcceptance(resolvedAcceptance, result.output, cwd ?? ctx.cwd, signal);
+      if (stepAcceptance.failStep) stepCode = 1;
+      // Persist provenance to dispatch-log so the badge survives widget teardown (ABSORPTION-PLAN §A).
+      pi.appendEntry("dispatch-log", {
+        kind: "acceptance",
+        chain: chainName,
+        step: step.name,
+        agent: step.agent,
+        level: stepAcceptance.level,
+        provenance: stepAcceptance.provenance,
+        inferred: stepAcceptance.inferred,
+        failStep: stepAcceptance.failStep,
+        ...(stepAcceptance.verifyResults ? { verifyResults: stepAcceptance.verifyResults } : {}),
+      });
+    }
+
+    // Strip the fenced acceptance-report from the output so it doesn't propagate as noise into
+    // the next step's $INPUT (Oracle A+C ruling). Gated on resolvedAcceptance so a level:none
+    // step's literal output is never mangled.
+    if (resolvedAcceptance) result.output = stripAcceptanceReport(result.output);
+
     const stepResult: ChainStepResult = {
       name: step.name,
       output: result.output,
-      code: result.code,
+      code: stepCode,
       elapsedMs: result.elapsedMs,
       toolCount: result.toolCount,
       modelFlag: result.modelFlag,
       thinkingLevel: result.thinkingLevel,
       ...(result.usage ? { usage: result.usage } : {}),
+      ...(stepAcceptance ? { acceptance: stepAcceptance } : {}),
     };
     onStepEnd?.(step.name, stepResult);
     stepResults.push(stepResult);
 
-    if (result.code !== 0) {
+    if (stepCode !== 0) {
+      const gateNote = stepAcceptance?.failStep
+        ? `\n[acceptance gate failed: provenance=${stepAcceptance.provenance} (requested ${stepAcceptance.level})]`
+        : "";
       return {
         ok: false,
         chainName,
         finalOutput,
         stepResults,
-        error: { step: step.name, output: result.output },
+        error: { step: step.name, output: result.output + gateNote },
       };
     }
 

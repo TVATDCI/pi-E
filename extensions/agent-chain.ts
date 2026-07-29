@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { loadChains, runChainByName, type Chain } from "./chain-runner.ts";
 import type { UsageStats, SpawnProgress } from "./orchestration-engine/spawn.ts";
+import type { StepAcceptance } from "./acceptance.ts";
 
 interface StepState {
   name: string;
@@ -14,6 +15,7 @@ interface StepState {
   thinkingLevel?: string;
   currentChunk?: string;
   usage?: UsageStats;
+  acceptance?: StepAcceptance;
 }
 
 interface ChainState {
@@ -71,6 +73,8 @@ export default function (pi: ExtensionAPI) {
           status === "running" ? RUNNING_FRAMES[frameIdx] : status === "done" ? "✓" : status === "error" ? "✗" : "○";
         const stepColor = (status: StepState["status"]) =>
           status === "running" ? "accent" : status === "done" ? "success" : status === "error" ? "error" : "muted";
+        const provColor = (p: StepAcceptance["provenance"]) =>
+          p === "verified" || p === "checked" ? "success" : p === "rejected" ? "error" : p === "claimed" ? "warning" : "dim";
 
         if (running.size === 0) {
           return activeChainName
@@ -119,7 +123,10 @@ export default function (pi: ExtensionAPI) {
             const cost = fmtCost(s.usage?.cost);
             if (cost) meta.push(cost);
             const metaStr = meta.length ? ` · ${meta.join(" · ")}` : "";
-            rows.push(truncateToWidth(theme.fg(stepColor(s.status), `  ${glyph(s.status)} ${s.name}${metaStr}`), width));
+            const provTag = s.acceptance
+              ? theme.fg(provColor(s.acceptance.provenance), ` · ${s.acceptance.provenance}`)
+              : "";
+            rows.push(truncateToWidth(theme.fg(stepColor(s.status), `  ${glyph(s.status)} ${s.name}${metaStr}`) + provTag, width));
             if (s.status === "running" && s.currentChunk && s.currentChunk.trim()) {
               rows.push(truncateToWidth(theme.fg("dim", `    ⎿ ${s.currentChunk.replace(/\s+/g, " ").trim()}`), width));
             }
@@ -266,6 +273,7 @@ export default function (pi: ExtensionAPI) {
             s.modelFlag = r.modelFlag;
             s.thinkingLevel = r.thinkingLevel;
             if (r.usage) s.usage = r.usage;
+            if (r.acceptance) s.acceptance = r.acceptance;
             render();
           }
         },
