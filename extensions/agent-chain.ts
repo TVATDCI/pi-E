@@ -1,7 +1,8 @@
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { loadChains, runChainByName, type Chain } from "./chain-runner.ts";
+import { loadChains, runChainByName, type Chain, type ChainOverrides } from "./chain-runner.ts";
+import { clarifyChain } from "./chain-clarify.ts";
 import type { UsageStats, SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { StepAcceptance } from "./acceptance.ts";
 
@@ -162,6 +163,69 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
+  // Shared widget+run core used by both the run_chain tool and the /chain-clarify slash command.
+  const runWithWidget = async (
+    ctx: ExtensionContext,
+    chainName: string,
+    task: string,
+    cwd: string | undefined,
+    returnAllSteps: boolean | undefined,
+    signal: AbortSignal | undefined,
+    overrides: ChainOverrides | undefined,
+  ) => {
+    widgetCtx = ctx;
+    const chain = chains.get(chainName);
+    const id = nextId++;
+    const chainState: ChainState = {
+      id,
+      chainName,
+      status: "running",
+      steps: (chain?.steps ?? []).map((s) => ({ name: s.name, status: "pending" as const, output: "", elapsedMs: 0 })),
+      startedAt: Date.now(),
+      elapsed: 0,
+    };
+    running.set(id, chainState); render(); startTick();
+
+    const stepStatusMap = new Map<string, StepState>();
+    for (const s of chainState.steps) stepStatusMap.set(s.name, s);
+
+    const result = await runChainByName(
+      pi, ctx, chainName, task, cwd, returnAllSteps,
+      (name) => {
+        const s = stepStatusMap.get(name);
+        if (s) { s.status = "running"; render(); }
+      },
+      (name, r) => {
+        const s = stepStatusMap.get(name);
+        if (s) {
+          s.status = r.code === 0 ? "done" : "error";
+          s.output = r.output;
+          s.elapsedMs = r.elapsedMs;
+          s.toolCount = r.toolCount;
+          s.modelFlag = r.modelFlag;
+          s.thinkingLevel = r.thinkingLevel;
+          if (r.usage) s.usage = r.usage;
+          if (r.acceptance) s.acceptance = r.acceptance;
+          render();
+        }
+      },
+      (name: string, p: SpawnProgress) => {
+        const s = stepStatusMap.get(name);
+        if (!s) return;
+        s.toolCount = p.toolCount;
+        if (p.chunk) s.currentChunk = p.chunk;
+        if (p.modelFlag) s.modelFlag = p.modelFlag;
+      },
+      signal,
+      overrides,
+    );
+
+    chainState.status = result.ok ? "done" : "error";
+    chainState.elapsed = Date.now() - chainState.startedAt;
+    render(); stopTickIfIdle();
+    return result;
+  };
+
   pi.on("session_start", async (_e, ctx) => {
     widgetCtx = ctx;
     refreshChains(ctx);
@@ -211,6 +275,27 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("chain-clarify", {
+    description: "Clarify-then-run a chain (TUI): /chain-clarify <chain> <task...>",
+    handler: async (args, ctx) => {
+      widgetCtx = ctx;
+      refreshChains(ctx);
+      if (ctx.mode !== "tui") { ctx.ui.notify("chain-clarify requires TUI mode.", "warning"); return; }
+      const parts = (args ?? "").trim().split(/\s+/).filter(Boolean);
+      const chainName = parts[0] ?? activeChainName;
+      const task = parts.slice(1).join(" ");
+      const chain = chains.get(chainName);
+      if (!chain) { ctx.ui.notify(`Chain '${chainName}' not found. Available: ${[...chains.keys()].join(", ") || "(none)"}`, "warning"); return; }
+      if (!task) { ctx.ui.notify("Usage: /chain-clarify <chain> <task...>", "warning"); return; }
+      if (chain.steps.length === 0) { ctx.ui.notify(`Chain '${chainName}' has no steps.`, "warning"); return; }
+      const clarified = await clarifyChain(ctx, chainName, chain, task);
+      if (!clarified.confirmed) { ctx.ui.notify("Cancelled.", "info"); return; }
+      const overrides: ChainOverrides = { ...(clarified.task ? { task: clarified.task } : {}), ...(clarified.steps ? { steps: clarified.steps } : {}) };
+      const result = await runWithWidget(ctx, chainName, task, undefined, false, undefined, overrides);
+      ctx.ui.notify(result.ok ? `[chain: ${chainName}] done` : `[chain: ${chainName}] failed at '${result.error?.step ?? "?"}'`, result.ok ? "info" : "error");
+    },
+  });
+
   pi.registerTool({
     name: "run_chain",
     label: "Run Chain",
@@ -223,6 +308,7 @@ export default function (pi: ExtensionAPI) {
       chain: Type.Optional(Type.String({ description: "Chain name from agent-chain.yaml. Uses active chain if omitted." })),
       cwd: Type.Optional(Type.String({ description: "Working directory for all chain steps. Defaults to the parent's cwd." })),
       returnAllSteps: Type.Optional(Type.Boolean({ description: "Return every step's output in the response text (default: false, only final step returned)." })),
+      clarify: Type.Optional(Type.Boolean({ description: "If true, show a preview/edit overlay (task + per-step model/thinking/prompt) before running. TUI mode only; no-op otherwise. Esc/abort cancels with no spawn." })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       widgetCtx = ctx;
@@ -243,55 +329,20 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const id = nextId++;
-      const chainState: ChainState = {
-        id,
-        chainName,
-        status: "running",
-        steps: chain.steps.map((s) => ({ name: s.name, status: "pending", output: "", elapsedMs: 0 })),
-        startedAt: Date.now(),
-        elapsed: 0,
-      };
-      running.set(id, chainState); render(); startTick();
+      // Clarify-before-launch (TUI only). Esc/abort ⇒ cancelled, no spawn.
+      let overrides: ChainOverrides | undefined;
+      if (params.clarify && ctx.mode === "tui") {
+        const clarified = await clarifyChain(ctx, chainName, chain, params.task, signal);
+        if (!clarified.confirmed) {
+          return {
+            content: [{ type: "text" as const, text: `Chain '${chainName}' cancelled in clarify (no steps ran).` }],
+            details: { cancelled: true, chain: chainName },
+          };
+        }
+        overrides = { ...(clarified.task ? { task: clarified.task } : {}), ...(clarified.steps ? { steps: clarified.steps } : {}) };
+      }
 
-      const stepStatusMap = new Map<string, StepState>();
-      for (const s of chainState.steps) stepStatusMap.set(s.name, s);
-
-      const result = await runChainByName(
-        pi, ctx, chainName, params.task, params.cwd, params.returnAllSteps,
-        (name) => {
-          const s = stepStatusMap.get(name);
-          if (s) { s.status = "running"; render(); }
-        },
-        (name, r) => {
-          const s = stepStatusMap.get(name);
-          if (s) {
-            s.status = r.code === 0 ? "done" : "error";
-            s.output = r.output;
-            s.elapsedMs = r.elapsedMs;
-            s.toolCount = r.toolCount;
-            s.modelFlag = r.modelFlag;
-            s.thinkingLevel = r.thinkingLevel;
-            if (r.usage) s.usage = r.usage;
-            if (r.acceptance) s.acceptance = r.acceptance;
-            render();
-          }
-        },
-        (name: string, p: SpawnProgress) => {
-          // State-only update — no render(). The 120ms tick refreshes the widget, avoiding
-          // per-delta render spam.
-          const s = stepStatusMap.get(name);
-          if (!s) return;
-          s.toolCount = p.toolCount;
-          if (p.chunk) s.currentChunk = p.chunk;
-          if (p.modelFlag) s.modelFlag = p.modelFlag;
-        },
-        signal,
-      );
-
-      chainState.status = result.ok ? "done" : "error";
-      chainState.elapsed = Date.now() - chainState.startedAt;
-      render(); stopTickIfIdle();
+      const result = await runWithWidget(ctx, chainName, params.task, params.cwd, params.returnAllSteps, signal, overrides);
 
       if (!result.ok) {
         const trimmed = result.error?.output && result.error.output.length > 3000

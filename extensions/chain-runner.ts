@@ -55,6 +55,17 @@ export interface ChainRunResult {
   error?: { step: string; output: string };
 }
 
+/** Per-step overrides from the clarify-before-launch TUI. */
+export interface ChainStepOverride {
+  model?: string;
+  thinking?: string;
+  prompt?: string;
+}
+export interface ChainOverrides {
+  task?: string;
+  steps?: Record<string, ChainStepOverride>;
+}
+
 const GLOBAL_CHAINS_PATH = join(os.homedir(), ".pi", "agent", "agent-chain.yaml");
 
 function loadChainsLayer(filepath: string): ChainsFile | null {
@@ -131,6 +142,7 @@ export async function runChainByName(
   onStepEnd?: (name: string, result: ChainStepResult) => void,
   onStepProgress?: (name: string, p: SpawnProgress) => void,
   signal?: AbortSignal,
+  overrides?: ChainOverrides,
 ): Promise<ChainRunResult> {
   const chains = loadChains(ctx);
   const chain = chains.get(chainName);
@@ -153,7 +165,7 @@ export async function runChainByName(
     };
   }
 
-  const original = task;
+  const original = overrides?.task ?? task;
   let input = original;
   const stepResults: ChainStepResult[] = [];
   let finalOutput = "";
@@ -163,8 +175,10 @@ export async function runChainByName(
     const category = step.category ?? chain.default_category ?? "unspecified-low";
     const persona = step.agent ? loadPersona(step.agent) : undefined;
     const resolvedAcceptance = resolveAcceptance(step.acceptance, inferDefaultLevel(persona?.tools));
+    const stepOverride = overrides?.steps?.[step.name];
+    const stepPrompt = stepOverride?.prompt ?? step.prompt;
     const prompt =
-      step.prompt.replace(/\$INPUT/g, input).replace(/\$ORIGINAL/g, original) +
+      stepPrompt.replace(/\$INPUT/g, input).replace(/\$ORIGINAL/g, original) +
       (resolvedAcceptance ? formatAcceptancePrompt(resolvedAcceptance) : "");
 
     onStepStart?.(step.name);
@@ -177,6 +191,9 @@ export async function runChainByName(
       ctx,
       onStepProgress ? (p) => onStepProgress(step.name, p) : undefined,
       signal,
+      undefined,
+      stepOverride?.model,
+      stepOverride?.thinking,
     );
 
     let stepCode = result.code;

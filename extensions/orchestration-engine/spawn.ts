@@ -244,6 +244,8 @@ export async function resolveAndSpawn(
   onProgress?: (p: SpawnProgress) => void,
   signal?: AbortSignal,
   agentSource?: string,
+  modelOverride?: string,
+  thinkingOverride?: string,
 ): Promise<SpawnResult> {
   const persona = agent ? loadPersona(agent) : undefined;
   if (agent && !persona) {
@@ -259,12 +261,16 @@ export async function resolveAndSpawn(
   }
 
   const tierDefault = resolveModel(category, ctx.modelRegistry);
-  let modelFlag = persona?.model ?? tierDefault.modelFlag;
-  let thinkingLevel = tierDefault.thinkingLevel;
-  let source: string = persona?.model ? "persona-override" : (agentSource ?? "tier-map");
-  let rationale = persona?.model
-    ? `persona override (thinking ${tierDefault.thinkingLevel ?? "off"} from tier-map)`
-    : tierDefault.rationale;
+  // clarify-override (interactive TUI) takes precedence over persona, then tier-map. Inherits the
+  // isAvail + FALLBACK downshift below, so an unavailable override downshifts instead of failing.
+  let modelFlag = modelOverride ?? persona?.model ?? tierDefault.modelFlag;
+  let thinkingLevel = thinkingOverride ?? tierDefault.thinkingLevel;
+  let source: string = modelOverride ? "clarify-override" : persona?.model ? "persona-override" : (agentSource ?? "tier-map");
+  let rationale = modelOverride
+    ? `clarify override (thinking ${thinkingLevel ?? "off"})`
+    : persona?.model
+      ? `persona override (thinking ${tierDefault.thinkingLevel ?? "off"} from tier-map)`
+      : tierDefault.rationale;
 
   const available = ctx.modelRegistry.getAvailable();
   const isAvail = (mf: string) => {
