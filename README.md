@@ -34,6 +34,7 @@ run_chain({ …, clarify: true })    # preview/edit overlay first (task + per-st
 run_chain({ …, background: true }) # fire-and-forget: returns now, toast on completion (/stop <runId>)
 /chain-clarify <chain> <task…>     # clarify-then-run, direct (no LLM flag needed)
 /stop <runId>              # stop a background chain run
+/chain-status              # fleet view: all active + recent chain runs at a glance
 /tiers                     # see the 10 categories × model × REAL availability
 /routing-stats             # observability: aggregate dispatch-log across this project
 /persona-forge evolve <target>  # generate + momus-review a persona variant
@@ -109,7 +110,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 | `agent-chain.ts`                                                           | 463 | `run_chain` (sequential pipelines + `clarify`/`background` params) + `/chain` + `/chain-list` + `/chain-clarify` + `/stop` + **chain widget** (rich per-step line, adaptive tiers, spinner) + background dispatch (registry, cap, toasts) |
 | `chain-clarify.ts`                                                         | 394 | Clarify-before-launch overlay (`ctx.ui.custom`): preview/edit task + per-step model/thinking/prompt. Pickers are internal sub-modes; prompt edit via exit-reopen `ctx.ui.editor` |
 | `acceptance.ts`                                                            | 429 | Acceptance gates: provenance ladder (claimed→attested→checked→verified) + **enum verify table** (`test\|typecheck\|lint\|build`→argv, `shell:false`, no YAML env/cwd). badge-only `auto`; explicit can fail |
-| `background-helpers.ts`                                                    |  19 | Pure background helpers (resolveBgStatus /stop-vs-fail + toast format); isolated for bare-node testing |
+| `background-helpers.ts`                                                    |  85 | Pure helpers: resolveBgStatus/formatBgToast (background dispatch) + formatFleet (fleet view); isolated for bare-node testing |
 | `persona-forge.ts`                                                         | 150 | `evolve` + `approve` + `list` + `reject` persona variants with provenance; pending personas persisted to disk                                           |
 | `statusline-encom.ts`                                                      | 877 | Encom statusline footer: segment registry, config/presets/customItems, 10-style separators, streaming ticker                                                                                                          |
 | `mini-task-tracker.ts`                                                     | 229 | `task` tool + widget; non-mutating tools (read/grep/find/ls/`memory_remember`) exempt from the task gate                                                |
@@ -250,6 +251,8 @@ Sequential agent pipelines from `agent-chain.yaml` (deny-additive: projects ADD 
 **Clarify-before-launch** (`run_chain({clarify:true})` or `/chain-clarify <chain> <task>`) — a `ctx.ui.custom` overlay to preview/edit the task + per-step model/thinking/prompt before burning tokens. Pickers are internal sub-modes (never a nested `custom()`); prompt/task edit uses `ctx.ui.editor()` via an exit-reopen pattern (cleaner than the `setHidden` choreography, which didn't reliably hide the overlay). Esc/abort cancels with no spawn.
 
 **Background dispatch** (`run_chain({background:true})`, Group 3 Tier A) — fire-and-forget: returns immediately with a `runId`; runs concurrently in the parent's event loop; the widget shows it as a compact `⟳ bg: N running` line (**excluded from `MAX_WIDGET_JOBS`** so it doesn't collapse the foreground). Completion → toast (✓/✗/■) + `dispatch-log` `background-result`. **In-parent** (not a detached runner — that machinery is cross-process-survival only; completion = promise resolution). `/stop <runId>` aborts a per-job `AbortController` (registry-keyed; decoupled from the turn-coupled tool signal) → SIGTERM → `■ stopped` (distinct from `✗ failed`). Concurrency cap **3**.
+
+**Fleet view** (`/chain-status`) — a slash command that dumps all active + recent chain runs (foreground + background) from the `running` map into a scannable `notify`: `⟳ #1 scout-twice [bg] · 45s · step 1/2: scout · glm-4.7 · 3🛠 · 4.2k tok`. Ordered running-first/newest; `[bg]` marks background jobs (also the `/stop`-eligible indicator). Retention cap: oldest done/error foreground chains evicted beyond 5 (bounds the `StepState.output` leak). Background *results* live in the toast + `dispatch-log` (not in `running` post-settle).
 
 ---
 
