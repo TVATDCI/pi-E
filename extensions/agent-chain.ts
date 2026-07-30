@@ -5,7 +5,7 @@ import { loadChains, runChainByName, type Chain, type ChainOverrides, type Chain
 import { clarifyChain } from "./chain-clarify.ts";
 import type { UsageStats, SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { StepAcceptance } from "./acceptance.ts";
-import { resolveBgStatus, formatBgToast, type BgStatus } from "./background-helpers.ts";
+import { resolveBgStatus, formatBgToast, formatFleet, type BgStatus } from "./background-helpers.ts";
 
 interface StepState {
   name: string;
@@ -241,6 +241,11 @@ export default function (pi: ExtensionAPI) {
 
     chainState.status = result.ok ? "done" : "error";
     chainState.elapsed = Date.now() - chainState.startedAt;
+    // Retention cap: evict oldest done/error foreground chains beyond 5 (bounds the StepState.output leak).
+    if (chainState.status !== "running") {
+      const settled = [...running.entries()].filter(([, c]) => c.status !== "running" && !c.background);
+      if (settled.length > 5) { settled.sort((a, b) => a[1].startedAt - b[1].startedAt); for (let i = 0; i < settled.length - 5; i++) running.delete(settled[i]![0]); }
+    }
     render(); stopTickIfIdle();
     return result;
   };
@@ -362,6 +367,15 @@ export default function (pi: ExtensionAPI) {
       const overrides: ChainOverrides = { ...(clarified.task ? { task: clarified.task } : {}), ...(clarified.steps ? { steps: clarified.steps } : {}) };
       const result = await runWithWidget(ctx, chainName, task, undefined, false, undefined, overrides);
       ctx.ui.notify(result.ok ? `[chain: ${chainName}] done` : `[chain: ${chainName}] failed at '${result.error?.step ?? "?"}'`, result.ok ? "info" : "error");
+    },
+  });
+
+  pi.registerCommand("chain-status", {
+    description: "Show all active + recent chain runs (foreground + background)",
+    handler: async (_args, ctx) => {
+      widgetCtx = ctx;
+      const lines = formatFleet([...running.values()]);
+      ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 
