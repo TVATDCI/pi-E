@@ -43,7 +43,8 @@ export function hashPrompt(prompt: string): string {
  * STABLE composition legitimately changes (AGENTS.md edit, <purpose> change, a section added).
  */
 export const KNOWN_GOOD_HASHES: Set<string> = new Set<string>([
-  "c2bfe1b57f74616f", // stable-parts (post memory+bridge strip), captured 2026-07-30
+  "c2bfe1b57f74616f", // stable-parts (post memory+bridge strip), pi 0.82.1, captured 2026-07-30
+  "7f21df25f4181676", // stable-parts, pi 0.83.0 (base prompt changed in the update), captured 2026-07-30
 ]);
 
 export function isKnownGood(hash: string): boolean {
