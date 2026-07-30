@@ -13,7 +13,7 @@ This is **not** a showcase. It's a single-operator production config: narrow and
 | **Pi version**         | `0.82.1` (npm: `@earendil-works/pi-coding-agent`)                               |
 | **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (quota-based, **no** balance fallback)       |
 | **Default model**      | `glm-5.2` @ `medium` thinking, theme `encom`                                    |
-| **Extensions**         | 13 active (~5,300 LOC; 11 feature + 2 host hooks) + 2 disabled                                             |
+| **Extensions**         | 16 active (~8,300 LOC; 14 feature + 2 host hooks) + 2 disabled — incl. chain widget, acceptance gates, clarify, background dispatch |
 | **Agents**             | 14 (6 personas + 8 Matrix operatives; 0 model pins)                             |
 | **Governance**         | 13 ADRs in `decisions/`                                                         |
 | **Secondary provider** | `opencode` (FREE tier — `git-commit-message` category + gemini vision fallback) |
@@ -30,6 +30,10 @@ dispatch …                 # delegate a sub-task (the core tool)
 /team <name>               # select active roster for dispatch/chain
 /chain <name>              # select active sequential agent pipeline
 run_chain({ task: … })     # execute the active chain (e.g., commit-message)
+run_chain({ …, clarify: true })    # preview/edit overlay first (task + per-step model/thinking/prompt)
+run_chain({ …, background: true }) # fire-and-forget: returns now, toast on completion (/stop <runId>)
+/chain-clarify <chain> <task…>     # clarify-then-run, direct (no LLM flag needed)
+/stop <runId>              # stop a background chain run
 /tiers                     # see the 10 categories × model × REAL availability
 /routing-stats             # observability: aggregate dispatch-log across this project
 /persona-forge evolve <target>  # generate + momus-review a persona variant
@@ -75,8 +79,11 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     │   ├── injection.ts              # pure pipeline: rank → budget → format
     │   ├── {classifier,scanner,ranker,budget,formatter,normalizer,schema}.ts  # pure functions
     │   └── test-*.ts                 # 147 assertions + smoke (all green)
-    ├── chain-runner.ts        # shared chain loader + runner (used by agent-chain and persona-forge)
-    ├── agent-chain.ts         # run_chain tool + /chain + /chain-list
+    ├── chain-runner.ts        # shared chain loader + runner (+ overrides, acceptance wiring)
+    ├── agent-chain.ts         # run_chain + /chain + /chain-list + /chain-clarify + /stop + chain widget + background dispatch
+    ├── chain-clarify.ts       # clarify-before-launch overlay (preview/edit task + per-step model/thinking/prompt)
+    ├── acceptance.ts          # acceptance gates: provenance badges + enum verify-command table (shell:false)
+    ├── background-helpers.ts  # pure background-dispatch helpers (status resolution + toast format)
     ├── persona-forge.ts       # evolve personas, momus review, operator-approved roster writes
     ├── statusline-encom.ts    # encom statusline footer: segment registry, config/presets, customItems, /encom-* commands
     ├── mini-task-tracker.ts   # `task` tool + widget (bd replacement)
@@ -97,9 +104,12 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 | `orchestration-engine/index.ts`                                            | 500 | `dispatch` (functional-agent resolution) + `/team` + `/team-list` + `/routing-stats` (F6) + `/tiers` (F4) + `before_agent_start` Cost-Discipline inject |
 | `orchestration-engine/tier-map.ts`                                         | 322 | Category→model map (sole model authority), peak/promo/availability logic, resolver                                                                      |
 | `orchestration-engine/agent-map.ts`                                        | 22  | Category→functional-agent DEFAULT + `resolveFunctionalAgent()` (Tier 2)                                                                                 |
-| `orchestration-engine/spawn.ts`                                            | 350 | `resolveAndSpawn` + stable sessions + rotation + usage capture + Esc/signal-abort                                                                       |
-| `chain-runner.ts`                                                          | 182 | Shared `loadChains()` + `runChainByName()` for chain consumers                                                                                          |
-| `agent-chain.ts`                                                           | 217 | `run_chain` tool + `/chain` + `/chain-list` (sequential pipelines)                                                                                      |
+| `orchestration-engine/spawn.ts`                                            | 361 | `resolveAndSpawn` + stable sessions + rotation + usage capture + Esc/signal-abort + `clarify-override` (model/thinking) + `!signal?.aborted` guard (no false quota-warning on /stop) |
+| `chain-runner.ts`                                                          | 272 | Shared `loadChains()` + `runChainByName()` (chain consumers) + overrides + acceptance wiring (inject/parse/strip/verify)                               |
+| `agent-chain.ts`                                                           | 463 | `run_chain` (sequential pipelines + `clarify`/`background` params) + `/chain` + `/chain-list` + `/chain-clarify` + `/stop` + **chain widget** (rich per-step line, adaptive tiers, spinner) + background dispatch (registry, cap, toasts) |
+| `chain-clarify.ts`                                                         | 394 | Clarify-before-launch overlay (`ctx.ui.custom`): preview/edit task + per-step model/thinking/prompt. Pickers are internal sub-modes; prompt edit via exit-reopen `ctx.ui.editor` |
+| `acceptance.ts`                                                            | 429 | Acceptance gates: provenance ladder (claimed→attested→checked→verified) + **enum verify table** (`test\|typecheck\|lint\|build`→argv, `shell:false`, no YAML env/cwd). badge-only `auto`; explicit can fail |
+| `background-helpers.ts`                                                    |  19 | Pure background helpers (resolveBgStatus /stop-vs-fail + toast format); isolated for bare-node testing |
 | `persona-forge.ts`                                                         | 150 | `evolve` + `approve` + `list` + `reject` persona variants with provenance; pending personas persisted to disk                                           |
 | `statusline-encom.ts`                                                      | 877 | Encom statusline footer: segment registry, config/presets/customItems, 10-style separators, streaming ticker                                                                                                          |
 | `mini-task-tracker.ts`                                                     | 229 | `task` tool + widget; non-mutating tools (read/grep/find/ls/`memory_remember`) exempt from the task gate                                                |
@@ -229,6 +239,20 @@ Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by
 
 ---
 
+## Chain runs (`run_chain` + widget + acceptance + clarify + background)
+
+Sequential agent pipelines from `agent-chain.yaml` (deny-additive: projects ADD chains, can't remove global). `$ORIGINAL` = the initial task (all steps); `$INPUT` = previous step's output.
+
+**Live widget** (`setWidget("chain")`) — per-step: model · tool-count · tokens · cost + a live `⎿ <text>` line on the running step; chain row shows elapsed + aggregate cost. Adaptive tiers (single-line <60col or >6 jobs; progressive `+N more`; full). Braille spinner @180ms (one tick drives elapsed + frame, idle-stopped). **Esc/abort now SIGTERMs the child** (was an orphan-process bug — `_signal` was dropped at `execute()`).
+
+**Acceptance gates** (`acceptance:` per step/chain) — each step earns a provenance badge: `claimed` → `attested` → `checked` → `verified` (or `rejected`). `auto` (default) infers from the agent's declared tools (`edit`/`write` ⇒ checked, else attested) and is **badge-only — never rejects**. Explicit levels can fail the step. The child gets an acceptance contract + fenced `acceptance-report` JSON schema; the report is parsed back and **stripped from `$INPUT`** (no propagation noise). **`verified` runs a parent-side enum command** — `kind ∈ {test,typecheck,lint,build}` → fixed argv, `shell:false`, **no YAML `env`/`cwd`** (chain config is deny-additive + `run_chain` is LLM-callable, so arbitrary exec is unacceptable). Provenance persists to `dispatch-log`.
+
+**Clarify-before-launch** (`run_chain({clarify:true})` or `/chain-clarify <chain> <task>`) — a `ctx.ui.custom` overlay to preview/edit the task + per-step model/thinking/prompt before burning tokens. Pickers are internal sub-modes (never a nested `custom()`); prompt/task edit uses `ctx.ui.editor()` via an exit-reopen pattern (cleaner than the `setHidden` choreography, which didn't reliably hide the overlay). Esc/abort cancels with no spawn.
+
+**Background dispatch** (`run_chain({background:true})`, Group 3 Tier A) — fire-and-forget: returns immediately with a `runId`; runs concurrently in the parent's event loop; the widget shows it as a compact `⟳ bg: N running` line (**excluded from `MAX_WIDGET_JOBS`** so it doesn't collapse the foreground). Completion → toast (✓/✗/■) + `dispatch-log` `background-result`. **In-parent** (not a detached runner — that machinery is cross-process-survival only; completion = promise resolution). `/stop <runId>` aborts a per-job `AbortController` (registry-keyed; decoupled from the turn-coupled tool signal) → SIGTERM → `■ stopped` (distinct from `✗ failed`). Concurrency cap **3**.
+
+---
+
 ## Safety model (`mini-damage-control`)
 
 - **Fail-closed by default** — no rules loaded → bash DENIED (never open).
@@ -243,6 +267,7 @@ Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by
 
 - **`/tiers`** — the 10 categories × model / thinking / quota× / **REAL availability** (key configured). Run before switching models.
 - **`/routing-stats`** — aggregates `dispatch-log` **cross-session / cwd-scoped**: per-category, per-model (with quota×), per-agent, routing-source views + threshold flags (fail-rate, override-rate, downshifts). Plus a **`▌ usage`** section (Tier 1): total/avg cost, turns, avg context-tokens — global and per-category. The tuning loop.
+- **Prompt-drift detector** (`prompt-observer.ts` + `lib/prompt-hash.ts`) — hashes the composed system prompt on `agent_start`, warns if the hash leaves the known-good set (catches composition corruption — a rogue extension rewriting the prompt, `AGENTS.md` tampering — *not* injection, which lands in messages/tool output). `hashPrompt()` **strips the volatile blocks first** (`<memory-context>` + `<bridge-context>`) so memory growth / bridge re-exports don't false-fire — only real base-prompt changes do.
 - **Cost reads `$0` until provider pricing is configured** (`zai-coding-cn` isn't priced yet); tokens are tracked regardless. Oracle Q7 caveat: summed `input` over-counts across turns — rely on `cost` + `contextTokens`.
 
 ---
@@ -267,7 +292,7 @@ Two extensions wire pi into its host environment. Both are load-bearing for *thi
 
 ### `bd-bridge.ts` — read-only sisyphus → pi memory bridge
 
-- **What:** At `before_agent_start`, reads `bridge/global-export.jsonl` (generated by `bridge/export-bd-global.sh` from the sibling opencode+sisyphus agent's `bd` store) and string-concatenates a labeled `[FROM bridge, exported <ts>]` block onto the system prompt.
+- **What:** At `before_agent_start`, reads `bridge/global-export.jsonl` (generated by `bridge/export-bd-global.sh` from the sibling opencode+sisyphus agent's `bd` store) and string-concatenates a labeled `<bridge-context>[FROM bridge, exported <ts>]…</bridge-context>` block onto the system prompt. (The XML tags are so `prompt-hash.ts` can strip it as a volatile block — see Observability.)
 - **Filter:** keeps only bd categories `constraint` / `exact` / `preference` / `reason` / `decision`; skips sisyphus-internal prefixes (`session-*`, `pre-test:*`, `next-session:*`, `files:*`).
 - **Hard constraints (load-bearing):** READ-PATH ONLY — it **never writes to `bd`** and **never writes to `memory/store.jsonl`**. Bridged facts are *projected*, not merged into pi's own store.
 - **Security self-model:** bridged values are **secret-scanned at inject** (`scanSecrets` from the memory extension); a hit is skipped + logged to `bridge/telemetry.log`. The bridge still bypasses the structured-store *write* boundary — bridged facts are *projected*, never stored in `store.jsonl` — and it never writes to `bd`. If sensitive-looking material ever appears in a `[FROM bridge]` block, flag it to the operator.
@@ -308,8 +333,8 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 
 1. **YAML-only safety additions** — cloud `bashToolPatterns` + richer `zeroAccessPaths` + git-history patterns. Zero code change. _(next)_
 2. **`readOnlyPaths` + `noDeletePaths`** rule categories — small code bump to the fail-closed hook.
-3. **`/sub` background sub-agents** — only if parallel micro fan-out is wanted.
-4. **`coms`/`coms-net`** — DEFER, gated on the handoff-vs-conversation question.
+3. **`coms`/`coms-net`** — DEFER, gated on the handoff-vs-conversation question.
+4. **Group 3 Tier B/C + A.5** — batched toasts; fleet view, live transcript tail, control/needs-attention notices, intercom/supervisor, async parallel/nested; + detached-runner survivability (Tier A.5). (See `GROUP3-ASYNC-SPEC.md` in the pi-subagents clone.)
 
 **Shipped:**
 
@@ -318,6 +343,7 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 - F3 runtime retry with per-tier opencode fallback (2026-07-11). `resolveAndSpawn` retries once on empty primary output; surfaced in `/routing-stats` as `downshift-exhausted`.
 - Structured memory extension (2026-07-13). `memory_remember` tool + `before_agent_start` injection. 3-tier design (pure functions → JSONL store → Pi wiring) with secret scan, provenance write-guard, dedup, atomic writes. 147 assertions + live-verified.
 - **Persistent sub-agent sessions + usage + functional agents** (2026-07-15, “the bridge”). Tier 0: stable `{agent,project}` session files (`sub-<agent>--<gitRoot>.jsonl`) + rotation at 100KB (not truncation) + Esc/signal-abort + per-`{agent,project}` mutex (delete-only-if-tail). Tier 1: `message_end` usage capture (cost/tokens/turns) into `dispatch-log` + a `▌ usage` view in `/routing-stats`; latent error-path bug fixed (`ev.message.stopReason`, not `ev.stopReason`). Tier 2: `agent-map.ts` auto-resolves a Matrix operative per category when `agent=` is omitted (explicit agent always wins). 6 personas + 8 operatives; 0 model pins.
+- **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + toasts + cap 3); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per group; 54 unit tests across acceptance/chain-clarify/background/prompt-hash.
 
 **Deferred by design (not gaps):** F1 LLM intent-classifier (🔒 CLOSED — explicit-category chosen; reopen only on `/routing-stats` evidence). F2 peak-hour auto-downshift — still open.
 
@@ -332,4 +358,4 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 
 ---
 
-_Living doc — update when topology changes. Last revised: 2026-07-24._
+_Living doc — update when topology changes. Last revised: 2026-07-30._
