@@ -119,6 +119,17 @@ export interface SpawnProgress {
   modelFlag?: string;
 }
 
+/** Build the full --append-system-prompt arg: persona systemPrompt + optional handoff context.
+ * 4 cases: persona+context / persona-only / context-only / neither→undefined. Exported for testing. */
+export function buildFullSystemPrompt(personaPrompt: string | undefined, context: string | undefined): string | undefined {
+  if (personaPrompt && context) return `${personaPrompt}\n\n## Handoff Context\n${context}`;
+  if (personaPrompt) return personaPrompt;
+  if (context) return `## Handoff Context\n${context}`;
+  return undefined;
+}
+
+const HANDOFF_CAP = 2000;
+
 export function spawnSub(
   _category: TaskCategory,
   task: string,
@@ -129,6 +140,7 @@ export function spawnSub(
   cwd?: string,
   onProgress?: (p: SpawnProgress) => void,
   signal?: AbortSignal,
+  context?: string,
 ): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined }> {
   const tools = persona?.tools ?? "read,grep,find,ls";
   const needsBash = tools.includes("bash");
@@ -148,7 +160,15 @@ export function spawnSub(
   args.push("--tools", tools);
   args.push("--thinking", resolved.thinkingLevel ?? "off");
   args.push("--model", resolved.modelFlag);
-  if (persona?.systemPrompt) args.push("--append-system-prompt", persona.systemPrompt);
+  // Soft cap on handoff context: truncate + warn if exceeded (don't reject — legitimate large handoffs exist).
+  let effectiveContext = context;
+  if (context && context.length > HANDOFF_CAP) {
+    effectiveContext = context.slice(0, HANDOFF_CAP) + `\n…[handoff truncated at ${HANDOFF_CAP} chars]`;
+    if (ctx.hasUI) ctx.ui.notify(`⚠ Handoff context truncated to ${HANDOFF_CAP} chars`, "warning");
+    console.warn(`[spawnSub] handoff context truncated from ${context.length} to ${HANDOFF_CAP} chars`);
+  }
+  const fullSystemPrompt = buildFullSystemPrompt(persona?.systemPrompt, effectiveContext);
+  if (fullSystemPrompt) args.push("--append-system-prompt", fullSystemPrompt);
   args.push(task);
 
   return new Promise((resolve) => {
@@ -246,6 +266,7 @@ export async function resolveAndSpawn(
   agentSource?: string,
   modelOverride?: string,
   thinkingOverride?: string,
+  context?: string,
 ): Promise<SpawnResult> {
   const persona = agent ? loadPersona(agent) : undefined;
   if (agent && !persona) {
@@ -305,7 +326,7 @@ export async function resolveAndSpawn(
   // the active model during a run (reads the live `modelFlag` let, so a fallback/downshift is
   // reflected on the retried spawn). spawnSub itself stays unchanged.
   const progressWithModel = onProgress ? (p: SpawnProgress) => onProgress({ ...p, modelFlag }) : undefined;
-  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal);
+  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context);
 
   // Cross-provider fallback when the primary model silently returns empty (e.g., quota exhausted).
   if (output.length === 0 && !signal?.aborted && tierDefault.fallbackFlag && tierDefault.fallbackFlag !== modelFlag && isAvail(tierDefault.fallbackFlag)) {
@@ -316,7 +337,7 @@ export async function resolveAndSpawn(
     source = "downshift-exhausted";
     rationale = `${fbDownshiftedFrom} returned empty (likely quota exhausted) → retried with ${fb}`;
     if (ctx.hasUI) ctx.ui.notify(`⚠ ${fbDownshiftedFrom} exhausted → retried with ${fb}`, "info");
-    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal);
+    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context);
     output = fbResult.output;
     code = fbResult.code;
     elapsedMs = fbResult.elapsedMs;

@@ -143,6 +143,7 @@ export async function runChainByName(
   onStepProgress?: (name: string, p: SpawnProgress) => void,
   signal?: AbortSignal,
   overrides?: ChainOverrides,
+  context?: string,
 ): Promise<ChainRunResult> {
   const chains = loadChains(ctx);
   const chain = chains.get(chainName);
@@ -194,6 +195,7 @@ export async function runChainByName(
       undefined,
       stepOverride?.model,
       stepOverride?.thinking,
+      context,
     );
 
     let stepCode = result.code;

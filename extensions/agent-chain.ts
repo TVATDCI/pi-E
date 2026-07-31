@@ -190,6 +190,7 @@ export default function (pi: ExtensionAPI) {
     signal: AbortSignal | undefined,
     overrides: ChainOverrides | undefined,
     opts?: { background?: boolean; id?: number },
+    context?: string,
   ): Promise<ChainRunResult> => {
     widgetCtx = ctx;
     const chain = chains.get(chainName);
@@ -237,6 +238,7 @@ export default function (pi: ExtensionAPI) {
       },
       signal,
       overrides,
+      context,
     );
 
     chainState.status = result.ok ? "done" : "error";
@@ -287,14 +289,15 @@ export default function (pi: ExtensionAPI) {
     task: string,
     cwd: string | undefined,
     overrides: ChainOverrides | undefined,
-  ): { runId: number } | { error: "cap" } => {
+  context?: string,
+): { runId: number } | { error: "cap" } => {
     const activeBg = [...running.values()].filter((c) => c.background && c.status === "running").length;
     if (activeBg >= MAX_BACKGROUND) return { error: "cap" };
     const id = nextId++;
     const controller = new AbortController();
     bgRegistry.set(id, { controller, stopped: false });
     // controller.signal — NOT the tool-call signal (that is turn-coupled). Voided: returns immediately.
-    void runWithWidget(ctx, chainName, task, cwd, false, controller.signal, overrides, { background: true, id })
+    void runWithWidget(ctx, chainName, task, cwd, false, controller.signal, overrides, { background: true, id }, context)
       .then((result) => onBgSettle(ctx, id, chainName, result, undefined))
       .catch((err) => onBgSettle(ctx, id, chainName, undefined, err));
     return { runId: id };
@@ -407,6 +410,7 @@ export default function (pi: ExtensionAPI) {
       returnAllSteps: Type.Optional(Type.Boolean({ description: "Return every step's output in the response text (default: false, only final step returned)." })),
       clarify: Type.Optional(Type.Boolean({ description: "If true, show a preview/edit overlay (task + per-step model/thinking/prompt) before running. TUI mode only; no-op otherwise. Esc/abort cancels with no spawn." })),
       background: Type.Optional(Type.Boolean({ description: "If true, run in the background (fire-and-forget): returns immediately with a runId, shows in the widget, notifies on completion. TUI mode only. /stop <runId> cancels. Max " + MAX_BACKGROUND + " concurrent." })),
+      context: Type.Optional(Type.String({ description: "Handoff context — appended to every step's system prompt as '## Handoff Context'. Findings, constraints, prior decisions. Keep concise (truncated >2000 chars)." })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       widgetCtx = ctx;
@@ -442,7 +446,7 @@ export default function (pi: ExtensionAPI) {
 
       // Background (fire-and-forget). Returns immediately with a runId; completion → toast + dispatch-log.
       if (params.background && ctx.mode === "tui") {
-        const bg = runBackground(ctx, chainName, params.task, params.cwd, overrides);
+        const bg = runBackground(ctx, chainName, params.task, params.cwd, overrides, params.context);
         if ("error" in bg) {
           return {
             content: [{ type: "text" as const, text: `Background cap reached (${MAX_BACKGROUND} concurrent). Wait for one to finish or /stop one, then retry.` }],
@@ -455,7 +459,7 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const result = await runWithWidget(ctx, chainName, params.task, params.cwd, params.returnAllSteps, signal, overrides);
+      const result = await runWithWidget(ctx, chainName, params.task, params.cwd, params.returnAllSteps, signal, overrides, undefined, params.context);
 
       if (!result.ok) {
         const trimmed = result.error?.output && result.error.output.length > 3000
