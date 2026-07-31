@@ -35,6 +35,8 @@ run_chain({ …, background: true }) # fire-and-forget: returns now, toast on co
 /chain-clarify <chain> <task…>     # clarify-then-run, direct (no LLM flag needed)
 /stop <runId>              # stop a background chain run
 /chain-status              # fleet view: all active + recent chain runs at a glance
+/chain-transcript <runId>  # tail a running chain's accumulated per-step output
+run_chain({ …, context: "…" }) # curated handoff: findings/constraints appended to every step's system prompt
 /tiers                     # see the 10 categories × model × REAL availability
 /routing-stats             # observability: aggregate dispatch-log across this project
 /persona-forge evolve <target>  # generate + momus-review a persona variant
@@ -84,7 +86,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── agent-chain.ts         # run_chain + /chain + /chain-list + /chain-clarify + /stop + chain widget + background dispatch
     ├── chain-clarify.ts       # clarify-before-launch overlay (preview/edit task + per-step model/thinking/prompt)
     ├── acceptance.ts          # acceptance gates: provenance badges + enum verify-command table (shell:false)
-    ├── background-helpers.ts  # pure background-dispatch helpers (status resolution + toast format)
+    ├── background-helpers.ts  # pure helpers: bg dispatch + fleet view + transcript + batched toasts
     ├── persona-forge.ts       # evolve personas, momus review, operator-approved roster writes
     ├── statusline-encom.ts    # encom statusline footer: segment registry, config/presets, customItems, /encom-* commands
     ├── mini-task-tracker.ts   # `task` tool + widget (bd replacement)
@@ -110,7 +112,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 | `agent-chain.ts`                                                           | 463 | `run_chain` (sequential pipelines + `clarify`/`background` params) + `/chain` + `/chain-list` + `/chain-clarify` + `/stop` + **chain widget** (rich per-step line, adaptive tiers, spinner) + background dispatch (registry, cap, toasts) |
 | `chain-clarify.ts`                                                         | 394 | Clarify-before-launch overlay (`ctx.ui.custom`): preview/edit task + per-step model/thinking/prompt. Pickers are internal sub-modes; prompt edit via exit-reopen `ctx.ui.editor` |
 | `acceptance.ts`                                                            | 429 | Acceptance gates: provenance ladder (claimed→attested→checked→verified) + **enum verify table** (`test\|typecheck\|lint\|build`→argv, `shell:false`, no YAML env/cwd). badge-only `auto`; explicit can fail |
-| `background-helpers.ts`                                                    |  85 | Pure helpers: resolveBgStatus/formatBgToast (background dispatch) + formatFleet (fleet view); isolated for bare-node testing |
+| `background-helpers.ts`                                                    | 140 | Pure helpers: resolveBgStatus/formatBgToast/formatBatchedToast (bg dispatch) + formatFleet (fleet view) + formatTranscript (transcript tail); isolated for bare-node testing |
 | `persona-forge.ts`                                                         | 150 | `evolve` + `approve` + `list` + `reject` persona variants with provenance; pending personas persisted to disk                                           |
 | `statusline-encom.ts`                                                      | 877 | Encom statusline footer: segment registry, config/presets/customItems, 10-style separators, streaming ticker                                                                                                          |
 | `mini-task-tracker.ts`                                                     | 229 | `task` tool + widget; non-mutating tools (read/grep/find/ls/`memory_remember`) exempt from the task gate                                                |
@@ -254,6 +256,12 @@ Sequential agent pipelines from `agent-chain.yaml` (deny-additive: projects ADD 
 
 **Fleet view** (`/chain-status`) — a slash command that dumps all active + recent chain runs (foreground + background) from the `running` map into a scannable `notify`: `⟳ #1 scout-twice [bg] · 45s · step 1/2: scout · glm-4.7 · 3🛠 · 4.2k tok`. Ordered running-first/newest; `[bg]` marks background jobs (also the `/stop`-eligible indicator). Retention cap: oldest done/error foreground chains evicted beyond 5 (bounds the `StepState.output` leak). Background *results* live in the toast + `dispatch-log` (not in `running` post-settle).
 
+**Transcript tail** (`/chain-transcript <runId>`) — peek at a running chain's accumulated per-step text without waiting for completion. Shows the last ~600 chars of each running step's text (where the child is NOW) + the final output for done steps. Useful for debugging a slow background job.
+
+**Curated handoff** (`context:` param on `dispatch` + `run_chain`) — the parent composes a handoff (findings, constraints, prior decisions) and the child receives it as a system-prompt-level `## Handoff Context` block, persistent across all chain steps. Children go from “blind delegate” to “briefed delegate”. Replaces wholesale session fork (cost-explosion + secret-leak risks; pi already ships `--fork`). Soft cap: truncated >2000 chars.
+
+**Batched toasts** — successful background completions within a 1500ms window are grouped into one notification. Failures/stopped flush immediately (never delay errors).
+
 ---
 
 ## Safety model (`mini-damage-control`)
@@ -346,7 +354,7 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 - F3 runtime retry with per-tier opencode fallback (2026-07-11). `resolveAndSpawn` retries once on empty primary output; surfaced in `/routing-stats` as `downshift-exhausted`.
 - Structured memory extension (2026-07-13). `memory_remember` tool + `before_agent_start` injection. 3-tier design (pure functions → JSONL store → Pi wiring) with secret scan, provenance write-guard, dedup, atomic writes. 147 assertions + live-verified.
 - **Persistent sub-agent sessions + usage + functional agents** (2026-07-15, “the bridge”). Tier 0: stable `{agent,project}` session files (`sub-<agent>--<gitRoot>.jsonl`) + rotation at 100KB (not truncation) + Esc/signal-abort + per-`{agent,project}` mutex (delete-only-if-tail). Tier 1: `message_end` usage capture (cost/tokens/turns) into `dispatch-log` + a `▌ usage` view in `/routing-stats`; latent error-path bug fixed (`ev.message.stopReason`, not `ev.stopReason`). Tier 2: `agent-map.ts` auto-resolves a Matrix operative per category when `agent=` is omitted (explicit agent always wins). 6 personas + 8 operatives; 0 model pins.
-- **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + toasts + cap 3); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per group; 54 unit tests across acceptance/chain-clarify/background/prompt-hash.
+- **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + batched toasts + cap 3); **fleet view** (`/chain-status`); **transcript tail** (`/chain-transcript`); **curated handoff** (`context:` param — briefed delegates); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per feature; 110 unit tests across 7 test files.
 
 **Deferred by design (not gaps):** F1 LLM intent-classifier (🔒 CLOSED — explicit-category chosen; reopen only on `/routing-stats` evidence). F2 peak-hour auto-downshift — still open.
 
