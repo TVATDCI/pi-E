@@ -81,5 +81,53 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+// ── Transcript tail (/chain-transcript) ─────────────────────────────────────────────────
+
+export interface TranscriptStep {
+  name: string;
+  status: string;
+  modelFlag?: string;
+  toolCount?: number;
+  output?: string;
+  accumulatedText?: string;
+}
+
+export interface TranscriptEntry {
+  id: number;
+  chainName: string;
+  status: string;
+  background?: boolean;
+  elapsed: number;
+  steps: TranscriptStep[];
+}
+
+const TRANSCRIPT_MAX = 600;
+
+export function formatTranscript(entry: TranscriptEntry): string[] {
+  const glyph = entry.status === "running" ? "⟳" : entry.status === "done" ? "✓" : "✗";
+  const bg = entry.background ? " [bg]" : "";
+  const header = `Transcript #${entry.id} ${entry.chainName}${bg} · ${Math.round(entry.elapsed / 1000)}s:`;
+  const rows: string[] = [header, ""];
+
+  for (let i = 0; i < entry.steps.length; i++) {
+    const s = entry.steps[i]!;
+    const idx = i + 1;
+    const statusGlyph = s.status === "running" ? "⟳" : s.status === "done" ? "✓" : s.status === "error" ? "✗" : "○";
+    const model = s.modelFlag ? " · " + (s.modelFlag.includes("/") ? s.modelFlag.split("/")[1] : s.modelFlag) : "";
+    const tools = s.toolCount ? ` · ${s.toolCount}🛠` : "";
+    rows.push(`  ${statusGlyph} step ${idx}/${entry.steps.length}: ${s.name}${model}${tools} (${s.status})`);
+
+    // For running steps: show accumulated text (tail). For done/error: show output.
+    const text = s.status === "running" ? s.accumulatedText : s.output;
+    if (text && text.trim()) {
+      const trimmed = text.replace(/\s+/g, " ").trim();
+      // Tail (last TRANSCRIPT_MAX chars) — show where the child is NOW.
+      const tail = trimmed.length > TRANSCRIPT_MAX ? "…" + trimmed.slice(-TRANSCRIPT_MAX) : trimmed;
+      rows.push(`    ⎿ ${tail}`);
+    }
+  }
+  return rows;
+}
+
 // Top-level extensions/*.ts must export a default factory for pi's loader.
 export default function () {}

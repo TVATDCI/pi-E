@@ -5,7 +5,7 @@ import { loadChains, runChainByName, type Chain, type ChainOverrides, type Chain
 import { clarifyChain } from "./chain-clarify.ts";
 import type { UsageStats, SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { StepAcceptance } from "./acceptance.ts";
-import { resolveBgStatus, formatBgToast, formatFleet, type BgStatus } from "./background-helpers.ts";
+import { resolveBgStatus, formatBgToast, formatFleet, formatTranscript, type BgStatus } from "./background-helpers.ts";
 
 interface StepState {
   name: string;
@@ -16,6 +16,7 @@ interface StepState {
   modelFlag?: string;
   thinkingLevel?: string;
   currentChunk?: string;
+  accumulatedText?: string;
   usage?: UsageStats;
   acceptance?: StepAcceptance;
 }
@@ -233,7 +234,7 @@ export default function (pi: ExtensionAPI) {
         const s = stepStatusMap.get(name);
         if (!s) return;
         s.toolCount = p.toolCount;
-        if (p.chunk) s.currentChunk = p.chunk;
+        if (p.chunk) { s.currentChunk = p.chunk; s.accumulatedText = (s.accumulatedText ?? "") + p.chunk; }
         if (p.modelFlag) s.modelFlag = p.modelFlag;
       },
       signal,
@@ -378,6 +379,19 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       widgetCtx = ctx;
       const lines = formatFleet([...running.values()]);
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("chain-transcript", {
+    description: "Tail a running chain's accumulated output: /chain-transcript <runId>",
+    handler: async (args, ctx) => {
+      const raw = (args ?? "").trim();
+      if (!raw || !/^\d+$/.test(raw)) { ctx.ui.notify("Usage: /chain-transcript <runId>  (runId from /chain-status)", "warning"); return; }
+      const id = Number(raw);
+      const entry = running.get(id);
+      if (!entry) { ctx.ui.notify(`No chain run #${id}. Use /chain-status to see active runs.`, "warning"); return; }
+      const lines = formatTranscript(entry);
       ctx.ui.notify(lines.join("\n"), "info");
     },
   });
