@@ -15,6 +15,26 @@ export function formatBgToast(chainName: string, status: BgStatus, durationMs: n
   return `Background ${status}: ${icon} ${chainName} · ${Math.round(durationMs / 1000)}s\n${body}`;
 }
 
+/** Format multiple completed background runs into one grouped toast. Pure, testable. */
+export interface BgCompletion {
+  chainName: string;
+  durationMs: number;
+  preview: string;
+}
+
+export function formatBatchedToast(completions: BgCompletion[]): string {
+  if (completions.length === 1) {
+    const c = completions[0]!;
+    return `Background completed: ✓ ${c.chainName} · ${Math.round(c.durationMs / 1000)}s\n${(c.preview || "(no output)").slice(0, 300)}`;
+  }
+  const header = `Background completed (${completions.length}): ${completions.map((c) => `✓ ${c.chainName}`).join(", ")}`;
+  const lines = [header];
+  for (const c of completions) {
+    lines.push(`  ${c.chainName} · ${Math.round(c.durationMs / 1000)}s — ${(c.preview || "(no output)").slice(0, 200)}`);
+  }
+  return lines.join("\n");
+}
+
 // ── Fleet view (pure formatFleet for /chain-status) ─────────────────────────────────────
 
 export interface FleetStep {

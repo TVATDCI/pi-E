@@ -5,7 +5,7 @@ import { loadChains, runChainByName, type Chain, type ChainOverrides, type Chain
 import { clarifyChain } from "./chain-clarify.ts";
 import type { UsageStats, SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { StepAcceptance } from "./acceptance.ts";
-import { resolveBgStatus, formatBgToast, formatFleet, formatTranscript, type BgStatus } from "./background-helpers.ts";
+import { resolveBgStatus, formatBgToast, formatBatchedToast, formatFleet, formatTranscript, type BgStatus, type BgCompletion } from "./background-helpers.ts";
 
 interface StepState {
   name: string;
@@ -254,8 +254,31 @@ export default function (pi: ExtensionAPI) {
   };
 
   // ── Group 3: background dispatch (in-parent) ──────────────────────────────────────────
+  // Batcher: hold successful completions for 1500ms; if more arrive, group into one toast.
+  // Failures/stopped flush immediately (never delay errors).
+  const BATCH_WINDOW_MS = 1500;
+  let batchPending: BgCompletion[] = [];
+  let batchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const flushBatch = (ctx: ExtensionContext): void => {
+    if (batchTimer) { clearTimeout(batchTimer); batchTimer = undefined; }
+    if (batchPending.length === 0) return;
+    const batch = batchPending;
+    batchPending = [];
+    ctx.ui.notify(formatBatchedToast(batch), "info");
+  };
+
   const bgToast = (ctx: ExtensionContext, chainName: string, status: BgStatus, durationMs: number, preview: string): void => {
-    ctx.ui.notify(formatBgToast(chainName, status, durationMs, preview), status === "completed" ? "info" : "warning");
+    if (status === "completed") {
+      // Hold for batching — group with other near-simultaneous successes.
+      batchPending.push({ chainName, durationMs, preview });
+      if (batchTimer) clearTimeout(batchTimer);
+      batchTimer = setTimeout(() => flushBatch(ctx), BATCH_WINDOW_MS);
+    } else {
+      // Failure/stopped: flush any held successes first, then fire immediately.
+      flushBatch(ctx);
+      ctx.ui.notify(formatBgToast(chainName, status, durationMs, preview), "warning");
+    }
   };
 
   const onBgSettle = (
