@@ -178,9 +178,10 @@ export async function runChainByName(
     const step = chain.steps[i];
     const category = step.category ?? chain.default_category ?? "unspecified-low";
     const persona = step.agent ? loadPersona(step.agent) : undefined;
-    const resolvedAcceptance = resolveAcceptance(step.acceptance, inferDefaultLevel(persona?.tools));
     const stepOverride = overrides?.steps?.[step.name];
     const stepPrompt = stepOverride?.prompt ?? step.prompt;
+    // ②a pass the task text so risky-context tasks auto-badge review-required (Q2.1 suggest).
+    const resolvedAcceptance = resolveAcceptance(step.acceptance, inferDefaultLevel(persona?.tools), stepPrompt);
     const prompt =
       stepPrompt.replace(/\$INPUT/g, input).replace(/\$ORIGINAL/g, original) +
       (resolvedAcceptance ? formatAcceptancePrompt(resolvedAcceptance) : "");
