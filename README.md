@@ -324,9 +324,9 @@ Two extensions wire pi into its host environment. Both are load-bearing for *thi
 | Role                                   | **micro** — frequent, cost-sensitive, bounded execution                                                                                      | **macro** — rare, expensive, high-stakes methodology            |
 | Standout                               | cost routing + availability + observability + Matrix functional agents                                                                       | ~41 planning skills (discovery→PRD→momus gate→plan→waves→close) |
 | Memory substrate                       | `memory.md` (handoff) + `memory/` ext (structured JSONL)                                                                                     | `bd` + `.sisyphus/*` (file contracts)                           |
-| Couplings to cut for full independence | (1) `settings.json skills → ~/.config/opencode/skills`; (2) `git-commit-message` → opencode provider; (3) auth.json opencode/openrouter keys | —                                                               |
+| Couplings to cut for full independence | (1) ~~`settings.json skills → ~/.config/opencode/skills`~~ ✂ CUT (`1dfdf30`, 2026-07-24 — pi skills native); (2) `git-commit-message` → opencode provider; (3) auth.json opencode/openrouter keys | —                                                               |
 
-pi loads sisyphus skills from opencode's folder (shared vocabulary, by convention). Pi now ships its own **Matrix operatives** (functional agents auto-resolved from the dispatch category), reducing reliance on sisyphus skills for delegated grunt work. The category taxonomy is **already pi-owned**; names sync to `oh-my-openagent.json` only for shared-document consistency.
+pi's skills are **pi-native real files** — `settings.json` loads none (`"skills": []`), zero symlinks to `~/.config/opencode/skills` (delinked `1dfdf30`, 2026-07-24). **Provider coupling remains** — tier-map.ts routes `quick`/`git-commit-message`/`ultrabrain` + several fallbacks to `opencode`/`opencode-go` (FREE models) — so pi is **skills-independent but provider-coupled**, not wholly independent. Pi now ships its own **Matrix operatives** (functional agents auto-resolved from the dispatch category), reducing reliance on sisyphus skills for delegated grunt work. The category taxonomy is **already pi-owned**; names sync to `oh-my-openagent.json` only for shared-document consistency.
 
 ---
 
@@ -369,4 +369,4 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 
 ---
 
-_Living doc — update when topology changes. Last revised: 2026-07-30._
+_Living doc — update when topology changes. Last revised: 2026-08-04._
