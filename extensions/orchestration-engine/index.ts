@@ -260,8 +260,8 @@ export default function (pi: ExtensionAPI) {
       "When agent is omitted AND no team is specified, the category's default operative is used: " +
       "quick→keymaker, unspecified→trinity, deep→morpheus, ultrabrain→neo, writing→mouse, visual-engineering/artistry→architect, research→researcher, git-commit-message→seraph. " +
       "Explicit agent= overrides the default (e.g. agent='momus' for a PRD gate, agent='oracle' for architecture reasoning). " +
-      "Categories (tier-map.ts is authoritative): quick (glm-4.5-air), unspecified-low (glm-4.7), unspecified-high (glm-5-turbo), " +
-      "deep (glm-5.1), ultrabrain (opencode-go/kimi-k3), writing (glm-4.7), visual-engineering (glm-5-turbo), artistry (glm-5.1), research (glm-4.7), git-commit-message (deepseek-v4-flash-free/FREE). " +
+      "Categories (tier-map.ts is authoritative): quick (deepseek-v4-flash-free/FREE), unspecified-low (glm-4.7), unspecified-high (glm-5-turbo), " +
+      "deep (glm-5.2), ultrabrain (opencode-go/kimi-k3), writing (glm-4.7), visual-engineering (glm-5-turbo), artistry (glm-5.2), research (glm-4.7), git-commit-message (deepseek-v4-flash-free/FREE). " +
       "0 of 14 agents pin a model — category is the sole model authority. " +
       "One focused objective per dispatch.",
     parameters: Type.Object({

@@ -16,6 +16,27 @@
  *                 glm-4.7-flashx      (code 1113 — no resource package)
  *                 glm-4-32b-0414-128k (code 1113 — no resource package)
  *
+ * ─── PLAN NARROWED 2026-08-04 (operator-confirmed; SUPERSEDES the 07-04 eligible set above) ─
+ *   Coding Plan subscription now permits ONLY 4 callable models:
+ *     glm-5.2 · glm-5.2-highspeed · glm-5-turbo · glm-4.7
+ *   DROPPED from plan (off-plan now, will 1113/1311 on call): glm-5.1, glm-4.5-air,
+ *     glm-5v-turbo, glm-4.7-flashx, glm-4-32b-0414-128k, glm-5 (bare).
+ *   THIS DROVE the 2026-08-04 tier-map moves:
+ *     - deep / artistry: glm-5.1 → glm-5.2  (glm-5.1 no longer callable; glm-5.2 is the
+ *       remaining flagship reasoning model on plan)
+ *     - quick: zai-coding-cn/glm-4.5-air → opencode/deepseek-v4-flash-free (glm-4.5-air
+ *       dropped; trivial work isn't worth the remaining on-plan quota either → FREE external)
+ *     - 7 of 10 categories now plan-primary (was 8); all plan primaries ∈ {glm-5.2, glm-5-turbo, glm-4.7}.
+ *   UNUSED allowed model: glm-5.2-highspeed (faster 5.2 variant — candidate for latency-sensitive tiers).
+ *   MODEL CHURN IS HIGH (industry flips every few days) — re-verify this set before trusting it.
+ *   ⚠ SELECTOR ≠ SUBSCRIPTION: Z AI /models lists the FULL platform catalog (glm-5, glm-5.1, ...),
+ *   so pi's model picker shows off-plan models; subscription scope is enforced at CALL TIME only
+ *   (off-plan → 1113/1311/empty). pi has no built-in way to grey-out an off-plan model.
+ *   ⚠ FOOTGUN: pi's built-in provider default for zai-coding-cn is hardcoded `glm-5.1`
+ *   (defaultModelPerProvider in dist/core/model-resolver.js) — now OFF plan. Avoid bare-provider
+ *   fallback paths; the scoped-models + tier-map path is safe (all primaries ∈ the allowed-4).
+ *   The 07-04 eligible-set record above is preserved as point-in-time probe evidence.
+ *
  * ─── QUOTA MULTIPLIERS (Z AI DevPack FAQ:21, /devpack/overview) ─────────────
  *   PROMO (now → 2026-09-30): glm-5.2 & glm-5-turbo = 1× off-peak  (free upgrade)
  *   POST-PROMO (2026-10-01+): glm-5.2 & glm-5-turbo = 2× off-peak, 3× peak
@@ -46,9 +67,9 @@ export type TaskCategory =
   | "ultrabrain" // hardest logic (was: gpt-5.5 xhigh)
   | "writing" // prose/docs (was: claude/glm-5.1)
   | "visual-engineering" // UI/frontend/styling code (LR-0019: OmO moved to glm-5.turbo text model; was gemini because glm-5v-turbo not on plan — but category is mostly code, not images)
-  | "artistry" // creative/design (LR-0019: OmO standardized on glm-5.1; was gemini-domain)
+  | "artistry" // creative/design (LR-0019: OmO standardized on glm-5.1; was gemini-domain. Pi re-elevated to glm-5.2 on 2026-08-04)
   | "research" // web/docs/package research (keyless composite — Wikipedia+DDG-IA+npm+GitHub+docs-fetch)
-  | "git-commit-message"; // git ops (kept on opencode/deepseek-v4-flash-free — FREE external, preserves plan quota; the one non-Z-AI category)
+  | "git-commit-message"; // git ops (opencode/deepseek-v4-flash-free — FREE external, preserves plan quota; one of three non-Z-AI categories alongside quick + ultrabrain)
 
 /** Pi thinking levels. null-able per model via thinkingLevelMap. */
 export type ThinkingLevel =
@@ -121,29 +142,29 @@ export function isPeakHours(now = new Date()): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The map (Layer 2 data) — 8 of 10 categories Z-AI-plan-primary; ultrabrain (opencode-go/kimi-k3) + git-commit-message (opencode/deepseek-v4-flash-free) are opencode-primary.
+// The map (Layer 2 data) — 7 of 10 categories Z-AI-plan-primary; quick (opencode/deepseek-v4-flash-free), ultrabrain (opencode-go/kimi-k3), git-commit-message (opencode/deepseek-v4-flash-free) are opencode-primary (FREE/external, preserve plan quota).
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Quota cost legend: 1× = standard, 2× = post-promo off-peak (5.2/5-turbo),
 //                    3× = peak (5.2/5-turbo), FREE = external (opencode), N/A = not on plan
 export const TIERS: Record<TaskCategory, TierEntry> = {
   quick: {
-    provider: "zai-coding-cn",
-    id: "glm-4.5-air",
+    provider: "opencode",
+    id: "deepseek-v4-flash-free",
     fallbackProvider: "opencode",
-    fallbackId: "deepseek-v4-flash-free",
+    fallbackId: "ling-3.0-flash-free",
     thinkingLevel: "off",
     rationale:
-      "1× plan tier; short fast tasks. Replaces opencode free tier on-plan. Fallback to FREE opencode/deepseek-v4-flash-free to preserve quota.",
+      "FREE external tier (opencode/deepseek-v4-flash-free); short fast tasks. Moved off Z-AI plan 2026-08-04 because glm-4.5-air was DROPPED from the Coding Plan (plan narrowed to 4 models), and trivial work isn't worth the remaining on-plan quota anyway → FREE opencode. Per-tier fallback opencode/ling-3.0-flash-free (also FREE).",
   },
   "unspecified-low": {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode-go",
-    fallbackId: "hy3",
+    fallbackProvider: "opencode",
+    fallbackId: "deepseek-v4-flash-free",
     thinkingLevel: "off",
     rationale:
-      "1× plan tier; routine low-effort work. FAQ:29 'sufficient for daily dev'. Fallback to opencode-go/hy3 to preserve quota.",
+      "1× plan tier; routine low-effort work. FAQ:29 'sufficient for daily dev'. Fallback to opencode/deepseek-v4-flash-free to preserve quota.",
   },
   "unspecified-high": {
     provider: "zai-coding-cn",
@@ -158,12 +179,14 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   },
   deep: {
     provider: "zai-coding-cn",
-    id: "glm-5.1",
+    id: "glm-5.2",
     fallbackProvider: "opencode-go",
-    fallbackId: "glm-5.1",
+    fallbackId: "glm-5.2",
     thinkingLevel: "high",
     rationale:
-      "Deep codebase investigation/execution; glm-5.1 per OmO (LR-0019). OmO consolidated 5.2→4 primary agents + unspecified-high (concurrency 2 saturated), so deep follows 5.1 to avoid overloading 5.2.",
+      "Deep codebase investigation/execution; glm-5.2 — moved from glm-5.1 on 2026-08-04 because glm-5.1 was DROPPED from the Coding Plan (plan narrowed to 4 models; glm-5.2 is the remaining flagship reasoning model). PROMO 1× off-peak → 2× after " +
+      PROMO_SUNSET_ISO +
+      ". Per-tier fallback opencode-go/glm-5.2 (cross-provider).",
   },
   ultrabrain: {
     provider: "opencode-go",
@@ -177,29 +200,33 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   writing: {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode-go",
-    fallbackId: "hy3",
+    fallbackProvider: "opencode",
+    fallbackId: "deepseek-v4-flash-free",
     thinkingLevel: "medium",
     rationale:
-      "Prose/docs; glm-4.7 per OmO (LR-0019). Always 1×. Downshifted from 5.1 — 4.7 is capable for writing and conserves 5.1 concurrency. Fallback to opencode-go/hy3 to preserve quota.",
+      "Prose/docs; glm-4.7 per OmO (LR-0019). Always 1×. Downshifted from 5.1 — 4.7 is capable for writing and conserves 5.1 concurrency. Fallback to opencode/deepseek-v4-flash-free to preserve quota.",
   },
   "visual-engineering": {
     provider: "zai-coding-cn",
     id: "glm-5-turbo",
     fallbackProvider: "opencode-go",
-    fallbackId: "glm-5.1",
+    fallbackId: "glm-5.2",
     thinkingLevel: "high",
     rationale:
-      "UI/frontend/styling code = text work; glm-5.1 @high per OmO (LR-0019). OmO moved this off glm-5v-turbo (vision model, NOT on Coding Plan — standard-API-only) to the on-plan text model — category is mostly code, not images.",
+      "UI/frontend/styling code = text work; glm-5-turbo @high. OmO moved this off glm-5v-turbo (vision model, NOT on Coding Plan — standard-API-only) to an on-plan text model — category is mostly code, not images. PROMO 1× off-peak → 2× after " +
+      PROMO_SUNSET_ISO +
+      ". Per-tier fallback opencode-go/glm-5.2.",
   },
   artistry: {
     provider: "zai-coding-cn",
-    id: "glm-5.1",
+    id: "glm-5.2",
     fallbackProvider: "opencode-go",
     fallbackId: "glm-5.1",
     thinkingLevel: "high",
     rationale:
-      "Creative/design; glm-5.1 per OmO (LR-0019). OmO standardized on Z AI primary; gemini retained only as fallback. Trade-off: loses gemini's creative-domain strength (flagged in LR-0019).",
+      "Creative/design; glm-5.2 — moved from glm-5.1 on 2026-08-04 because glm-5.1 was DROPPED from the Coding Plan (OmO LR-0019 had standardized on 5.1). PROMO 1× off-peak → 2× after " +
+      PROMO_SUNSET_ISO +
+      ". Per-tier fallback opencode-go/glm-5.1. Loses gemini's creative-domain strength (flagged in LR-0019).",
   },
   research: {
     provider: "zai-coding-cn",
@@ -208,7 +235,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackId: "minimax-m2.7",
     thinkingLevel: "medium",
     rationale:
-      "Web/docs/package research (athena-equivalent). glm-4.7 per athena parity — NOT quick/keymaker (glm-4.5-air). Keyless composite search (Wikipedia+DDG-IA+npm+GitHub+docs-fetch via the web-research extension); general free-text web is a known gap. Always 1× plan tier.",
+      "Web/docs/package research (athena-equivalent). glm-4.7 per athena parity — NOT quick/keymaker (opencode/deepseek-v4-flash-free, FREE). Keyless composite search (Wikipedia+DDG-IA+npm+GitHub+docs-fetch via the web-research extension); general free-text web is a known gap. Always 1× plan tier.",
   },
   "git-commit-message": {
     provider: "opencode",
@@ -217,7 +244,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackId: "minimax-m2.7",
     thinkingLevel: "off",
     rationale:
-      "FREE external tier; preserves plan quota entirely for trivial git work. OmO keeps this category opencode-primary by design (the one category not on Z AI plan) — matches OmO after operator reverted an interim glm-4.5-air assignment.",
+      "FREE external tier; preserves plan quota entirely for trivial git work. OmO keeps this category opencode-primary by design (one of three categories not on the Z AI plan, alongside quick + ultrabrain) — matches OmO after operator reverted an interim glm-4.5-air assignment.",
   },
 };
 

@@ -70,6 +70,8 @@ Today the parent agent (a flagship model) reads nine `CategoryEnum` literals plu
 
 `resolveModel` has a fallback, but it's a **registration** fallback: "tier model not in registry → use `glm-5.2`." It does nothing for **runtime** failures. Per `PROBE-RESULTS.md`, Z AI Coding Plan has **no balance fallback** (FAQ:66-69) — quota exhaustion is a hard fail. Today, when a spawned `pi` exits non-zero (`proc.on("close", code => ... code !== 0 → status: "error")` in `spawnSub`), the tool just returns `"failed"`. No retry, no downshift to a 1× tier, no re-dispatch.
 
+> **🔄 RE-VERIFY 2026-08-04 (tier-map sync):** The per-tier fallback targets above are superseded by a `tier-map.ts` model change. Current map: `quick` is now **opencode-primary** (`opencode/deepseek-v4-flash-free`, fb `opencode/ling-3.0-flash-free` — no longer Z-AI-plan), so only **7 of 10** categories are Z-AI-plan-primary (was 8). Updated per-tier fallbacks: `unspecified-low`/`writing`→`opencode/deepseek-v4-flash-free` (was `hy3-free`), `deep`→`opencode-go/glm-5.2` (was glm-5.1), `visual-engineering`→`opencode-go/glm-5.2` (was glm-5.1), `artistry`→`opencode-go/glm-5.1` (unchanged), `unspecified-high`→`kimi-k2.7-code` (unchanged). Primary changes: `deep` 5.1→5.2, `artistry` 5.1→5.2, `quick` glm-4.5-air→opencode/deepseek-v4-flash-free. The original paragraph above is preserved as the 2026-07-11 point-in-time record.
+
 **L3 fix:** explicit retry policy keyed on failure class (see §5). On promo-model quota exhaustion → downshift to `glm-4.7` (always 1×) and re-dispatch once. On crash/timeout → retry once, same model. On abort (`ctx.signal`) → propagate, never retry.
 
 ### F4 — Availability is checked at spawn-exit, not at route time

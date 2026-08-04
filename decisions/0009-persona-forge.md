@@ -55,6 +55,8 @@ The generate step is the only one on the flagship model; analyze and review are 
 > holds — all three steps now run on high-effort reasoning tiers (07-12 bumped analyze/review to
 > `ultrabrain` because `unspecified-low` was too weak for gap-analysis/verdict work). The chain
 > *structure* (3 steps, `returnAllSteps`) is unchanged; live values in `agent-chain.yaml`.
+>
+> **_[Footnote 2026-08-04 — `ultrabrain` model cell above superseded again.]_** The 2026-07-13 footnote's `analyze`/`review` = `ultrabrain` → **`glm-5.1`** is now stale: `ultrabrain` primary is **`opencode-go/kimi-k3`** (per current `tier-map.ts` + README). `generate` = `unspecified-high` → `glm-5-turbo` remains current. So persona-forge now runs: analyze/review on `opencode-go/kimi-k3` (reasoning model), generate on `zai-coding-cn/glm-5-turbo`. The "all three on high-effort reasoning tiers" framing still holds. Live values: `agent-chain.yaml` + `tier-map.ts`.
 
 ### Chain data-flow fix: `returnAllSteps`
 

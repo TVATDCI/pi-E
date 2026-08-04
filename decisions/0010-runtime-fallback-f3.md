@@ -29,6 +29,18 @@ The prior `FALLBACK` (`opencode/glm-5.1`) was only used when the chosen model wa
 > - `deep` / `ultrabrain` / `visual-engineering` / `artistry` → `opencode/glm-5.1`
 >
 > This makes the "Out of scope (deferred) → fine-grained per-tier fallback targets" item below **no longer deferred — shipped 2026-07-11, operator-tested with all Z-AI tiers exhausted.** The ADR body above is preserved as the original decision record; the live config lives in `tier-map.ts` + `README.md`.
+>
+> **_[Footnote 2026-08-04 — per-tier fallback map superseded by tier-map.ts model update.]_** The map above is now stale. Current per-tier fallbacks (source of truth = `tier-map.ts`):
+> - `quick` → `opencode/ling-3.0-flash-free` (FREE)  [primary is now `opencode/deepseek-v4-flash-free`, also FREE — quick moved OFF the Z-AI plan]
+> - `unspecified-low` → `opencode/deepseek-v4-flash-free` (was `hy3-free`)
+> - `writing` → `opencode/deepseek-v4-flash-free` (was `hy3-free`)
+> - `unspecified-high` → `opencode-go/kimi-k2.7-code` (unchanged)
+> - `deep` → `opencode-go/glm-5.2` (was `glm-5.1`; primary also 5.1→5.2)
+> - `ultrabrain` → `zai-coding-cn/glm-5.2` (unchanged)
+> - `visual-engineering` → `opencode-go/glm-5.2` (was `glm-5.1`)
+> - `artistry` → `opencode-go/glm-5.1` (unchanged; primary 5.1→5.2)
+>
+> Also note: the §4 v1 framing "high-effort tiers fall back to `opencode/glm-5.1`" is now only literally true for `artistry`; deep/visual-engineering fall back to `glm-5.2`. The earlier footnotes + ADR body are preserved as the audit trail.
 
 ## Why this is the minimal F3 implementation
 

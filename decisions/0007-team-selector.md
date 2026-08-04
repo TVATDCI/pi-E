@@ -306,3 +306,5 @@ The `generated_by` and `review_status` fields make the roster the natural landin
    - `dispatch({ agent: "explore", team: "research" })` resolves to `deep` (team default_category).
    - `dispatch({ category: "quick", agent: "builder" })` resolves to `quick` (caller override).
 5. Verify tier-map precedence: `dispatch({ category: "quick", agent: "builder" })` still routes to `glm-4.5-air` even if the team `default_category` is `deep`.
+
+   > **_[Footnote 2026-08-04 — `quick` model in this verification step is superseded.]_** `quick` no longer routes to `glm-4.5-air`; per current `tier-map.ts` it routes to **`opencode/deepseek-v4-flash-free`** (FREE, moved off the Z-AI plan 2026-08-04). The tier-map *precedence* claim this step verifies (caller `category` override beats team `default_category`) is unchanged and still the point of the check — only the expected model string is stale. Update the assertion to `opencode/deepseek-v4-flash-free` when re-running this verification.

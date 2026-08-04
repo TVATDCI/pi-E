@@ -1,55 +1,43 @@
-# Pi Handoff — pi-subagents absorption: complete for all lightweight items (2026-07-30)
+# Pi Handoff — align tier-map.ts model docs to the 4-model Z AI Coding Plan (2026-08-04)
 
-**Written at:** 2026-07-30T01:45:00Z
-**Pi session:** commits 989f19e..8551841 (~/.pi/agent, main) — the full absorption arc
-**Original intent:** Explore the cloned pi-subagents (v0.34.0) repo, identify UI/UX features worth absorbing, and ship them — Oracle-reviewed per feature, lean builds on existing spawn.ts/widget, no port of heavy machinery.
+**Written at:** 2026-08-04T00:20:00Z
+**Pi session:** 019fc9fd-5b5f-79d0-ae48-22c623a77c9c
+**Original intent:** Map the operator's tier-map.ts model changes and align every dependent document; then record *why* after the operator discovered the Coding Plan narrowed to 4 callable models.
 
 ## Summary
-Absorbed pi-subagents' UI/UX patterns (not its code) across 15 commits: rich live chain widget, acceptance gates with provenance badges + sandboxed enum verify table, clarify-before-launch overlay, in-parent background dispatch + /stop + batched toasts + cap, fleet view, transcript tail, curated-handoff context param (briefed delegates — replaces wholesale fork), and a hardened prompt-drift detector. Every feature was Oracle-reviewed (GO-WITH-CHANGES), security-verified against live code, unit-tested (110 checks across 8 test files), and committed individually. pi updated 0.82.1→0.83.0 (TypeBox 1.3.7 breaking change verified safe). All lightweight absorption items are done; only heavy Tier C platform machinery remains deferred.
+The operator changed three primaries + several per-tier fallbacks in `tier-map.ts` (quick→FREE opencode, deep/artistry→glm-5.2). I derived the delta by comparing `tier-map.ts` against the README/HANDOFF "before" tables (no git diff available — see Dead ends), then aligned 9 files: living docs updated in place (README table+prose, the load-bearing `index.ts` dispatch-description string, review-loop SKILL, tier-map rationales+top comment) and historical docs given dated addendum footnotes (HANDOFF, ADRs 0007/0009/0010, 3-LAYER-ROUTING-DESIGN). When the operator revealed the *why* (Coding Plan now allows only 4 models), I recorded it in the tier-map `PLAN NARROWED 2026-08-04` block + rationale strings + memory.
 
 ## Files touched
-- `extensions/agent-chain.ts` — rich widget (slice 1), acceptance glyph, clarify param + /chain-clarify, background dispatch (registry, /stop, cap, compact widget, batched toasts), /chain-status (fleet view), /chain-transcript (transcript tail), curated-handoff context param, retention cap, accumulatedText for transcript
-- `extensions/chain-runner.ts` — overrides param + acceptance wiring (inject/parse/strip/evaluate/failStep/dispatch-log) + context param
-- `extensions/orchestration-engine/spawn.ts` — SpawnProgress.modelFlag, modelOverride/thinkingOverride (clarify), !signal?.aborted guard (/stop), buildFullSystemPrompt (curated handoff) + HANDOFF_CAP soft cap + context param
-- `extensions/chain-clarify.ts` (new) — clarify overlay (single ctx.ui.custom, internal editMode sub-modes, exit-reopen editor)
-- `extensions/acceptance.ts` (new) — acceptance gates + enum verify table (shell:false, no YAML env/cwd)
-- `extensions/background-helpers.ts` (new) — pure helpers: resolveBgStatus, formatBgToast, formatBatchedToast, formatFleet, formatTranscript, buildFullSystemPrompt (all bare-node testable)
-- `extensions/lib/prompt-hash.ts` — stableParts() strips volatile blocks + re-seeded for 0.82.1 + 0.83.0
-- `extensions/bd-bridge.ts` — bridge block wrapped in <bridge-context>
-- `extensions/tests/{acceptance,chain-clarify,agent-chain-background,fleet-view,handoff-context,transcript-tail,batched-toasts}.test.ts` (new) — 110 checks total
-- `README.md` — documented all features (Chain runs section, extensions table, quick start, observability, shipped list)
+- `agent/extensions/orchestration-engine/tier-map.ts` — operator changed ids/fallbacks; I aligned 4 stale `rationale` strings to their ids, rewrote the map header (8→7 of 10 Z-AI-plan-primary), 2 type comments, and added the dated `PLAN NARROWED` doc block (the *why*). Date was corrected 07-25→08-04.
+- `agent/README.md` — category→model table (10 rows) + prose line aligned to the new map.
+- `agent/extensions/orchestration-engine/index.ts` — dispatch-description string (injected into every dispatch prompt — load-bearing) aligned.
+- `agent/extensions/orchestration-engine/3-LAYER-ROUTING-DESIGN.md` — dated re-verify footnote on the now-stale per-tier fallback targets.
+- `agent/extensions/orchestration-engine/HANDOFF.md` — dated addendum footnote with the delta (original 07-08 table + 07-13 footnote preserved).
+- `agent/decisions/0010-runtime-fallback-f3.md` — dated footnote superseding the per-tier fallback map.
+- `agent/decisions/0009-persona-forge.md` — dated footnote correcting `ultrabrain → glm-5.1` to `→ opencode-go/kimi-k3` (was already stale pre-session).
+- `agent/decisions/0007-team-selector.md` — dated footnote on the `quick → glm-4.5-air` verification step.
+- `agent/skills/review-loop/SKILL.md` — tier/model cheat line aligned.
 
 ## Decisions made
-- **Build lean, don't port** — pi-subagents' async substrate is ~6,000 LOC; we took patterns, not code, and built in-parent (~250 LOC) reusing spawnSub.
-- **In-parent async, not detached** — completion = spawn promise resolving; result-file/fs.watch is cross-process survival only (Tier A.5 escalation if needed).
-- **Enum verify table (security)** — fixed argv, shell:false, no YAML env/cwd. Arbitrary exec from deny-additive + LLM-callable chain config is unacceptable.
-- **auto acceptance is badge-only, never rejects** — deliberate fork from reference (which rejects on missing report).
-- **Exit-reopen editor, not setHidden** — onHandle/setHidden choreography didn't reliably hide the overlay (editor rendered behind). Exit-reopen: resolve custom() with edit signal → open editor alone → re-open.
-- **Strip BOTH volatile blocks for prompt-hash** — bridge block is a second volatile driver alongside memory-context (Oracle caught this).
-- **Per-job AbortController + registry** — the tool-call signal is turn-coupled; background jobs need their own retained controller for /stop.
-- **Curated handoff replaces wholesale fork** — Oracle verified: cost-explosion (100K+ tokens per child), secret-leak across trust boundaries, pi already ships --fork. Curated handoff (parent composes, ≤2000 chars, system-prompt-level) captures 80% of value at 10% of risk.
-- **Decline supervisor** — foreground deadlock (spawnSub awaits proc close; blocking child = stuck parent), child-tool gap (children run --no-extensions), reply channel infeasible (stdin closed). A bidirectional IPC subsystem, not a feature.
-- **Oracle-review loop per feature** — each was planned → Oracle-reviewed → claims verified against live code (caught Oracle's stale "runWithWidget doesn't exist" claim) → revised → implemented → tested → committed.
-- **pi 0.83.0 update** — TypeBox 1.3.7 breaking change (removed deprecated APIs) verified safe (none used). Prompt-hash re-seeded for the new base prompt.
+- **Why deep/artistry→glm-5.2, quick→FREE opencode:** the Z AI Coding Plan narrowed to 4 callable models (glm-5.2, glm-5.2-highspeed, glm-5-turbo, glm-4.7); glm-5.1 and glm-4.5-air were dropped. deep/artistry had to leave 5.1 (5.2 is the remaining flagship reasoning model); quick had to leave 4.5-air and trivial work isn't worth the remaining on-plan quota → FREE external. Recorded durably.
+- **Historical docs get footnotes, living docs get rewrites** — per the existing `historical_doc_edits_as_footnotes` rule; ADRs/HANDOFF/PROBE-RESULTS keep their audit trail, README/index.ts/SKILL/tier-map are corrected in place.
+- **Left PROBE-RESULTS.md + test-routing-stats.ts alone** — the former is point-in-time probe evidence ("do not rewrite"); the latter are synthetic fixtures, not docs.
 
 ## Dead ends
-- **onHandle/setHidden editor choreography** — Oracle prescribed handle.setHidden(true) before ctx.ui.editor(). Smoke-tested: editor rendered BEHIND the overlay (setHidden didn't hide it). Fix: exit-reopen.
-- **Single-block prompt-hash strip** — first fix stripped only <memory-context>. Oracle found the bridge block (timestamp/entries/stale) is a SECOND volatile driver. Fix: strip both + tag bridge.
-- **Wholesale session fork** — pitched as "forked context." Oracle: pi already ships --fork; cost-explosion (100K+ tokens); secret-leak (auth keys, bd-bridge content, memory facts across trust boundaries); industry precedent (opencode/Claude Code/Aider use curated handoff). Fix: curated-handoff context: param.
-- **Supervisor/intercom** — pitched as ~200 LOC. Oracle verified: foreground deadlock (spawnSub awaits proc close), child-tool gap (--no-extensions), reply channel infeasible (stdin closed). It's a bidirectional IPC subsystem. Declined.
-- **import { type X } not elided by bare node** — background test couldn't import agent-chain.ts (inline type modifier not stripped by --experimental-strip-types). Fix: extracted pure helpers to dependency-free background-helpers.ts.
-- **acceptance.ts missing default factory** — pi loads every top-level extensions/*.ts as an extension; acceptance.ts (a library) omitted the default factory → pi failed to load. Fix: added export default function () {}.
-- **Oracle's stale "runWithWidget doesn't exist" claim** — Oracle asserted the widget logic was inline in execute(). Verified: runWithWidget was extracted in a10a7ea. Corrected with evidence.
+- **No git diff to map the change.** `~/.pi` is not a repo (the repo is `~/.pi/agent`); I initially checked the wrong dir and found no history. Fell back to using the README + HANDOFF tier tables as the "before" snapshot, which worked cleanly.
+- **Standalone `tsc` on `index.ts` spilled ~20 errors** (missing `@earendil-works/pi-coding-agent` module, node types, `.ts` import extensions) — recognized these as pre-existing environment errors from compiling in isolation without the project tsconfig, NOT from my string-literal edit. Relied on `tier-map.ts` standalone (clean) + the fact that the index.ts edit was a pure string swap.
+- **Near-miss (caught): wrong date.** I labeled everything `2026-07-25` — copied from the bridge export timestamp, not the real session date. Caught at close (real date 2026-08-04) and globally corrected across all 7 affected files + both memory fact keys before commit. Lesson for future: the bridge `[FROM bridge, exported …]` timestamp is sisyphus's export time, NOT this session's date — use the real current date.
 
 ## Incomplete work
-- **Heavy Tier C deferred** — parallel runs, nested/fanout, supervisor/intercom, steer, worktree isolation, scheduled runs, async resume, detached survival (Tier A.5). All documented in GROUP3-ASYNC-SPEC.md + ABSORPTION-PLAN.md in the pi-subagents clone. These are platform-grade features (high effort, high infrastructure), deliberately deferred.
-- **README fleet-view LOC slightly stale** — background-helpers.ts is now ~140 LOC (was 85 when last README update added it at 85; this session's README update corrected to 140).
+- **(b) deferred:** optionally adopt `glm-5.2-highspeed` (faster 5.2 variant, newly on-plan) for a latency-sensitive tier (deep/visual-engineering). Operator deferred — model churn is too high to tune right now.
+- **High model churn** (industry flips every 3-4 days, per operator): the 4-model set will need re-verification within days; the *reasoning* is now durable, only specific ids will need refreshing.
 
 ## Proposed bd facts
-- scope=global | category=decision | key=pi_curated_handoff_not_fork | value="Absorption: curated-handoff context: param replaces wholesale session fork for sub-agent context. Parent composes a handoff (findings/constraints/decisions, ≤2000 chars soft cap) → appended to every step's system prompt as ## Handoff Context. Replaces fork because: cost-explosion (100K+ tokens per child), secret-leak across trust boundaries, pi already ships --fork, industry precedent (opencode/Claude Code/Aider use curated handoff). Oracle verified --append-system-prompt is rebuilt every fresh pi process (NOT persisted to session file) so resumed steps re-receive the handoff."
-- scope=global | category=decision | key=pi_supervisor_declined | value="Supervisor/intercom (child→parent questions) declined for the pi harness. Oracle verified three blocking problems: (1) foreground deadlock (spawnSub awaits proc.on(close); blocking child = stuck parent turn), (2) child-tool gap (children run --no-extensions; no clean way to provide contact_supervisor), (3) reply channel infeasible (stdin is 'ignore'/closed; --mode json -p is single-shot). It's a bidirectional IPC subsystem, not a ~200 LOC feature. Revisit only for background delegates if concrete blocking failures recur."
+<pi proposes; sisyphus reviews + promotes via scripts/bd_remember.py. pi NEVER writes bd.>
+- scope=global | category=exact | key=zai_coding_plan_callable_models | value="As of 2026-08-04 the Z AI Coding Plan permits ONLY 4 callable models: glm-5.2, glm-5.2-highspeed, glm-5-turbo, glm-4.7. glm-5.1, glm-4.5-air, glm-5v-turbo, glm-4.7-flashx are now OFF-plan (error 1113/1311 or empty on call). Volatile — re-verify; the model industry flips every few days."
+- scope=global | category=reason | key=pi_selector_shows_catalog_not_subscription | value="pi's model selector shows the provider CATALOG (pi built-ins + ~/.pi/agent/models-store.json, a cache of Z AI's /models endpoint), NOT what the active subscription permits. Z AI /models returns the full platform catalog, so off-plan models still appear in the picker; subscription scope is enforced server-side at call time only. pi has no built-in way to grey out an off-plan model. Footgun: pi's built-in default for zai-coding-cn is hardcoded glm-5.1 (now off-plan) — avoid bare-provider fallback paths."
 
 ## Next steps for opencode
-- **Promote the proposed bd facts** (review first) via scripts/bd_remember.py.
-- **Heavy Tier C** — if the operator wants to continue: the items are parallel runs, nested/fanout, supervisor (background-only IPC), steer, worktree isolation, scheduled runs, async resume, detached survival. All documented as deferred in GROUP3-ASYNC-SPEC.md. These are platform-grade; each is a separate scoped effort.
-- **Smoke-test the new features after /reload** — /chain-status (fleet view), /chain-transcript <runId> (transcript tail), dispatch with context: (curated handoff), batched toasts (fire 2+ background jobs that complete near-simultaneously).
+- **Re-verify the 4 callable models in a few days** — churn is high; the set above is a 2026-08-04 snapshot.
+- **glm-5.2-highspeed adoption** — a pi-side tier-map decision if latency on deep/visual-engineering matters; not urgent.
+- **pi built-in default `glm-5.1` footgun** lives in the pi package (`dist/core/model-resolver.js` `defaultModelPerProvider["zai-coding-cn"]`), now off-plan — not fixable from agent config; just be aware if any path resolves to the bare provider default.

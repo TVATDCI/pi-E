@@ -131,9 +131,9 @@ dispatch({ category: "deep",      agent: "morpheus",   task: "Practical tradeoff
   `researcher`, `keymaker`) — they must not edit. Only the fix `trinity` writes,
   one writer at a time.
 - **Category sets the model** (tier-map is the sole model authority): review =
-  `unspecified-high` (glm-5-turbo); deep trace = `deep` (glm-5.1); recon = `quick`
-  (glm-4.5-air); web research = `research` (glm-4.7). Pick the cheapest tier that
-  does the job — don't burn glm-5.2 on review passes.
+  `unspecified-high` (glm-5-turbo); deep trace = `deep` (glm-5.2); recon = `quick`
+  (opencode/deepseek-v4-flash-free, FREE); web research = `research` (glm-4.7). Pick the cheapest tier that
+  does the job — don't burn glm-5.2/5-turbo on review passes.
 - **Narrow tasks** — each dispatch is one focused angle/objective.
 - **Keep it small — this is a review pass, not a refactor.** A single-file review =
   ≤3 reviewers + ≤1 fix per round. If you are about to exceed ~6 dispatches for one

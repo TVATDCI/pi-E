@@ -54,6 +54,9 @@ All 5 plan-eligible text models are **Pi built-ins** under `zai-coding-cn`: glm-
 > state). The global `FALLBACK` referenced below in “tier → glm-5.2 → throw” is
 > **`opencode/glm-5.1`** (the code-level `FALLBACK` const), not glm-5.2. The table above is the
 > original 2026-07-08 v2 record; live values live in `tier-map.ts` `TIERS` + `README.md`.
+>
+> **_[Footnote 2026-08-04 — 3 primaries + several per-tier fallbacks superseded.]_**
+> `tier-map.ts` model update: `quick` moved off Z-AI plan → **`opencode/deepseek-v4-flash-free`** (FREE; was `zai-coding-cn/glm-4.5-air`), so **7 of 10** categories are now Z-AI-plan-primary (was 8). `deep` → **`glm-5.2`** (was glm-5.1). `artistry` → **`glm-5.2`** (was glm-5.1). Per-tier fallbacks changed: `unspecified-low`/`writing` → `opencode/deepseek-v4-flash-free` (was `opencode-go/hy3`), `quick` → `opencode/ling-3.0-flash-free`, `deep`/`visual-engineering` → `opencode-go/glm-5.2` (was glm-5.1). Unchanged: `unspecified-high` (glm-5-turbo), `ultrabrain` (opencode-go/kimi-k3), `writing`/`research`/`unspecified-low` primaries, `git-commit-message`, global `FALLBACK` (`opencode-go/glm-5.1`). Live values: `tier-map.ts` `TIERS` + `README.md` table.
 
 8/9 categories are Z-AI-plan-primary (LR-0019); git-commit-message stays on the FREE opencode tier by design. opencode survives in OmO fallback chains (not modeled here), the `explore` agent, the `git-commit-message` category, and multimodal-looker's fallback.
 

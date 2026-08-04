@@ -223,19 +223,19 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
     source ∈ {tier-map, persona-override, functional-agent, downshift-unavailable, downshift-exhausted}
 ```
 
-**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. glm-5 is deprecated/broken on Z-AI, so pi uses tested-available models: `unspecified-high` & `visual-engineering` → **glm-5-turbo**, `artistry` → glm-5.1):
+**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. glm-5 is deprecated/broken on Z-AI, so pi uses tested-available models: `unspecified-high` & `visual-engineering` → **glm-5-turbo**, `deep` & `artistry` → **glm-5.2**, `quick` → FREE `opencode/deepseek-v4-flash-free` (moved off Z-AI plan 2026-08-04 to conserve Coding-Plan quota)):
 
 | Category             | Model                           | Thinking | Quota                          | Functional agent | Fallback                        |
 | -------------------- | ------------------------------- | -------- | ------------------------------ | ---------------- | ------------------------------- |
-| `quick`              | zai-coding-cn/glm-4.5-air       | off      | 1×                             | keymaker         | opencode/deepseek-v4-flash-free |
-| `unspecified-low`    | zai-coding-cn/glm-4.7           | off      | 1×                             | trinity          | opencode-go/hy3                 |
+| `quick`              | opencode/deepseek-v4-flash-free | off      | FREE                           | keymaker         | opencode/ling-3.0-flash-free   |
+| `unspecified-low`    | zai-coding-cn/glm-4.7           | off      | 1×                             | trinity          | opencode/deepseek-v4-flash-free |
 | `unspecified-high`   | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | trinity          | opencode-go/kimi-k2.7-code      |
-| `deep`               | zai-coding-cn/glm-5.1           | high     | 1×                             | morpheus         | opencode-go/glm-5.1             |
+| `deep`               | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | morpheus         | opencode-go/glm-5.2            |
 | `ultrabrain`         | opencode-go/kimi-k3             | high     | —                              | neo              | zai-coding-cn/glm-5.2           |
-| `writing`            | zai-coding-cn/glm-4.7           | medium   | 1×                             | mouse            | opencode-go/hy3                 |
+| `writing`            | zai-coding-cn/glm-4.7           | medium   | 1×                             | mouse            | opencode/deepseek-v4-flash-free |
 | `research`           | zai-coding-cn/glm-4.7           | medium   | 1×                             | researcher       | opencode-go/minimax-m2.7        |
-| `visual-engineering` | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1             |
-| `artistry`           | zai-coding-cn/glm-5.1           | high     | 1×                             | architect        | opencode-go/glm-5.1             |
+| `visual-engineering` | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.2            |
+| `artistry`           | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1            |
 | `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | opencode-go/minimax-m2.7        |
 
 Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary model returns an empty response (e.g., Z-AI Coding Plan quota exhausted). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
