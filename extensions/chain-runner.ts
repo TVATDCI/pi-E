@@ -8,6 +8,7 @@ import type { TaskCategory } from "./orchestration-engine/tier-map.ts";
 import { READ_ONLY_CATEGORIES, tierEntryFor } from "./orchestration-engine/tier-map.ts";
 import { resolveBudgets, budgetUsageState } from "./budgets/index.ts";
 import { accumulateUsage, sessionUsage } from "./orchestration-engine/session-state.ts";
+import { buildReviewTask, parseReviewerResult } from "./orchestration-engine/review-helpers.ts";
 import {
   coerceAcceptance,
   resolveAcceptance,
@@ -17,6 +18,8 @@ import {
   inferDefaultLevel,
   type AcceptanceInput,
   type StepAcceptance,
+  type AcceptanceReview,
+  type ReviewerResult,
 } from "./acceptance.ts";
 
 export interface ChainStep {
@@ -134,6 +137,28 @@ export function loadChains(ctx: ExtensionContext): Map<string, Chain> {
   return chains;
 }
 
+// ②b reviewer orchestration. The independent reviewer is spawned ONLY on an explicit review.required
+// (Q2.1); auto-inferred/risky review stays a badge. Model: category "deep" (glm-5.2 @high) — engineering-
+// standards judgment (see memory reviewer_orchestration_model_glm52). The reviewer agent is read-only;
+// reuses the trusted resolveAndSpawn (inherits the ① budget nudge + dispatch-log). Failure / no structured
+// block ⇒ returns undefined ⇒ the caller leaves a review-required badge + warns (Q-2b-3, non-terminal).
+const REVIEW_CATEGORY: TaskCategory = "deep";
+
+async function runReviewer(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  workOutput: string,
+  review: AcceptanceReview | undefined,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<ReviewerResult | undefined> {
+  const task = buildReviewTask(workOutput, review);
+  const agent = review?.agent ?? "reviewer";
+  const result = await resolveAndSpawn(pi, task, REVIEW_CATEGORY, agent, cwd, ctx, undefined, signal, "review-orchestration");
+  if (result.code !== 0 || !result.output.trim()) return undefined; // reviewer failed ⇒ caller leaves review-required badge
+  return parseReviewerResult(result.output);
+}
+
 export async function runChainByName(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -231,6 +256,17 @@ export async function runChainByName(
     let stepAcceptance: StepAcceptance | undefined;
     if (resolvedAcceptance && result.code === 0) {
       stepAcceptance = await evaluateAcceptance(resolvedAcceptance, result.output, cwd ?? ctx.cwd, signal);
+      // ②b: EXPLICIT review.required + evidence passed (review-required) ⇒ orchestrate an independent reviewer.
+      // Auto-inferred/risky review never spawns (Q2.1). A clean reviewer result re-evaluates to reviewed/rejected;
+      // a missing/failed result leaves a non-terminal review-required badge + a dispatch-log warning (Q-2b-3).
+      if (stepAcceptance.provenance === "review-required" && step.acceptance?.review?.required === true) {
+        const reviewerResult = await runReviewer(pi, ctx, result.output, resolvedAcceptance.review, cwd ?? ctx.cwd, signal);
+        if (reviewerResult) {
+          stepAcceptance = await evaluateAcceptance(resolvedAcceptance, result.output, cwd ?? ctx.cwd, signal, reviewerResult);
+        } else {
+          pi.appendEntry("dispatch-log", { kind: "review-warning", chain: chainName, step: step.name, agent: step.agent, note: "reviewer returned no structured result — step left at review-required (non-terminal)" });
+        }
+      }
       if (stepAcceptance.failStep) stepCode = 1;
       // Persist provenance to dispatch-log so the badge survives widget teardown (ABSORPTION-PLAN §A).
       pi.appendEntry("dispatch-log", {
