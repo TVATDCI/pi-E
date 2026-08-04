@@ -7,7 +7,7 @@
 //   (2) the gate flow — resolveBudgets(hard) → budgetUsageState → not-exhausted under limit →
 //       exhausted after accumulate crosses hard (mirrors the index.ts/chain-runner gate logic).
 //   (3) consistency — the no-budget DEFAULT path can never exhaust (gate cannot fire).
-import { accumulateUsage, sessionUsage } from "../orchestration-engine/session-state.ts";
+import { accumulateUsage, resetUsage, sessionUsage } from "../orchestration-engine/session-state.ts";
 import { resolveBudgets, budgetUsageState } from "../budgets/index.ts";
 
 const READ_ONLY = new Set(["quick", "research", "git-commit-message"]);
@@ -59,6 +59,14 @@ sessionUsage.costUsd = 0;
 const costBudgets = resolveBudgets({ category: "quick", readOnlyCategories: READ_ONLY, usageBudget: { costUsd: { hard: 0.05 } } });
 accumulateUsage({ input: 0, output: 0, cost: 0.06 });
 check("over cost hard ⇒ exhausted, reason costUsd", budgetUsageState(costBudgets, sessionUsage)?.reason === "costUsd");
+
+// ── resetUsage (review-loop round-2 F2b) ─────────────────────────────
+accumulateUsage({ input: 500, output: 0, cost: 0.1 });
+check("pre-reset: accumulator is non-zero", sessionUsage.inputTokens === 500 && sessionUsage.costUsd > 0);
+resetUsage();
+check("resetUsage zeroes input tokens", sessionUsage.inputTokens === 0);
+check("resetUsage zeroes output tokens", sessionUsage.outputTokens === 0);
+check("resetUsage zeroes cost", sessionUsage.costUsd === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

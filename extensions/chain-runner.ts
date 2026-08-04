@@ -186,9 +186,11 @@ export async function runChainByName(
       (resolvedAcceptance ? formatAcceptancePrompt(resolvedAcceptance) : "");
 
     // ① per-step budget resolution + usageBudget gate (PORT-PLAN §①). Mirrors dispatch (index.ts):
-    // turn/tool are prompt-nudges from the step's tier-map category default; the gate blocks a LATER
-    // step when a hard usage limit is exhausted (shared sessionUsage across dispatch + run_chain).
-    // Runs before onStepStart so an aborted step never leaves a stale widget row.
+    // turn/tool are prompt-nudges from the step's tier-map category default. The usageBudget gate is
+    // DORMANT by default (no usageBudget is passed — upstream's UsageBudgetLimitConfig requires `hard`,
+    // so any default would ACTIVATE it); it reports cumulative usage always and blocks a later step
+    // ONLY when a caller/config supplies a usageBudget with a hard limit (shared sessionUsage across
+    // dispatch + run_chain). Runs before onStepStart so an aborted step never leaves a stale widget row.
     const stepTier = tierEntryFor(category);
     const stepBudgets = resolveBudgets({
       category,

@@ -13,7 +13,7 @@ import { isPeakHours, isPromoActive, TIERS, READ_ONLY_CATEGORIES, tierEntryFor, 
 import { aggregateDispatchLog, quotaMarker, type DispatchLogEntry } from "./routing-stats.ts";
 import { resolveAndSpawn, sessionKey } from "./spawn.ts";
 import { resolveBudgets, budgetUsageState } from "../budgets/index.ts";
-import { accumulateUsage, sessionUsage } from "./session-state.ts";
+import { accumulateUsage, sessionUsage, resetUsage } from "./session-state.ts";
 import { resolveFunctionalAgent } from "./agent-map.ts";
 
 // 0b: per-{agent, project} Promise mutex. Corrected delete-only-if-tail pattern
@@ -172,6 +172,9 @@ const CategoryEnum = Type.Union([
 export default function (pi: ExtensionAPI) {
   const subs = new Map<number, SubState>();
   let nextId = 1;
+  // ① tracks the active session id so an in-process /resume (session-ID change without session_start)
+  // can reset the shared usage accumulator (review-loop round-2 F2b).
+  let lastSessionId: string | undefined;
   let widgetCtx: ExtensionContext | undefined;
   let tick: ReturnType<typeof setInterval> | undefined;
 
@@ -241,7 +244,21 @@ export default function (pi: ExtensionAPI) {
     widgetCtx = ctx;
     loadTeams(ctx);
     if (activeTeamName) ctx.ui.setStatus("team", `team: ${activeTeamName}`);
+    // ① a new session starts with a fresh usage accumulator (review-loop round-2 F2b).
+    lastSessionId = ctx.sessionManager.getSessionId();
+    resetUsage();
     render();
+  });
+
+  // ① session_start does NOT fire on in-process /resume — detect a session-ID change on every turn
+  // and reset the shared usage accumulator so a resumed session isn't charged the prior one's spend
+  // (mirrors mini-task-tracker.ts; review-loop round-2 F2).
+  pi.on("turn_start", async (_e, ctx) => {
+    const sid = ctx.sessionManager.getSessionId();
+    if (sid !== lastSessionId) {
+      lastSessionId = sid;
+      resetUsage();
+    }
   });
 
   pi.on("before_agent_start", async (event, _ctx) => {
