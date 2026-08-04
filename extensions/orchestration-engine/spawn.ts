@@ -266,6 +266,13 @@ export function spawnSub(
   });
 }
 
+export interface ResolveAndSpawnOptions {
+  modelOverride?: string;
+  thinkingOverride?: string;
+  context?: string;
+  budgets?: ResolvedBudgets;
+}
+
 export async function resolveAndSpawn(
   pi: ExtensionAPI,
   task: string,
@@ -276,11 +283,9 @@ export async function resolveAndSpawn(
   onProgress?: (p: SpawnProgress) => void,
   signal?: AbortSignal,
   agentSource?: string,
-  modelOverride?: string,
-  thinkingOverride?: string,
-  context?: string,
-  budgets?: ResolvedBudgets,
+  options?: ResolveAndSpawnOptions,
 ): Promise<SpawnResult> {
+  const { modelOverride, thinkingOverride, context, budgets } = options ?? {};
   const persona = agent ? loadPersona(agent) : undefined;
   if (agent && !persona) {
     return {

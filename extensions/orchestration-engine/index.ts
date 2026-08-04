@@ -9,10 +9,11 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
-import { isPeakHours, isPromoActive, TIERS, READ_ONLY_CATEGORIES, type TaskCategory } from "./tier-map.ts";
+import { isPeakHours, isPromoActive, TIERS, READ_ONLY_CATEGORIES, tierEntryFor, type TaskCategory } from "./tier-map.ts";
 import { aggregateDispatchLog, quotaMarker, type DispatchLogEntry } from "./routing-stats.ts";
 import { resolveAndSpawn, sessionKey } from "./spawn.ts";
-import { resolveBudgets, budgetUsageState, type CostSummary } from "../budgets/index.ts";
+import { resolveBudgets, budgetUsageState } from "../budgets/index.ts";
+import { accumulateUsage, sessionUsage } from "./session-state.ts";
 import { resolveFunctionalAgent } from "./agent-map.ts";
 
 // 0b: per-{agent, project} Promise mutex. Corrected delete-only-if-tail pattern
@@ -170,9 +171,6 @@ const CategoryEnum = Type.Union([
 
 export default function (pi: ExtensionAPI) {
   const subs = new Map<number, SubState>();
-  // ① session-scoped cumulative usage for the usageBudget pre-launch gate (PORT-PLAN §①). Closure-
-  // scoped → resets on /reload or restart (matches the "reported, no reservation" semantics).
-  const sessionUsage: CostSummary = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let nextId = 1;
   let widgetCtx: ExtensionContext | undefined;
   let tick: ReturnType<typeof setInterval> | undefined;
@@ -333,7 +331,7 @@ export default function (pi: ExtensionAPI) {
       // pre-launch gate (blocks LATER dispatches when a hard limit is exhausted); turn/tool are
       // prompt-nudges. The gate runs BEFORE creating the SubState so an exhausted session returns
       // cleanly without leaving a dangling widget row.
-      const tier = TIERS[category];
+      const tier = tierEntryFor(category);
       const budgets = resolveBudgets({
         category,
         readOnlyCategories: READ_ONLY_CATEGORIES,
@@ -372,11 +370,7 @@ export default function (pi: ExtensionAPI) {
         },
         signal,
         agentSource,
-        // modelOverride, thinkingOverride, context: omitted (undefined) — budgets is the ① arg.
-        undefined,
-        undefined,
-        undefined,
-        budgets,
+        { budgets },
       ));
 
       sub.status = result.code === 0 ? "done" : "error";
@@ -387,12 +381,8 @@ export default function (pi: ExtensionAPI) {
       sub.toolCount = result.toolCount;
       render(); stopTickIfIdle();
 
-      // ① accumulate reported usage into the session total for the usageBudget gate (no reservation).
-      if (result.usage) {
-        sessionUsage.inputTokens += result.usage.input;
-        sessionUsage.outputTokens += result.usage.output;
-        sessionUsage.costUsd += result.usage.cost;
-      }
+      // ① accumulate reported usage into the shared session total (dispatch + run_chain) for the gate.
+      accumulateUsage(result.usage);
 
       const tag = agentName ? ` (${agentName})` : "";
       const dsTag = result.downshiftedFrom ? ` [downshifted from ${result.downshiftedFrom}]` : "";

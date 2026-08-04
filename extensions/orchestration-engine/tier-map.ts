@@ -281,6 +281,15 @@ export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> = new Set<TaskCateg
 
 export const FALLBACK = { provider: "opencode-go", id: "glm-5.1" } as const;
 
+/** Tier entry for a category, GUARDED: an unknown/invalid category (e.g. an unvalidated teams.yaml
+ *  member.category / default_category, or a typo) falls back to DEFAULT_CATEGORY instead of
+ *  returning undefined and crashing the caller. Closes the unguarded `TIERS[category]` path
+ *  (review-loop S1) at BOTH the dispatch site (index.ts) and the chain site (chain-runner.ts).
+ *  Mirrors the guard `resolveModel` already applies. */
+export function tierEntryFor(category: TaskCategory | string): TierEntry {
+  return category in TIERS ? TIERS[category as TaskCategory] : TIERS[DEFAULT_CATEGORY];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Resolver (Layer 2 logic)
 // ─────────────────────────────────────────────────────────────────────────────

@@ -5,6 +5,9 @@ import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
 import { resolveAndSpawn, loadPersona, type UsageStats, type SpawnProgress } from "./orchestration-engine/spawn.ts";
 import type { TaskCategory } from "./orchestration-engine/tier-map.ts";
+import { READ_ONLY_CATEGORIES, tierEntryFor } from "./orchestration-engine/tier-map.ts";
+import { resolveBudgets, budgetUsageState } from "./budgets/index.ts";
+import { accumulateUsage, sessionUsage } from "./orchestration-engine/session-state.ts";
 import {
   coerceAcceptance,
   resolveAcceptance,
@@ -182,6 +185,29 @@ export async function runChainByName(
       stepPrompt.replace(/\$INPUT/g, input).replace(/\$ORIGINAL/g, original) +
       (resolvedAcceptance ? formatAcceptancePrompt(resolvedAcceptance) : "");
 
+    // ① per-step budget resolution + usageBudget gate (PORT-PLAN §①). Mirrors dispatch (index.ts):
+    // turn/tool are prompt-nudges from the step's tier-map category default; the gate blocks a LATER
+    // step when a hard usage limit is exhausted (shared sessionUsage across dispatch + run_chain).
+    // Runs before onStepStart so an aborted step never leaves a stale widget row.
+    const stepTier = tierEntryFor(category);
+    const stepBudgets = resolveBudgets({
+      category,
+      readOnlyCategories: READ_ONLY_CATEGORIES,
+      tierTurnBudget: stepTier.turnBudget,
+      tierToolBudget: stepTier.toolBudget,
+    });
+    const stepUbState = budgetUsageState(stepBudgets, sessionUsage);
+    if (stepUbState?.exhausted) {
+      const reason = stepUbState.reason === "costUsd" ? "cost" : "tokens";
+      return {
+        ok: false,
+        chainName,
+        finalOutput,
+        stepResults,
+        error: { step: step.name, output: `Chain aborted at step '${step.name}': session usage budget exhausted (${reason} hard limit). Cumulative: ${sessionUsage.inputTokens + sessionUsage.outputTokens} tokens, $${sessionUsage.costUsd.toFixed(4)}. Start a new session or raise the usageBudget.` },
+      };
+    }
+
     onStepStart?.(step.name);
     const result = await resolveAndSpawn(
       pi,
@@ -193,10 +219,10 @@ export async function runChainByName(
       onStepProgress ? (p) => onStepProgress(step.name, p) : undefined,
       signal,
       undefined,
-      stepOverride?.model,
-      stepOverride?.thinking,
-      context,
+      { modelOverride: stepOverride?.model, thinkingOverride: stepOverride?.thinking, context, budgets: stepBudgets },
     );
+    // ① accumulate this step's reported usage into the shared session total (counts toward the gate).
+    accumulateUsage(result.usage);
 
     let stepCode = result.code;
     let stepAcceptance: StepAcceptance | undefined;
