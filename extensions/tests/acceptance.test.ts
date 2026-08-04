@@ -134,6 +134,15 @@ async function main(): Promise<void> {
   const autoRev = resolveAcceptance(undefined, "checked", "ship the migration")!;
   const er5 = await evaluateAcceptance(autoRev, `impl\n${REPORT}`, "/tmp");
   check("auto risky review-required ⇒ non-terminal (failStep false)", er5.provenance === "review-required" && er5.failStep === false);
+  // M1 (round-1): lock the review state-machine edge cases before ②b makes them reachable.
+  const er6 = await evaluateAcceptance(autoRev, `impl\n${REPORT}`, "/tmp", undefined, { blockers: ["bug"] });
+  check("auto risky + reviewer blockers ⇒ rejected but NON-TERMINAL (badge-only)", er6.provenance === "rejected" && er6.failStep === false);
+  check("reviewed provenance ⇒ failStep false (terminal success)", er2.failStep === false);
+  const revOff = resolveAcceptance({ level: "checked", review: { required: false } }, "checked")!;
+  check("review.required=false ⇒ no review-required badge (checked)", (await evaluateAcceptance(revOff, `impl\n${REPORT}`, "/tmp")).provenance === "checked");
+  const revNoReqRaw = coerceAcceptance({ level: "checked", review: { agent: "bob" } });
+  check("coerce: review without required passes through", revNoReqRaw?.review?.agent === "bob");
+  check("review without required ⇒ ignored (checked)", (await evaluateAcceptance(resolveAcceptance(revNoReqRaw, "checked")!, `impl\n${REPORT}`, "/tmp")).provenance === "checked");
 
   // --- 11. ② parser canonicalization (snake_case / string-bool / scalar-array) ---
   const snakeReport = "```acceptance-report\n" + JSON.stringify({

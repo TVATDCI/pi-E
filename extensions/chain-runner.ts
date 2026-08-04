@@ -243,6 +243,7 @@ export async function runChainByName(
         inferred: stepAcceptance.inferred,
         failStep: stepAcceptance.failStep,
         ...(stepAcceptance.verifyResults ? { verifyResults: stepAcceptance.verifyResults } : {}),
+        ...(stepAcceptance.review ? { review: stepAcceptance.review } : {}), // M3: surface the review gate
       });
     }
 

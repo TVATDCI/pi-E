@@ -130,8 +130,10 @@ const LEVEL_RANK: Record<Provenance, number> = {
   attested: 1,
   checked: 2,
   verified: 3,
-  // ② review-required/reviewed are computed POST-rank in evaluateAcceptance (review dimension), so
-  // their ranks exist only to satisfy Record<Provenance,number> — never on the evidence axis compared.
+  // ② SAFETY: review-required/reviewed are computed POST-rank in evaluateAcceptance (the review block
+  // runs AFTER gatePassed). These ranks exist ONLY to satisfy Record<Provenance,number> — they are
+  // NEVER operands in the gatePassed comparison (left side is always claimed/attested/checked/verified;
+  // right side is a ResolvedLevel). Do NOT add a comparison that uses them.
   "review-required": 4,
   reviewed: 5,
   rejected: -1,
@@ -309,7 +311,7 @@ export function formatAcceptancePrompt(a: ResolvedAcceptance): string {
     // ② tell the child an independent review is required so it scopes accordingly.
     lines.push(
       "",
-      `Independent review REQUIRED${a.review.agent ? ` (agent: ${a.review.agent})` : ""}${a.review.focus ? `; focus: ${a.review.focus}` : ""}. Evidence alone is not sufficient — the parent runs an independent reviewer.`,
+      `Independent review REQUIRED${a.review.agent ? ` (agent: ${a.review.agent})` : ""}${a.review.focus ? `; focus: ${a.review.focus}` : ""}. Evidence alone is not sufficient — the parent requires an independent reviewer's sign-off before accepting this work.`,
     );
   }
   lines.push(
@@ -380,9 +382,11 @@ function canonicalizeReport(raw: unknown): AcceptanceReport {
   const ARRAY_FIELDS = new Set([
     "changedFiles",
     "testsAddedOrUpdated",
-    "residualRisks",
+    "commandsRun", // M2: template shows arrays; a scalar child emission gets wrapped
     "validationOutput",
+    "residualRisks",
     "reviewFindings",
+    "criteriaSatisfied", // M2
   ]);
   for (const [k, v] of Object.entries(src)) {
     const key = camel(k);
