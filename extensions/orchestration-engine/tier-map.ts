@@ -147,6 +147,13 @@ export function isPeakHours(now = new Date()): boolean {
 //
 // Quota cost legend: 1× = standard, 2× = post-promo off-peak (5.2/5-turbo),
 //                    3× = peak (5.2/5-turbo), FREE = external (opencode), N/A = not on plan
+// ─── STRONG-MODEL-AT-JUDGING INVARIANT (graph-eng §7/§17c) ───────────────────
+// The review/verify/oracle categories — unspecified-high, deep, ultrabrain —
+// MUST stay strong-tier, and their per-tier fallback + the global FALLBACK
+// (L253) MUST land only on glm-5.x / kimi. Never downgrade these to a FREE or
+// cheap tier (deepseek-v4-flash-free / ling-*-flash-free / minimax-m2.7):
+// one cheap-model review inside a fan-out cascades untraceably. See AGENTS.md
+// "Model selection". If you weaken this, update both files.
 export const TIERS: Record<TaskCategory, TierEntry> = {
   quick: {
     provider: "opencode",

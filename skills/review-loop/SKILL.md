@@ -28,6 +28,17 @@ prompts, rewritten for pi's actual primitives:
 - **Fresh context is the default** and is exactly what these patterns want:
   reviewers inspect the repo/diff directly, not the parent's chat history.
 
+## Vocabulary (graph-eng §15 → pi primitives)
+
+pi primitives already implement these shapes; this section gives them names
+so fan-out work can be discussed explicitly.
+
+- **node / edge** — `dispatch()` / its `task` arg + `context:` curated-handoff + chain vars `$INPUT`·`$ORIGINAL`
+- **fan-out** — N `dispatch()` calls in one turn (this skill, Mode A)
+- **barrier** — "parent reads ALL N before synthesizing" (Mode A step 3); de-facto from blocking dispatch — NO code gate
+- **diamond** — fan-out + parent-mediated fan-in (Mode A is pi's only diamond). `scout-twice` (agent-chain.yaml) is the linear contrast (scout→verify, serial) — NOT a diamond.
+- **second-opinion** — `dispatch({agent:"oracle"})` on a high-risk finding (Mode A step 6)
+
 ## Prerequisites (before ANY dispatch)
 
 review-loop needs a **concrete review target** — a file, a diff, a PR, or a named
@@ -65,15 +76,34 @@ When the user wants N reviewers on a change/diff/PR:
    - Prefer **3 strong reviewers over many vague ones.**
    - Use `reviewer-security` (category `deep`) for the security angle; `morpheus`
      (category `deep`) if the angle needs dependency/flow tracing beyond a surface review.
-3. **Synthesize yourself** (parent fan-in) into:
-   - **fixes worth doing now**
-   - **optional improvements**
-   - **feedback to ignore/defer** (with a short reason)
-   Never blindly apply every suggestion. If a reviewer surfaces an unapproved
-   product/scope/architecture decision, **stop and ask the user**.
+3. **Synthesize only over complete fan-in.** Each foreground dispatch blocks,
+   so all N reviewer results land in your context before you synthesize. A
+   reviewer that ERRORED or returned EMPTY is a MISSING angle — re-dispatch
+   it at smaller scope, or explicitly mark that angle uncovered in the
+   synthesis. Never fold a broken result silently into the merge.
+   (dispatch-log is the post-hoc audit trail, not the in-flight check.)
+   **Same rule governs Mode B re-review rounds** — a broken/empty result in
+   round 2+ is still a missing angle.
+   Synthesize into: **fixes worth doing now** · **optional improvements** ·
+   **feedback to ignore/defer** (with a short reason). Never blindly apply
+   every suggestion. If a reviewer surfaces an unapproved product/scope/
+   architecture decision, **stop and ask the user**.
 4. **Apply only with consent** unless the user said "autofix" or already authorized
    fixes. End the ask with a compact numbered menu:
    `[1] Apply fixes-worth-doing-now   [2] + optional improvements`.
+5. **(reserved — hung-reviewer timeout escape; tracked as Edit 7 BUILD in
+   `extensions/orchestration-engine/spawn.ts`; not executable today)**
+6. **Second-opinion lane (high-risk only, post-synthesis).** If synthesis
+   surfaced a high-risk trigger — reviewer FAIL at high confidence,
+   reviewer-security CRITICAL/HIGH, or momus FAIL — fire ONE fresh oracle
+   pass before applying fixes:
+   `dispatch({category:"ultrabrain", agent:"oracle", task:"Confirm or clear
+   this high-risk finding from a fresh read; do not inherit prior reasoning.
+   <finding + file:line + evidence>"})`.
+   Verdict: CONFIRMED→lead blocker; CLEARED→downgrade to advisory;
+   INCONCLUSIVE→original verdict stands. No high-risk finding → no oracle
+   pass (cost-discipline: ultrabrain is the expensive tier, spend only when
+   warranted).
 
 ## Mode B — Review loop (iterate until clean)
 

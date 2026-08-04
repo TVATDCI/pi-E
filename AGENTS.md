@@ -52,6 +52,15 @@ Not the session JSONL, not `/note`, not compaction summaries — those are ephem
 
 Curate `/scoped-models` as a small tiered set for `Ctrl+P` cycling: a **cheap/fast** model for exploration, search, and bulk mechanical edits; a **strong reasoning** model for planning, synthesis, gate review, and hard debugging. Raise `--thinking` (Shift+Tab) only for genuinely hard problems. Don't burn the strong model on work the cheap one handles cleanly. **Dispatch-tier routing:** when delegating to sub-agents (if enabled), route trivial mechanical work to the cheap tier and reserve the strong tier for synthesis.
 
+- **No cheap model at a judging node.** Review, verify, and oracle dispatches
+  (`unspecified-high`→reviewer, `deep`→reviewer-security/morpheus,
+  `ultrabrain`→oracle/neo) must use a strong-tier category. All three judging
+  categories' primaries AND fallback chains land only on glm-5.x or kimi
+  (tier-map.ts:169-195, 253) — never on FREE/cheap tiers
+  (deepseek-v4-flash-free / ling-*-flash-free / minimax-m2.7). One bad
+  cheap-model review among parallel reviewers cascades through the whole graph
+  and can't be traced.
+
 ## Branching
 
 `/tree` navigates the session in-place; `/fork` starts a new session from a prior message; `/clone` duplicates the active branch. Full history stays in the JSONL — nothing is lost. **Convention:** before a risky refactor, a large speculative change, or a "let me try this" experiment, suggest `/fork` so the trunk stays clean and the attempt is reversible. Use `/tree` to revisit or branch from any earlier point rather than discarding context.

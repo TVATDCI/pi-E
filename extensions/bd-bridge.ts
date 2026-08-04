@@ -11,6 +11,9 @@
 //
 // Filters: only constraint/exact/preference/reason/decision categories (skip
 // sisyphus-internal: session-*, pre-test:*, next-session:*, files:*).
+//
+// NOTE: memory-projection only — does NOT expose opencode tools/MCP;
+// dispatched subprocesses run --no-extensions, so they cannot call codegraph or other MCP tools.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync, existsSync, statSync, appendFileSync } from "node:fs";

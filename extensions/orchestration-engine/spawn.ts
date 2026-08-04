@@ -174,6 +174,12 @@ export function spawnSub(
   return new Promise((resolve) => {
     const proc = spawn("pi", args, { cwd: cwd ?? ctx.cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
 
+    // TODO(Edit 7): wrap spawn in Promise.race([spawn, sleep(timeoutMs)]) when
+    // dispatch gains a timeoutMs param; on expiry SIGTERM the child and return
+    // {outcome: "timeout", downshiftedFrom: "timeout"} in the dispatch-log
+    // receipt. Tracked in graph-engineering absorption plan; unblocks
+    // review-loop Mode A hung-reviewer INCONCLUSIVE escape (Edit 4a). Until
+    // this lands, the only abort is operator-Esc (manual).
     // 0a: Esc/abort must terminate the sub-agent process — no orphan subprocesses.
     let killed = false;
     const killProc = () => {
