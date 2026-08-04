@@ -92,6 +92,24 @@ export function toolBudgetState(
   };
 }
 
+/** Launch-time tool-budget nudge injected into the child system prompt. Process-mode honest:
+ *  the hard BLOCK itself cannot be enforced from the parent (no mid-run channel — spawnSub runs
+ *  with stdin ignored), so this is a heads-up asking the child to self-limit. Mirrors
+ *  appendTurnBudgetSystemPrompt. Exported for testing. */
+export function appendToolBudgetSystemPrompt(
+  systemPrompt: string,
+  budget: ResolvedToolBudget | undefined,
+): string {
+  if (!budget) return systemPrompt;
+  const block = [
+    "## Tool budget",
+    `This child run has a tool-call budget: hard ${budget.hard}${budget.soft !== undefined ? ` (soft ${budget.soft})` : ""}.`,
+    "When you approach the soft limit, stop starting new browsing/search work and finalize from the context you already have.",
+    "The supervisor cannot steer this process-mode run after launch, so treat this as the wrap-up request.",
+  ].join("\n");
+  return systemPrompt.trim() ? `${systemPrompt.trim()}\n\n${block}` : block;
+}
+
 export function shouldBlockToolForBudget(
   budget: ResolvedToolBudget,
   toolName: string,

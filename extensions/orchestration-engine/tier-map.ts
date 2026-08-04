@@ -51,6 +51,8 @@
  *   they were removed from models.json and must NOT appear in this map.
  */
 
+import type { ToolBudgetConfig, TurnBudgetConfig } from "../budgets/types.ts";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,6 +96,13 @@ export interface TierEntry {
   rationale: string;
   fallbackProvider?: string;
   fallbackId?: string;
+  /**
+   * Per-dispatch turn/tool budget DEFAULTS (PORT-PLAN-v0.40.md ①). Read-only categories carry
+   * generous turn budgets to bound runaway recon; writers carry NONE by default (conservative
+   * policy — never hard-cap mutation workers). Resolved in budgets/resolver.ts; enforced as a
+   * launch-time prompt-nudge in spawn.ts. usageBudget is session-level, NOT per-category. */
+  turnBudget?: TurnBudgetConfig;
+  toolBudget?: ToolBudgetConfig;
 }
 
 export interface ResolvedModel {
@@ -161,6 +170,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackProvider: "opencode",
     fallbackId: "ling-3.0-flash-free",
     thinkingLevel: "off",
+    turnBudget: { maxTurns: 12 },
     rationale:
       "FREE external tier (opencode/deepseek-v4-flash-free); short fast tasks. Moved off Z-AI plan 2026-08-04 because glm-4.5-air was DROPPED from the Coding Plan (plan narrowed to 4 models), and trivial work isn't worth the remaining on-plan quota anyway → FREE opencode. Per-tier fallback opencode/ling-3.0-flash-free (also FREE).",
   },
@@ -241,6 +251,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackProvider: "opencode-go",
     fallbackId: "minimax-m2.7",
     thinkingLevel: "medium",
+    turnBudget: { maxTurns: 20 },
     rationale:
       "Web/docs/package research (athena-equivalent). glm-4.7 per athena parity — NOT quick/keymaker (opencode/deepseek-v4-flash-free, FREE). Keyless composite search (Wikipedia+DDG-IA+npm+GitHub+docs-fetch via the web-research extension); general free-text web is a known gap. Always 1× plan tier.",
   },
@@ -250,12 +261,23 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackProvider: "opencode-go",
     fallbackId: "minimax-m2.7",
     thinkingLevel: "off",
+    turnBudget: { maxTurns: 6 },
     rationale:
       "FREE external tier; preserves plan quota entirely for trivial git work. OmO keeps this category opencode-primary by design (one of three categories not on the Z AI plan, alongside quick + ultrabrain) — matches OmO after operator reverted an interim glm-4.5-air assignment.",
   },
 };
 
 export const DEFAULT_CATEGORY: TaskCategory = "unspecified-low";
+
+/**
+ * Read-only categories — safe to bound with turn/tool budgets per the conservative orchestration
+ * policy (PORT-PLAN-v0.40.md ①). A turn/tool budget on any OTHER (mutation) category triggers a
+ * WARNING from budgets/resolver.ts. Single source of truth for the read-only taxonomy. */
+export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> = new Set<TaskCategory>([
+  "quick",
+  "research",
+  "git-commit-message",
+]);
 
 export const FALLBACK = { provider: "opencode-go", id: "glm-5.1" } as const;
 

@@ -62,6 +62,20 @@ export {
   usageBudgetExceededMessage,
 } from "./usage-budget.ts";
 
+// ── resolver (resolution + enforcement levels + conservative-policy warnings) ────
+// Pure budgets layer; the caller injects the read-only category set (tier-map owns the taxonomy).
+export {
+  resolveBudgets,
+  appendBudgetNudges,
+  budgetUsageState,
+  hasUsageHardLimit,
+} from "./resolver.ts";
+export type {
+  ResolveBudgetsInput,
+  ResolvedBudgets,
+  BudgetEnforcement,
+} from "./resolver.ts";
+
 // eslint-disable-next-line @typescript-eslint/no-empty-function
 export default function (_pi: never): void {
   // No-op extension entry. Budgets are enforced by the spawn/dispatch wiring (PORT-PLAN §①),

@@ -4,6 +4,7 @@ import { join, resolve, dirname } from "node:path";
 import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModel, FALLBACK, type TaskCategory } from "./tier-map.ts";
+import { appendBudgetNudges, type ResolvedBudgets } from "../budgets/index.ts";
 
 // 0b: stable session key per {agent, project}. Sanitized git-root path → zero collision.
 function findGitRoot(cwd: string): string | null {
@@ -141,6 +142,7 @@ export function spawnSub(
   onProgress?: (p: SpawnProgress) => void,
   signal?: AbortSignal,
   context?: string,
+  budgets?: ResolvedBudgets,
 ): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined }> {
   const tools = persona?.tools ?? "read,grep,find,ls";
   const needsBash = tools.includes("bash");
@@ -167,7 +169,11 @@ export function spawnSub(
     if (ctx.hasUI) ctx.ui.notify(`⚠ Handoff context truncated to ${HANDOFF_CAP} chars`, "warning");
     console.warn(`[spawnSub] handoff context truncated from ${context.length} to ${HANDOFF_CAP} chars`);
   }
-  const fullSystemPrompt = buildFullSystemPrompt(persona?.systemPrompt, effectiveContext);
+  const baseSystemPrompt = buildFullSystemPrompt(persona?.systemPrompt, effectiveContext);
+  // ① budget nudges: turn/tool soft-wrap warnings injected at launch. Process-mode honest — the
+  // hard block/kill itself can't be enforced from the parent (no mid-run channel; spawnSub runs with
+  // stdin ignored), so this is a heads-up. Applied here so BOTH the primary and fallback spawns receive it.
+  const fullSystemPrompt = appendBudgetNudges(baseSystemPrompt, budgets);
   if (fullSystemPrompt) args.push("--append-system-prompt", fullSystemPrompt);
   args.push(task);
 
@@ -273,6 +279,7 @@ export async function resolveAndSpawn(
   modelOverride?: string,
   thinkingOverride?: string,
   context?: string,
+  budgets?: ResolvedBudgets,
 ): Promise<SpawnResult> {
   const persona = agent ? loadPersona(agent) : undefined;
   if (agent && !persona) {
@@ -332,7 +339,7 @@ export async function resolveAndSpawn(
   // the active model during a run (reads the live `modelFlag` let, so a fallback/downshift is
   // reflected on the retried spawn). spawnSub itself stays unchanged.
   const progressWithModel = onProgress ? (p: SpawnProgress) => onProgress({ ...p, modelFlag }) : undefined;
-  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context);
+  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets);
 
   // Cross-provider fallback when the primary model silently returns empty (e.g., quota exhausted).
   if (output.length === 0 && !signal?.aborted && tierDefault.fallbackFlag && tierDefault.fallbackFlag !== modelFlag && isAvail(tierDefault.fallbackFlag)) {
@@ -343,7 +350,7 @@ export async function resolveAndSpawn(
     source = "downshift-exhausted";
     rationale = `${fbDownshiftedFrom} returned empty (likely quota exhausted) → retried with ${fb}`;
     if (ctx.hasUI) ctx.ui.notify(`⚠ ${fbDownshiftedFrom} exhausted → retried with ${fb}`, "info");
-    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context);
+    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets);
     output = fbResult.output;
     code = fbResult.code;
     elapsedMs = fbResult.elapsedMs;
@@ -371,6 +378,7 @@ export async function resolveAndSpawn(
     task: task.slice(0, 200),
     ...(downshiftedFrom ? { downshiftedFrom } : {}),
     ...(usage ? { usage } : {}),
+    ...(budgets ? { budget: budgets.enforcement, ...(budgets.warnings.length ? { budgetWarnings: budgets.warnings } : {}) } : {}),
   });
 
   return {

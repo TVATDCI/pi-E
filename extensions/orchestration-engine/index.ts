@@ -9,9 +9,10 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
-import { isPeakHours, isPromoActive, TIERS, type TaskCategory } from "./tier-map.ts";
+import { isPeakHours, isPromoActive, TIERS, READ_ONLY_CATEGORIES, type TaskCategory } from "./tier-map.ts";
 import { aggregateDispatchLog, quotaMarker, type DispatchLogEntry } from "./routing-stats.ts";
 import { resolveAndSpawn, sessionKey } from "./spawn.ts";
+import { resolveBudgets, budgetUsageState, type CostSummary } from "../budgets/index.ts";
 import { resolveFunctionalAgent } from "./agent-map.ts";
 
 // 0b: per-{agent, project} Promise mutex. Corrected delete-only-if-tail pattern
@@ -169,6 +170,9 @@ const CategoryEnum = Type.Union([
 
 export default function (pi: ExtensionAPI) {
   const subs = new Map<number, SubState>();
+  // ① session-scoped cumulative usage for the usageBudget pre-launch gate (PORT-PLAN §①). Closure-
+  // scoped → resets on /reload or restart (matches the "reported, no reservation" semantics).
+  const sessionUsage: CostSummary = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let nextId = 1;
   let widgetCtx: ExtensionContext | undefined;
   let tick: ReturnType<typeof setInterval> | undefined;
@@ -325,6 +329,30 @@ export default function (pi: ExtensionAPI) {
         agentSource = "functional-agent";
       }
 
+      // ① resolve budgets + usageBudget pre-launch gate (PORT-PLAN §①). usage enforcement is a
+      // pre-launch gate (blocks LATER dispatches when a hard limit is exhausted); turn/tool are
+      // prompt-nudges. The gate runs BEFORE creating the SubState so an exhausted session returns
+      // cleanly without leaving a dangling widget row.
+      const tier = TIERS[category];
+      const budgets = resolveBudgets({
+        category,
+        readOnlyCategories: READ_ONLY_CATEGORIES,
+        tierTurnBudget: tier.turnBudget,
+        tierToolBudget: tier.toolBudget,
+        // usageBudget omitted by default: upstream's UsageBudgetLimitConfig REQUIRES `hard`, so any
+        // default would ACTIVATE the gate (surprise-blocking dispatches). Visibility is delivered
+        // via always-on cumulative `sessionUsage` reporting below; the gate is opt-in (caller/config
+        // passes a usageBudget with a hard limit).
+      });
+      const ubState = budgetUsageState(budgets, sessionUsage);
+      if (ubState?.exhausted) {
+        const reason = ubState.reason === "costUsd" ? "cost" : "tokens";
+        return {
+          content: [{ type: "text" as const, text: `Dispatch blocked: session usage budget exhausted (${reason} hard limit reached). Cumulative: ${sessionUsage.inputTokens + sessionUsage.outputTokens} tokens, $${sessionUsage.costUsd.toFixed(4)}. Start a new session or raise the usageBudget.` }],
+          details: { error: "usage-budget-exhausted", enforcement: budgets.enforcement, sessionUsage },
+        };
+      }
+
       const id = nextId++;
       const sub: SubState = {
         id, category, status: "running", task: params.task,
@@ -344,6 +372,11 @@ export default function (pi: ExtensionAPI) {
         },
         signal,
         agentSource,
+        // modelOverride, thinkingOverride, context: omitted (undefined) — budgets is the ① arg.
+        undefined,
+        undefined,
+        undefined,
+        budgets,
       ));
 
       sub.status = result.code === 0 ? "done" : "error";
@@ -354,12 +387,19 @@ export default function (pi: ExtensionAPI) {
       sub.toolCount = result.toolCount;
       render(); stopTickIfIdle();
 
+      // ① accumulate reported usage into the session total for the usageBudget gate (no reservation).
+      if (result.usage) {
+        sessionUsage.inputTokens += result.usage.input;
+        sessionUsage.outputTokens += result.usage.output;
+        sessionUsage.costUsd += result.usage.cost;
+      }
+
       const tag = agentName ? ` (${agentName})` : "";
       const dsTag = result.downshiftedFrom ? ` [downshifted from ${result.downshiftedFrom}]` : "";
       const trimmed = result.output.length > 6000 ? result.output.slice(0, 6000) + "\n...[truncated]" : result.output;
       return {
         content: [{ type: "text" as const, text: `[${category} → ${result.modelFlag} @${result.thinkingLevel ?? "off"}]${tag}${dsTag} sub-agent ${result.code === 0 ? "done" : "failed"}:\n\n${trimmed}` }],
-        details: { category, modelFlag: result.modelFlag, code: result.code, persona: agentName ?? null, downshifted: !!result.downshiftedFrom },
+        details: { category, modelFlag: result.modelFlag, code: result.code, persona: agentName ?? null, downshifted: !!result.downshiftedFrom, budget: budgets.enforcement, ...(budgets.warnings.length ? { budgetWarnings: budgets.warnings } : {}), sessionUsage: { ...sessionUsage } },
       };
     },
   });
