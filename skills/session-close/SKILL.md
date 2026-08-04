@@ -94,8 +94,13 @@ cd ~/.pi/agent && git add exports/pi-handoff.md && git commit -m "pi: session-cl
 ```
 
 Hand the operator the exact command. **Never push** (`only_operator_pushes`); never
-auto-commit. If other session work is uncommitted, fold the handoff into the session's
-close commit (still `pi:`-prefixed).
+auto-commit. **Two commit types, kept separate (operator principle):** (1) *implementation commits*
+(`feat`/`fix`/`docs`/`refactor`/`test`) — tested-pass checkpoints that secure the
+codebase as work progresses, committed **before** close; (2) the *session-close commit*
+(`pi: session-close`) — the handoff, terminal session metadata. The handoff is **never
+folded into an implementation commit, and implementation work is never folded into the
+close commit.** If stray work is uncommitted at close, commit it as its own
+implementation commit **first**, then the `pi:` handoff commit.
 
 ## Hard rules
 - **pi NEVER writes bd.** Proposed facts live only in the markdown.
@@ -107,6 +112,10 @@ close commit (still `pi:`-prefixed).
 
 ## Done-when (the round-trip)
 The write is complete when `exports/pi-handoff.md` has all sections + `Written at:`.
-The **bridge** is closed only when sisyphus's next `session-begin` surfaces a
-`[FROM pi]` block (Step 4) and the proposed facts are promotable (Step 5). State both
-honestly: "handoff written; round-trip pending sisyphus's next session-begin."
+**The session is not closed until the working tree is clean** — the `pi:` handoff
+commit must run (operator authorizes it via the ASK gate). If the operator continues
+with other work before that commit runs, **re-offer the handoff commit; do not let it
+strand** (a written-but-uncommitted handoff is an incomplete close). The **bridge** is
+closed only when sisyphus's next `session-begin` surfaces a `[FROM pi]` block (Step 4)
+and the proposed facts are promotable (Step 5). State all three honestly: "handoff
+written; handoff commit <run|pending>; round-trip pending sisyphus's next session-begin."
