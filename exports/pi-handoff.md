@@ -1,43 +1,51 @@
-# Pi Handoff — align tier-map.ts model docs to the 4-model Z AI Coding Plan (2026-08-04)
+# Pi Handoff — graph-engineering absorption + independence corrections (2026-08-04)
 
-**Written at:** 2026-08-04T00:20:00Z
-**Pi session:** 019fc9fd-5b5f-79d0-ae48-22c623a77c9c
-**Original intent:** Map the operator's tier-map.ts model changes and align every dependent document; then record *why* after the operator discovered the Coding Plan narrowed to 4 callable models.
+**Written at:** 2026-08-04T13:01:07Z
+**Pi session:** 019fca45-8539-70e4-8afe-fa4f1e27c2c4
+**Original intent:** Verify Sisyphus's inventory of pi, explore the graph-engineering folder, implement the approved absorption spec, then (follow-up) correct stale independence claims in README + memory.
 
 ## Summary
-The operator changed three primaries + several per-tier fallbacks in `tier-map.ts` (quick→FREE opencode, deep/artistry→glm-5.2). I derived the delta by comparing `tier-map.ts` against the README/HANDOFF "before" tables (no git diff available — see Dead ends), then aligned 9 files: living docs updated in place (README table+prose, the load-bearing `index.ts` dispatch-description string, review-loop SKILL, tier-map rationales+top comment) and historical docs given dated addendum footnotes (HANDOFF, ADRs 0007/0009/0010, 3-LAYER-ROUTING-DESIGN). When the operator revealed the *why* (Coding Plan now allows only 4 models), I recorded it in the tier-map `PLAN NARROWED 2026-08-04` block + rationale strings + memory.
+Absorbed the graph-engineering discipline into pi's review machinery (commit 00dd49d, zero TS behavior change), then corrected two stale independence claims: the README "Two-platform architecture" section said pi "loads sisyphus skills" (false since delinking commit 1dfdf30) — fixed in commit 253f5f7; and the memory constraint `pi_independent_from_opencode` overstated "COMPLETELY independent" (ignored provider coupling) — tightened to "skills-independent; provider-coupled" and renamed `skills_delinked_from_opencode` → `pi_skills_independent_provider_coupled` for symmetric framing. The absorption was RENAME + ENFORCE, not BUILD. The commit-message chain (seraph→reviewer) was dogfooded for 00dd49d.
 
 ## Files touched
-- `agent/extensions/orchestration-engine/tier-map.ts` — operator changed ids/fallbacks; I aligned 4 stale `rationale` strings to their ids, rewrote the map header (8→7 of 10 Z-AI-plan-primary), 2 type comments, and added the dated `PLAN NARROWED` doc block (the *why*). Date was corrected 07-25→08-04.
-- `agent/README.md` — category→model table (10 rows) + prose line aligned to the new map.
-- `agent/extensions/orchestration-engine/index.ts` — dispatch-description string (injected into every dispatch prompt — load-bearing) aligned.
-- `agent/extensions/orchestration-engine/3-LAYER-ROUTING-DESIGN.md` — dated re-verify footnote on the now-stale per-tier fallback targets.
-- `agent/extensions/orchestration-engine/HANDOFF.md` — dated addendum footnote with the delta (original 07-08 table + 07-13 footnote preserved).
-- `agent/decisions/0010-runtime-fallback-f3.md` — dated footnote superseding the per-tier fallback map.
-- `agent/decisions/0009-persona-forge.md` — dated footnote correcting `ultrabrain → glm-5.1` to `→ opencode-go/kimi-k3` (was already stale pre-session).
-- `agent/decisions/0007-team-selector.md` — dated footnote on the `quick → glm-4.5-air` verification step.
-- `agent/skills/review-loop/SKILL.md` — tier/model cheat line aligned.
+- `skills/review-loop/SKILL.md` — §15 vocab glossary; Mode A step 3 fan-in completeness check (+ preserved buckets/escalation); step 5 reserved for future timeout; step 6 conditional Lane-6 oracle *(in 00dd49d)*
+- `AGENTS.md` — "No cheap model at a judging node" rule *(in 00dd49d)*
+- `extensions/orchestration-engine/tier-map.ts` — STRONG-MODEL-AT-JUDGING invariant comment above TIERS *(in 00dd49d)*
+- `extensions/bd-bridge.ts` — header NOTE: memory-projection only, no opencode tool/MCP access *(in 00dd49d)*
+- `extensions/orchestration-engine/spawn.ts` — TODO(Edit 7) tracking deferred dispatch-timeout BUILD *(in 00dd49d)*
+- `README.md` — corrected stale "loads sisyphus skills" line + couplings-table row + footer date; noted skills-independent/provider-coupled *(in 253f5f7)*
+- `skills/session-close/SKILL.md` — two-commit-type separation (Step 3) + clean-tree Done-when + strand guard *(this session)*
+- `exports/pi-handoff.md` — this file (session close)
+- Memory (`store.jsonl`, NOT git-tracked): renamed `skills_delinked_from_opencode` → `pi_skills_independent_provider_coupled`; tightened `pi_independent_from_opencode`; added `codegraph_defer_basis_corrected` + `edit7_dispatch_timeout_build_tracked`
 
 ## Decisions made
-- **Why deep/artistry→glm-5.2, quick→FREE opencode:** the Z AI Coding Plan narrowed to 4 callable models (glm-5.2, glm-5.2-highspeed, glm-5-turbo, glm-4.7); glm-5.1 and glm-4.5-air were dropped. deep/artistry had to leave 5.1 (5.2 is the remaining flagship reasoning model); quick had to leave 4.5-air and trivial work isn't worth the remaining on-plan quota → FREE external. Recorded durably.
-- **Historical docs get footnotes, living docs get rewrites** — per the existing `historical_doc_edits_as_footnotes` rule; ADRs/HANDOFF/PROBE-RESULTS keep their audit trail, README/index.ts/SKILL/tier-map are corrected in place.
-- **Left PROBE-RESULTS.md + test-routing-stats.ts alone** — the former is point-in-time probe evidence ("do not rewrite"); the latter are synthetic fixtures, not docs.
+- **Absorption = RENAME + ENFORCE, not BUILD** — Phase-1 audit (16-row inventory + 5 questions, all file-cited) showed pi already had 2/5 graph-eng "missing pieces" (review-loop = orchestrator-review; dispatch-log = execution-receipt).
+- **scout-twice is LINEAR, not a diamond** — corrected Sisyphus's inventory; documented the contrast in the glossary.
+- **Strong-model rule as hard rule + defense-in-depth** — AGENTS.md (policy) + tier-map.ts comment at the breach point (the file a human edits to change models).
+- **Lane-6 oracle fires post-synthesis, conditional only** — cost-discipline (ultrabrain is the expensive tier).
+- **Edit 4a hung-reviewer timeout DEFERRED** — unexecutable in pi's foreground-dispatch model (no timeout param); tracked as Edit 7 BUILD.
+- **Independence correction (operator-driven #1)** — pi is skills-INDEPENDENT (settings:[] + 6 native skills + 0 symlinks) but PROVIDER-COUPLED (tier-map.ts routes quick/git-commit/ultrabrain + fallbacks to opencode/opencode-go). README + memory updated to stop overstating "completely independent."
+- **Commit-type separation (operator-stated principle)** — two distinct commit aims kept separate: (1) **implementation commits** (`feat/fix/docs` — tested-pass checkpoints securing the codebase) and (2) the **session-close commit** (`pi: session-close` — the handoff, session metadata). The handoff is NEVER folded into an implementation commit. Stranding is solved by making "close" terminal (clean tree = closed), not by folding.
 
 ## Dead ends
-- **No git diff to map the change.** `~/.pi` is not a repo (the repo is `~/.pi/agent`); I initially checked the wrong dir and found no history. Fell back to using the README + HANDOFF tier tables as the "before" snapshot, which worked cleanly.
-- **Standalone `tsc` on `index.ts` spilled ~20 errors** (missing `@earendil-works/pi-coding-agent` module, node types, `.ts` import extensions) — recognized these as pre-existing environment errors from compiling in isolation without the project tsconfig, NOT from my string-literal edit. Relied on `tier-map.ts` standalone (clean) + the fact that the index.ts edit was a pure string swap.
-- **Near-miss (caught): wrong date.** I labeled everything `2026-07-25` — copied from the bridge export timestamp, not the real session date. Caught at close (real date 2026-08-04) and globally corrected across all 7 affected files + both memory fact keys before commit. Lesson for future: the bridge `[FROM bridge, exported …]` timestamp is sisyphus's export time, NOT this session's date — use the real current date.
+- **Edit 3 REPLACE collapsed Mode A step 3's content** — the spec said REPLACE; literal execution dropped the 3-bucket synthesis + escalation. Surfaced (not freehanded); Sisyphus confirmed it was his spec error (should've been INSERT-before). Resolved by the Item-2 delta.
+- **"codegraph reachable via bridge" claim** — wrong; `bd-bridge.ts` is memory-projection only, subprocesses run `--no-extensions`. Corrected; persisted as `codegraph_defer_basis_corrected`.
+- **Edit 4 step-5 timeout as a documented rule** — unexecutable (no dispatch timeout); deferred to Edit 7 BUILD.
+- **commit-message reviewer miscount** — chain reviewer PASSed a ~65-char subject claiming "exactly 50"; caught + trimmed to 48.
+- **Misnamed memory key** — I called the skills-delinking fact `pi_delinked_from_opencode` in Phase-1, but the actual store.jsonl key was `skills_delinked_from_opencode`. Caught before renaming (verified via grep); renamed the real key.
 
 ## Incomplete work
-- **(b) deferred:** optionally adopt `glm-5.2-highspeed` (faster 5.2 variant, newly on-plan) for a latency-sensitive tier (deep/visual-engineering). Operator deferred — model churn is too high to tune right now.
-- **High model churn** (industry flips every 3-4 days, per operator): the 4-model set will need re-verification within days; the *reasoning* is now durable, only specific ids will need refreshing.
+- **Edit 7 BUILD — dispatch-level timeout** (`spawn.ts`): `Promise.race([spawn, sleep(timeoutMs)])` → SIGTERM → `{outcome:"timeout", downshiftedFrom:"timeout"}` receipt. Enables review-loop Mode A step 5 (reserved). Tracked via TODO(Edit 7) + reserved step 5.
+- **#2 — the "5 missing pieces" table walkthrough** — operator asked for a deeper explanation; deferred ("come back after #1"). Still pending.
+- **session-close skill refinement** — **DONE this session**: two-commit-type separation (Step 3) + clean-tree Done-when + strand guard encoded in `skills/session-close/SKILL.md`. (Was the recurring "handoff strands uncommitted" bug; fix encoded so close is terminal = clean tree.)
 
 ## Proposed bd facts
-<pi proposes; sisyphus reviews + promotes via scripts/bd_remember.py. pi NEVER writes bd.>
-- scope=global | category=exact | key=zai_coding_plan_callable_models | value="As of 2026-08-04 the Z AI Coding Plan permits ONLY 4 callable models: glm-5.2, glm-5.2-highspeed, glm-5-turbo, glm-4.7. glm-5.1, glm-4.5-air, glm-5v-turbo, glm-4.7-flashx are now OFF-plan (error 1113/1311 or empty on call). Volatile — re-verify; the model industry flips every few days."
-- scope=global | category=reason | key=pi_selector_shows_catalog_not_subscription | value="pi's model selector shows the provider CATALOG (pi built-ins + ~/.pi/agent/models-store.json, a cache of Z AI's /models endpoint), NOT what the active subscription permits. Z AI /models returns the full platform catalog, so off-plan models still appear in the picker; subscription scope is enforced server-side at call time only. pi has no built-in way to grey out an off-plan model. Footgun: pi's built-in default for zai-coding-cn is hardcoded glm-5.1 (now off-plan) — avoid bare-provider fallback paths."
+- scope=global | category=decision | key=pi_graph_eng_absorbed | value="pi absorbed graph-engineering discipline in commit 00dd49d (2026-08-04): skills/review-loop/SKILL.md gains §15 vocab glossary + Mode A fan-in completeness check + conditional Lane-6 oracle; AGENTS.md + tier-map.ts enforce strong-model-at-judging invariant. Zero TS behavior change."
+- scope=global | category=reason | key=pi_dispatch_log_is_log_not_gate | value="pi's dispatch-log (spawn.ts:354) is a per-dispatch log with NO fan-out-completion gate; pi's barrier is de-facto (blocking dispatch) + review-loop convention only."
+- scope=global | category=reason | key=pi_independence_skills_vs_provider | value="pi is skills-INDEPENDENT from opencode (settings.json:[] + 6 native skills + 0 symlinks, delinked 1dfdf30) but PROVIDER-COUPLED (tier-map.ts routes quick/git-commit-message/ultrabrain + fallbacks to opencode/opencode-go FREE providers). NOT 'completely independent.'"
+- scope=global | category=decision | key=pi_commit_type_separation | value="pi keeps two commit types separate: (1) implementation commits (feat/fix/docs — tested-pass checkpoints) and (2) the session-close commit (pi: session-close — the handoff, session metadata, never folded into implementation commits)."
 
 ## Next steps for opencode
-- **Re-verify the 4 callable models in a few days** — churn is high; the set above is a 2026-08-04 snapshot.
-- **glm-5.2-highspeed adoption** — a pi-side tier-map decision if latency on deep/visual-engineering matters; not urgent.
-- **pi built-in default `glm-5.1` footgun** lives in the pi package (`dist/core/model-resolver.js` `defaultModelPerProvider["zai-coding-cn"]`), now off-plan — not fixable from agent config; just be aware if any path resolves to the bare provider default.
+- **Round-trip pending:** sisyphus's next session-begin surfaces a `[FROM pi]` block; promote the 4 proposed bd facts after review. pi has NOT written bd.
+- **#2 deferred:** the 5-missing-pieces table explanation is pending on pi's side (operator will resume).
+- **session-close skill refinement:** pending operator go on pi's side.
