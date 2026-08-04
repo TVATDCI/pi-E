@@ -159,6 +159,13 @@ async function main(): Promise<void> {
   const promptWithReview = formatAcceptancePrompt(resolveAcceptance({ level: "checked", review: { required: true, agent: "reviewer", focus: "diff safety" } }, "checked")!);
   check("formatAcceptancePrompt: required review line present", promptWithReview.includes("Independent review REQUIRED") && promptWithReview.includes("reviewer") && promptWithReview.includes("diff safety"));
 
+  // --- 13. F3 (②b): cachedVerifyResults — re-eval reuses prior verify results (no double-verify) ---
+  const verifiedCfg = resolveAcceptance({ level: "verified", verify: [{ id: "t", kind: "test" }] }, "checked")!;
+  const cachedPass = await evaluateAcceptance(verifiedCfg, `impl\n${REPORT}`, "/tmp", undefined, undefined, [{ id: "t", kind: "test", status: "passed", durationMs: 5 }]);
+  check("F3: cached verify (all passed) ⇒ verified (no verify command re-run)", cachedPass.provenance === "verified");
+  const cachedFail = await evaluateAcceptance(verifiedCfg, `impl\n${REPORT}`, "/tmp", undefined, undefined, [{ id: "t", kind: "test", status: "failed", durationMs: 5 }]);
+  check("F3: cached verify (failed) ⇒ rejected (verify not met)", cachedFail.provenance === "rejected");
+
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
 }

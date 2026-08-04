@@ -37,8 +37,9 @@ export function buildReviewTask(workOutput: string, review: AcceptanceReview | u
   ].join("\n");
 }
 
-/** Balanced-brace JSON object extractor (mirrors acceptance.ts's extractBalancedJson; local to keep
- *  this module dep-free). Returns the substring from `start` to the matching close brace, or undefined. */
+/** Balanced-brace JSON object extractor. DUPLICATE of acceptance.ts:extractBalancedJson — kept local
+ *  (not imported) so this module stays dep-free and unit-testable; SYNC manually if either is fixed.
+ *  Returns the substring from `start` to the matching close brace, or undefined. */
 function extractBalancedJson(text: string, start: number): string | undefined {
   let depth = 0;
   let inString = false;
@@ -102,4 +103,13 @@ export function parseReviewerResult(output: string): ReviewerResult | undefined 
     if (parsed) return parsed;
   }
   return undefined;
+}
+
+/**
+ * The ②b spawn gate as a PURE predicate (extracted for testability): launch the independent reviewer
+ * ONLY when the step's evidence passed (provenance === "review-required") AND the review was EXPLICITLY
+ * configured (explicitReviewRequired). Auto-inferred/risky review never spawns (Q2.1) — this is the
+ * exact safety property the round-1 F4 test locks. */
+export function shouldOrchestrateReview(provenance: string | undefined, explicitReviewRequired: boolean): boolean {
+  return provenance === "review-required" && explicitReviewRequired;
 }

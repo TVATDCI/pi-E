@@ -8,7 +8,7 @@ import type { TaskCategory } from "./orchestration-engine/tier-map.ts";
 import { READ_ONLY_CATEGORIES, tierEntryFor } from "./orchestration-engine/tier-map.ts";
 import { resolveBudgets, budgetUsageState } from "./budgets/index.ts";
 import { accumulateUsage, sessionUsage } from "./orchestration-engine/session-state.ts";
-import { buildReviewTask, parseReviewerResult } from "./orchestration-engine/review-helpers.ts";
+import { buildReviewTask, parseReviewerResult, shouldOrchestrateReview } from "./orchestration-engine/review-helpers.ts";
 import {
   coerceAcceptance,
   resolveAcceptance,
@@ -154,7 +154,13 @@ async function runReviewer(
 ): Promise<ReviewerResult | undefined> {
   const task = buildReviewTask(workOutput, review);
   const agent = review?.agent ?? "reviewer";
-  const result = await resolveAndSpawn(pi, task, REVIEW_CATEGORY, agent, cwd, ctx, undefined, signal, "review-orchestration");
+  // F1: FORCE read-only tools regardless of the named agent's persona — the independent reviewer must
+  // not be able to tamper with the work it reviews (a review.agent naming a writer is NEUTERED, not empowered).
+  // F2: resolve the reviewer's own budgets (category "deep" has no turn/tool default ⇒ no nudge today, but
+  // the spawn is budget-aware) and accumulate its usage into the shared session total.
+  const reviewerBudgets = resolveBudgets({ category: REVIEW_CATEGORY, readOnlyCategories: READ_ONLY_CATEGORIES });
+  const result = await resolveAndSpawn(pi, task, REVIEW_CATEGORY, agent, cwd, ctx, undefined, signal, "review-orchestration", { budgets: reviewerBudgets, toolsOverride: "read,grep,find,ls" });
+  accumulateUsage(result.usage); // F2: count reviewer spend toward the (dormant) usageBudget gate
   if (result.code !== 0 || !result.output.trim()) return undefined; // reviewer failed ⇒ caller leaves review-required badge
   return parseReviewerResult(result.output);
 }
@@ -257,12 +263,13 @@ export async function runChainByName(
     if (resolvedAcceptance && result.code === 0) {
       stepAcceptance = await evaluateAcceptance(resolvedAcceptance, result.output, cwd ?? ctx.cwd, signal);
       // ②b: EXPLICIT review.required + evidence passed (review-required) ⇒ orchestrate an independent reviewer.
-      // Auto-inferred/risky review never spawns (Q2.1). A clean reviewer result re-evaluates to reviewed/rejected;
+      // Auto-inferred/risky review never spawns (Q2.1 — shouldOrchestrateReview). A clean reviewer result
+      // re-evaluates to reviewed/rejected (F3: reuses cached verifyResults so verify commands don't run twice);
       // a missing/failed result leaves a non-terminal review-required badge + a dispatch-log warning (Q-2b-3).
-      if (stepAcceptance.provenance === "review-required" && step.acceptance?.review?.required === true) {
+      if (shouldOrchestrateReview(stepAcceptance.provenance, step.acceptance?.review?.required === true)) {
         const reviewerResult = await runReviewer(pi, ctx, result.output, resolvedAcceptance.review, cwd ?? ctx.cwd, signal);
         if (reviewerResult) {
-          stepAcceptance = await evaluateAcceptance(resolvedAcceptance, result.output, cwd ?? ctx.cwd, signal, reviewerResult);
+          stepAcceptance = await evaluateAcceptance(resolvedAcceptance, result.output, cwd ?? ctx.cwd, signal, reviewerResult, stepAcceptance.verifyResults);
         } else {
           pi.appendEntry("dispatch-log", { kind: "review-warning", chain: chainName, step: step.name, agent: step.agent, note: "reviewer returned no structured result — step left at review-required (non-terminal)" });
         }

@@ -143,8 +143,9 @@ export function spawnSub(
   signal?: AbortSignal,
   context?: string,
   budgets?: ResolvedBudgets,
+  toolsOverride?: string,
 ): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined }> {
-  const tools = persona?.tools ?? "read,grep,find,ls";
+  const tools = toolsOverride ?? persona?.tools ?? "read,grep,find,ls";
   const needsBash = tools.includes("bash");
 
   const dir = join(os.homedir(), ".pi", "agent", "sessions", "orch-engine");
@@ -271,6 +272,9 @@ export interface ResolveAndSpawnOptions {
   thinkingOverride?: string;
   context?: string;
   budgets?: ResolvedBudgets;
+  /** F1 (②b): force a tools list overriding the persona's — used to guarantee the independent
+   *  reviewer is read-only regardless of `review.agent` (integrity: it can't tamper with the work). */
+  toolsOverride?: string;
 }
 
 export async function resolveAndSpawn(
@@ -285,7 +289,7 @@ export async function resolveAndSpawn(
   agentSource?: string,
   options?: ResolveAndSpawnOptions,
 ): Promise<SpawnResult> {
-  const { modelOverride, thinkingOverride, context, budgets } = options ?? {};
+  const { modelOverride, thinkingOverride, context, budgets, toolsOverride } = options ?? {};
   const persona = agent ? loadPersona(agent) : undefined;
   if (agent && !persona) {
     return {
@@ -344,7 +348,7 @@ export async function resolveAndSpawn(
   // the active model during a run (reads the live `modelFlag` let, so a fallback/downshift is
   // reflected on the retried spawn). spawnSub itself stays unchanged.
   const progressWithModel = onProgress ? (p: SpawnProgress) => onProgress({ ...p, modelFlag }) : undefined;
-  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets);
+  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride);
 
   // Cross-provider fallback when the primary model silently returns empty (e.g., quota exhausted).
   if (output.length === 0 && !signal?.aborted && tierDefault.fallbackFlag && tierDefault.fallbackFlag !== modelFlag && isAvail(tierDefault.fallbackFlag)) {
@@ -355,7 +359,7 @@ export async function resolveAndSpawn(
     source = "downshift-exhausted";
     rationale = `${fbDownshiftedFrom} returned empty (likely quota exhausted) → retried with ${fb}`;
     if (ctx.hasUI) ctx.ui.notify(`⚠ ${fbDownshiftedFrom} exhausted → retried with ${fb}`, "info");
-    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets);
+    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride);
     output = fbResult.output;
     code = fbResult.code;
     elapsedMs = fbResult.elapsedMs;

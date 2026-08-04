@@ -545,6 +545,7 @@ export async function evaluateAcceptance(
   cwd: string,
   signal?: AbortSignal,
   reviewerResult?: ReviewerResult,
+  cachedVerifyResults?: VerifyResult[], // F3 (②b): reuse prior verify results on re-eval (reviewer orchestration) so verify commands don't run twice
 ): Promise<StepAcceptance> {
   const parsed = parseAcceptanceReport(output);
   const report = parsed.report;
@@ -558,12 +559,18 @@ export async function evaluateAcceptance(
     if (report && structuralOk) achieved = "checked";
   }
 
-  // verified: run the enum verify commands
+  // verified: run the enum verify commands (or reuse cached results on re-eval — F3, no double-verify)
   let verifyResults: VerifyResult[] | undefined;
   if (a.level === "verified" && a.verify.length > 0) {
-    const vr = await runVerifyAll(a.verify, cwd, signal);
-    verifyResults = vr.results;
-    if (achieved === "checked" && vr.allPassed) achieved = "verified";
+    if (cachedVerifyResults) {
+      verifyResults = cachedVerifyResults;
+      const allPassed = cachedVerifyResults.every((r) => r.status === "passed" || a.verify.find((s) => s.id === r.id)?.allowFailure === true);
+      if (achieved === "checked" && allPassed) achieved = "verified";
+    } else {
+      const vr = await runVerifyAll(a.verify, cwd, signal);
+      verifyResults = vr.results;
+      if (achieved === "checked" && vr.allPassed) achieved = "verified";
+    }
   }
 
   const gatePassed = LEVEL_RANK[achieved] >= LEVEL_RANK[a.level];

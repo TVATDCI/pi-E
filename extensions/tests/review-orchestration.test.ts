@@ -5,7 +5,7 @@
 // review-result block instruction) and parseReviewerResult (block parsed / empty blockers / absent ⇒
 // undefined / malformed ⇒ undefined / non-string filtering / first-block-wins). The live resolveAndSpawn
 // path is a smoke test, not unit-tested here.
-import { buildReviewTask, parseReviewerResult } from "../orchestration-engine/review-helpers.ts";
+import { buildReviewTask, parseReviewerResult, shouldOrchestrateReview } from "../orchestration-engine/review-helpers.ts";
 
 let pass = 0;
 let fail = 0;
@@ -59,6 +59,14 @@ check("parse: first PARSEABLE block wins (skips malformed)", parseReviewerResult
 
 const surrounded = "lead prose\n```review-result\n" + JSON.stringify({ blockers: ["b"] }) + "\n```\ntrailing prose";
 check("parse: block amid surrounding prose parsed", parseReviewerResult(surrounded)?.blockers?.[0] === "b");
+
+// ── shouldOrchestrateReview (F4: lock the ②b spawn-gate predicate) ───────────────
+check("gate: review-required + explicit ⇒ orchestrate", shouldOrchestrateReview("review-required", true) === true);
+check("gate: review-required + NOT explicit ⇒ no spawn (auto-inferred, Q2.1)", shouldOrchestrateReview("review-required", false) === false);
+check("gate: non-review-required + explicit ⇒ no spawn", shouldOrchestrateReview("checked", true) === false);
+check("gate: reviewed + explicit ⇒ no spawn (already done)", shouldOrchestrateReview("reviewed", true) === false);
+check("gate: undefined provenance + explicit ⇒ no spawn", shouldOrchestrateReview(undefined, true) === false);
+check("gate: rejected + explicit ⇒ no spawn (evidence failed)", shouldOrchestrateReview("rejected", true) === false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
