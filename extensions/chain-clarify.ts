@@ -12,12 +12,24 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Theme, KeybindingsManager, ExtensionContext, ExtensionAPI, Skill } from "@earendil-works/pi-coding-agent";
-import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
+import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { resolveModel, type TaskCategory } from "./orchestration-engine/tier-map.ts";
 import type { Chain, ChainStepOverride } from "./chain-runner.ts";
+
+// ④ fix: lazy-load pi-coding-agent's loadSkillsFromDir via createRequire so this module's top level stays
+// free of the external package (no local node_modules in the unit-test env). The require fires ONLY
+// inside enterSkillPicker at runtime in pi (where the package IS installed) — never at module load or
+// construction — so chain-clarify.test.ts (which constructs the component but never opens the skill
+// picker) loads cleanly. Local fn shadows the would-be static import.
+const requirePi = createRequire(import.meta.url);
+let _loadSkillsFromDir: ((opts: { dir: string; source: string }) => { skills: Skill[] }) | undefined;
+function loadSkillsFromDir(opts: { dir: string; source: string }): { skills: Skill[] } {
+  if (!_loadSkillsFromDir) _loadSkillsFromDir = requirePi("@earendil-works/pi-coding-agent").loadSkillsFromDir;
+  return _loadSkillsFromDir(opts);
+}
 
 export interface ChainClarifyEdit {
   kind: "task" | "prompt";
@@ -59,7 +71,8 @@ export class ChainClarifyComponent implements Component {
   private readonly initialTask: string;
   private readonly signal?: AbortSignal;
   private readonly availableModels: ModelEntry[];
-  private readonly availableSkills: Skill[];
+  private availableSkills: Skill[] = [];
+  private skillsLoaded = false; // ④ skills lazy-loaded in enterSkillPicker (test-safe: construction doesn't require the external package)
 
   private editMode: EditMode = "list";
   private selectedStep = 0;
@@ -101,9 +114,9 @@ export class ChainClarifyComponent implements Component {
     this.signal = signal;
     const avail = (ctx.modelRegistry.getAvailable?.() ?? []) as Array<{ provider: string; id: string }>;
     this.availableModels = avail.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.id, description: m.provider }));
-    // ④ (PORT-PLAN-v0.40): skills for the 's' picker — global dir only (mirrors availableModels from modelRegistry).
-    const skillsDir = join(os.homedir(), ".pi", "agent", "skills");
-    this.availableSkills = existsSync(skillsDir) ? loadSkillsFromDir({ dir: skillsDir, source: "global" }).skills : [];
+    // ④ skills are lazy-loaded in enterSkillPicker (first 's' press) — see the loadSkillsFromDir wrapper
+    // near the imports. Deferring the external-package require keeps construction test-safe
+    // (chain-clarify.test.ts builds the component but never opens the skill picker).
     if (signal) {
       if (signal.aborted) queueMicrotask(() => this.finish({ confirmed: false }));
       else signal.addEventListener("abort", this.onAbort, { once: true });
@@ -259,6 +272,11 @@ export class ChainClarifyComponent implements Component {
   private enterSkillPicker(): void {
     const step = this.chain.steps[this.selectedStep];
     if (!step) return;
+    if (!this.skillsLoaded) {
+      const skillsDir = join(os.homedir(), ".pi", "agent", "skills");
+      this.availableSkills = existsSync(skillsDir) ? loadSkillsFromDir({ dir: skillsDir, source: "global" }).skills : [];
+      this.skillsLoaded = true;
+    }
     if (!this.availableSkills.length) {
       this.flash("no skills available");
       return;
