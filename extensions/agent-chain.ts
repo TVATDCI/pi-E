@@ -212,48 +212,58 @@ export default function (pi: ExtensionAPI) {
     const stepStatusMap = new Map<string, StepState>();
     for (const s of chainState.steps) stepStatusMap.set(s.name, s);
 
-    const result = await runChainByName(
-      pi, ctx, chainName, task, cwd, returnAllSteps,
-      (name) => {
-        const s = stepStatusMap.get(name);
-        if (s) { s.status = "running"; render(); }
-      },
-      (name, r) => {
-        const s = stepStatusMap.get(name);
-        if (s) {
-          s.status = r.code === 0 ? "done" : "error";
-          s.output = r.output;
-          s.elapsedMs = r.elapsedMs;
-          s.toolCount = r.toolCount;
-          s.modelFlag = r.modelFlag;
-          s.thinkingLevel = r.thinkingLevel;
-          if (r.usage) s.usage = r.usage;
-          if (r.acceptance) s.acceptance = r.acceptance;
-          render();
-        }
-      },
-      (name: string, p: SpawnProgress) => {
-        const s = stepStatusMap.get(name);
-        if (!s) return;
-        s.toolCount = p.toolCount;
-        if (p.chunk) { s.currentChunk = p.chunk; s.accumulatedText = (s.accumulatedText ?? "") + p.chunk; }
-        if (p.modelFlag) s.modelFlag = p.modelFlag;
-      },
-      signal,
-      overrides,
-      context,
-      callerTimeoutMs,
-    );
+    try {
+      const result = await runChainByName(
+        pi, ctx, chainName, task, cwd, returnAllSteps,
+        (name) => {
+          const s = stepStatusMap.get(name);
+          if (s) { s.status = "running"; render(); }
+        },
+        (name, r) => {
+          const s = stepStatusMap.get(name);
+          if (s) {
+            s.status = r.code === 0 ? "done" : "error";
+            s.output = r.output;
+            s.elapsedMs = r.elapsedMs;
+            s.toolCount = r.toolCount;
+            s.modelFlag = r.modelFlag;
+            s.thinkingLevel = r.thinkingLevel;
+            if (r.usage) s.usage = r.usage;
+            if (r.acceptance) s.acceptance = r.acceptance;
+            render();
+          }
+        },
+        (name: string, p: SpawnProgress) => {
+          const s = stepStatusMap.get(name);
+          if (!s) return;
+          s.toolCount = p.toolCount;
+          if (p.chunk) { s.currentChunk = p.chunk; s.accumulatedText = (s.accumulatedText ?? "") + p.chunk; }
+          if (p.modelFlag) s.modelFlag = p.modelFlag;
+        },
+        signal,
+        overrides,
+        context,
+        callerTimeoutMs,
+      );
 
-    chainState.status = result.ok ? "done" : "error";
-    chainState.elapsed = Date.now() - chainState.startedAt;
-    // Retention cap: evict oldest done/error foreground chains beyond 5 (bounds the StepState.output leak).
-    if (chainState.status !== "running") {
+      chainState.status = result.ok ? "done" : "error";
+      chainState.elapsed = Date.now() - chainState.startedAt;
+      // Retention cap: evict oldest done/error foreground chains beyond 5 (bounds the StepState.output leak).
       const settled = [...running.entries()].filter(([, c]) => c.status !== "running" && !c.background);
       if (settled.length > 5) { settled.sort((a, b) => a[1].startedAt - b[1].startedAt); for (let i = 0; i < settled.length - 5; i++) running.delete(settled[i]![0]); }
+      return result;
+    } finally {
+      // If still "running" after the try block, we exited via throw — force to error so
+      // stopTickIfIdle will stop the tick (it only stops when no entries are "running").
+      if (chainState.status === "running") {
+        chainState.status = "error";
+        chainState.elapsed = Date.now() - chainState.startedAt;
+        // Also reset any steps left in "running" state (mid-step throw).
+        for (const s of chainState.steps) if (s.status === "running") s.status = "error";
+      }
+      render();
+      stopTickIfIdle();
     }
-    render(); stopTickIfIdle();
-    return result;
   };
 
   // ── Group 3: background dispatch (in-parent) ──────────────────────────────────────────
