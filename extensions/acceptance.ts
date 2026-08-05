@@ -21,8 +21,9 @@
 // auto-badge (Q2.1 suggest — NO spawn; the reviewer is orchestrated in ②b on an explicit
 // `review.required`), slimmed parser canonicalization, and the `"reviewed"`-is-not-requestable rule.
 // An unmet `review.required` resolves to a NON-TERMINAL `review-required` badge (Q2.2) — the chain
-// continues. `acceptanceRole` in ②a influences REVIEW inference only (a "read-only" role suppresses
-// the risky-task suggestion); full level-override parity with upstream is deferred.
+// continues. `acceptanceRole` in ②a influenced REVIEW inference only; ②b added level-override parity
+// (read-only⇒attested, writer⇒checked via inferLevelFromRoleAndTask + a slimmed task-intent
+// classifier) and enum synonym normalization in canonicalizeReport.
 import { spawn, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -38,8 +39,9 @@ export type Provenance =
   | "rejected";
 export type VerifyKind = "test" | "typecheck" | "lint" | "build";
 
-/** ② Explicit read-only/writer role that biases REVIEW inference (slimmed: in ②a a "read-only" role
- *  suppresses the risky-task review suggestion; full level-override parity with upstream is deferred). */
+/** ② Explicit read-only/writer role. ②b: the role OVERRIDES the inferred level (read-only⇒attested,
+ *  writer⇒checked) via inferLevelFromRoleAndTask; it also biases REVIEW inference (read-only suppresses
+ *  the risky-task suggestion). */
 export type AcceptanceRole = "read-only" | "writer";
 
 /** ② Independent-review gate, orthogonal to evidence. `required` activates the review dimension. */
@@ -164,6 +166,160 @@ export function inferReview(task: string, isWriter: boolean): AcceptanceReview |
   return RISKY_RE.test(task) ? { required: true, agent: "reviewer" } : undefined;
 }
 
+// --- ②b task-intent classifier (slimmed port of pi-subagents/src/runs/shared/task-intent.ts).
+// TASK-ONLY (no agent param): uses the general implementation grammar. The known successor that needs
+// agent-specialized grammars (worker/reviewer) is the prompt to extract this into its own file. ---
+
+export type TaskIntent = { kind: "implementation" } | { kind: "read-only" } | { kind: "unknown" };
+
+const REVIEW_ONLY_PATTERNS = [
+  /\breview only\b/i,
+  /\bsuggest fixes only\b/i,
+  /\bonly return findings\b/i,
+  /\breturn findings only\b/i,
+];
+
+const NO_TOOL_INTENT_PATTERNS = [
+  /\bno tools? needed\b/i,
+  /\bno tools? required\b/i,
+  /\bwithout using tools\b/i,
+  /\bdo not use tools\b/i,
+  /\bdon't use tools\b/i,
+];
+
+// Prohibition object ends at punctuation or a coordinator (but/and/then) so a follow-on like
+// "but implement the fix" survives for write-intent testing instead of being swallowed.
+const NO_EDIT_PROHIBITION_PATTERN = /\b(?:do not|don't|must not)\s+(?:edit|modify|write(?:\s+to)?|touch|change)\b((?:(?!\b(?:but|and|then)\b)[^.;,:!?\n\u2013\u2014-])*)/gi;
+
+// Objects of a no-edit prohibition meaning "the codebase in general" — a blanket prohibition wins.
+const GENERIC_PROHIBITION_OBJECT = /^\s*(?:(?:any|all|the|these|those|your|our|existing|project|product|source|sources|config|configs|repo|repository)[\s/,-]*)*(?:files?|code|codebase|sources?|anything|repo(?:sitory)?)?\s*$/i;
+
+const SCOPED_NO_EDIT_CONSTRAINT_PATTERNS = [
+  /\bdo not edit files?\s+outside\b/i,
+  /\bdo not edit\s+outside\b/i,
+  /\bdo not edit\s+unrelated files?\b/i,
+  /\bdo not change\s+unrelated files?\b/i,
+  /\bdo not modify\s+unrelated files?\b/i,
+];
+
+const READ_ONLY_DELIVERABLE_PATTERNS = [
+  /\b(?:draft|write|compose|prepare|produce)\s+(?:(?:a|an|the)\s+)?(?:github\s+)?(?:issue|bug report|issue draft|issue body|proposal|plan|report|summary|findings?|analysis|recommendations?)\b/i,
+  /\b(?:issue|bug report)\s+(?:draft|body|template)\b/i,
+  /\b(?:return|provide|produce)\s+(?:text|markdown|answer|findings?|recommendations?)\s+only\b/i,
+];
+
+const FIX_OR_PATCH_IMPLEMENTATION_PATTERN = /\b(?:fix|patch)\s+(?:(?:it|this|that|them|each|any|all|these|those)\b|(?:(?:a|an|the|any|all)\s+)?(?:(?:failing|failed|broken|flaky|red|cold|start|current|existing|reported|approved|known|regression|unit|integration|e2e|source|typescript|type-?script|ts|type-?check|compiler)\s+)*(?:bug|defect|issues?|problems?|failures?|regressions?|tests?|errors?|items?|typos?|code|source|implementation|component|function|module|class|method|logic|file|files|readme|docs?|changelog|package\.json|config|manifest|extension|prompt|command|lint(?:ing)?|build|ci|type-?check|type\s+checking)\b)/i;
+
+const GENERAL_IMPLEMENTATION_PATTERNS = [
+  /\b(?:implement|edit|modify|refactor)\b/i,
+  FIX_OR_PATCH_IMPLEMENTATION_PATTERN,
+  /\bapply\s+(?:the\s+)?(?:(?:suggested|proposed|recommended)\s+)?(?:changes?|fix(?:es)?|patch)\b/i,
+  /\bmake\s+(?:the\s+)?changes\b/i,
+  /\bdo those fixes\b/i,
+  /\b(?:update|add|remove|replace|delete|create)\s+(?:the\s+)?(?:file|files|code|source|implementation|test|tests|component|function|module|class|method|logic|import|imports|readme|docs?|changelog|package\.json|config|manifest|extension|prompt|command)\b/i,
+];
+
+// Bare write verbs that make a task write-capable for acceptance level inference (broad vocabulary —
+// only raises evidence gates, never blocks completion).
+const MAY_MUTATE_VERB_PATTERN = /\b(?:fix|implement|update|write|edit|modify|migrate|delete|remove|refactor|commit)\b/i;
+
+function stripFrameworkInstructions(task: string): string {
+  return task
+    .split("\n")
+    .filter((line) => !/^\s*\[(?:Write to|Read from):/i.test(line))
+    .filter((line) => !/^\s*(?:Create and maintain progress at:|Update progress at:|\*\*Output:\*\*|Write your findings to(?: exactly this path)?:|Return the complete artifact in your final response\.|The runtime will persist it to exactly this path:|Do not call contact_supervisor merely because no write-capable tool is available\.|This path is authoritative for this run\.|Ignore any other output filename or output path mentioned elsewhere)/i.test(line))
+    .join("\n");
+}
+
+function stripPatterns(task: string, patterns: RegExp[]): string {
+  let stripped = task;
+  for (const pattern of patterns) {
+    const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+    stripped = stripped.replace(new RegExp(pattern.source, flags), " ");
+  }
+  return stripped;
+}
+
+interface NoEditProhibitionAnalysis {
+  present: boolean;
+  blanket: boolean;
+  strippedText: string;
+}
+
+function analyzeNoEditProhibitions(taskText: string): NoEditProhibitionAnalysis {
+  let present = REVIEW_ONLY_PATTERNS.some((pattern) => pattern.test(taskText))
+    || NO_TOOL_INTENT_PATTERNS.some((pattern) => pattern.test(taskText));
+  let blanket = present;
+  let strippedText = stripPatterns(taskText, [...REVIEW_ONLY_PATTERNS, ...NO_TOOL_INTENT_PATTERNS]);
+  strippedText = strippedText.replace(
+    new RegExp(NO_EDIT_PROHIBITION_PATTERN.source, NO_EDIT_PROHIBITION_PATTERN.flags),
+    (_match, object: string) => {
+      present = true;
+      if (GENERIC_PROHIBITION_OBJECT.test(object)) blanket = true;
+      return " ";
+    },
+  );
+  return { present, blanket, strippedText };
+}
+
+function hasGeneralImplementationIntent(taskText: string): boolean {
+  return GENERAL_IMPLEMENTATION_PATTERNS.some((pattern) => pattern.test(taskText));
+}
+
+function taskHasReadOnlyDeliverable(taskText: string): boolean {
+  return READ_ONLY_DELIVERABLE_PATTERNS.some((pattern) => pattern.test(taskText));
+}
+
+/**
+ * ②b Classify a task's mutation intent from its wording (slimmed port of upstream
+ * classifyTaskMutationIntent — TASK-ONLY, no agent param: uses the general implementation grammar).
+ * - "implementation": the task looks like it requires file changes (write verbs / fix patterns).
+ * - "read-only": explicit no-edit prohibition (blanket, or scoped with no surviving write intent) or
+ *   a read-only deliverable phrase (draft/write a report/summary/findings).
+ * - "unknown": neither signal. Consumed by inferLevelFromRoleAndTask. */
+export function classifyTaskIntent(task: string): TaskIntent {
+  const taskText = stripFrameworkInstructions(task);
+  const taskTextWithoutScopedConstraints = stripPatterns(taskText, SCOPED_NO_EDIT_CONSTRAINT_PATTERNS);
+  const prohibitions = analyzeNoEditProhibitions(taskTextWithoutScopedConstraints);
+  if (prohibitions.present) {
+    if (prohibitions.blanket) return { kind: "read-only" };
+    return hasGeneralImplementationIntent(prohibitions.strippedText) ? { kind: "implementation" } : { kind: "read-only" };
+  }
+  if (hasGeneralImplementationIntent(taskText)) return { kind: "implementation" };
+  return taskHasReadOnlyDeliverable(taskTextWithoutScopedConstraints) ? { kind: "read-only" } : { kind: "unknown" };
+}
+
+/**
+ * ②b Whether the task could plausibly change files (slimmed port of upstream taskMayMutate). Blanket
+ * prohibitions win; read-only-deliverable phrases ("write a summary report") don't count; any other
+ * bare write verb does. Broad vocabulary — only raises evidence gates. Exported for parity/tests. */
+export function taskMayMutate(task: string): boolean {
+  const taskText = stripPatterns(stripFrameworkInstructions(task), SCOPED_NO_EDIT_CONSTRAINT_PATTERNS);
+  const prohibitions = analyzeNoEditProhibitions(taskText);
+  if (prohibitions.blanket) return false;
+  return MAY_MUTATE_VERB_PATTERN.test(stripPatterns(prohibitions.strippedText, READ_ONLY_DELIVERABLE_PATTERNS));
+}
+
+/**
+ * ②b Infer the effective acceptance LEVEL from an explicit role and/or the task wording. The role
+ * OVERRIDES the tools-based level: read-only⇒attested (even with edit tools), writer⇒checked. Absent a
+ * role, read-only task wording — an explicit no-edit/read-only intent, a read-only deliverable phrase,
+ * or the keyword set (review/inspect/summarize/no-edits) on an otherwise-unknown task — ⇒ attested.
+ * Returns undefined when neither signal is present, so resolveAcceptance falls back to
+ * inferDefaultLevel(tools) and existing chains (no role, non-read-only task) are unchanged. */
+export function inferLevelFromRoleAndTask(role: AcceptanceRole | undefined, task: string | undefined): ResolvedLevel | undefined {
+  if (role === "read-only") return "attested";
+  if (role === "writer") return "checked";
+  if (task) {
+    const intent = classifyTaskIntent(task);
+    if (intent.kind === "read-only") return "attested";
+    if (intent.kind === "unknown" && /\b(?:read[- ]only|review[- ]only|no edits|without edits|inspect|summari[sz]e)\b/i.test(task)) {
+      return "attested";
+    }
+  }
+  return undefined;
+}
+
 function defaultEvidence(level: ResolvedLevel): string[] {
   return level === "attested" ? [] : ["changed-files", "no-staged-files"];
 }
@@ -172,7 +328,9 @@ function defaultEvidence(level: ResolvedLevel): string[] {
  * Resolve the effective acceptance config. `null` ⇒ gate disabled (level:none). `inferred:true`
  * ⇒ auto-inferred (or no config) ⇒ badge-only, never rejects the step. ② `task?` enables risky-task
  * review auto-suggest; explicit `input.review` always wins; `acceptanceRole: "read-only"` suppresses
- * the risky suggestion.
+ * the risky suggestion. ②b: under `auto`, the role and read-only task wording OVERRIDE the tools-based
+ * `inferred` level (inferLevelFromRoleAndTask); absent both, `inferred` is used (existing chains
+ * unchanged).
  */
 export function resolveAcceptance(
   input: AcceptanceInput | undefined,
@@ -193,10 +351,15 @@ export function resolveAcceptance(
   }
   const rawLevel = input.level ?? "auto";
   if (rawLevel === "none") return null;
-  const level: ResolvedLevel = rawLevel === "auto" ? inferred : (rawLevel as ResolvedLevel);
+  // ②b role/task level-override: under auto, an explicit role or read-only task wording overrides the
+  // tools-based inferred level (read-only⇒attested, writer⇒checked, read-only task⇒attested); absent
+  // both signals, fall back to `inferred` so existing chains (no role, non-read-only task) are unchanged.
+  const roleAwareInferred = inferLevelFromRoleAndTask(input.acceptanceRole, task) ?? inferred;
+  const level: ResolvedLevel = rawLevel === "auto" ? roleAwareInferred : (rawLevel as ResolvedLevel);
   const isAuto = rawLevel === "auto" || input.level === undefined;
   // ② explicit review wins; otherwise infer from task text. "read-only" role ⇒ no risky suggestion.
-  const isWriter = input.acceptanceRole === "writer" || (input.acceptanceRole === undefined && inferred === "checked");
+  // isWriter uses the role-aware level so a read-only task on a write-capable agent suppresses review.
+  const isWriter = input.acceptanceRole === "writer" || (input.acceptanceRole === undefined && roleAwareInferred === "checked");
   const review = input.review ?? (input.acceptanceRole === "read-only" ? undefined : inferReview(task ?? "", isWriter));
   return {
     level,
@@ -367,10 +530,57 @@ function fencedBlocks(output: string, tag: string): string[] {
     .filter((v): v is string => Boolean(v));
 }
 
+// --- ②b enum synonym normalization (additive report canonicalization) ---
+
+/** Canonical criterion-status enum. Synonyms a child emits map here. */
+const CRITERION_STATUS_CANON: Record<string, "satisfied" | "not-satisfied" | "not-applicable"> = {
+  satisfied: "satisfied", met: "satisfied", complete: "satisfied", completed: "satisfied", done: "satisfied",
+  pass: "satisfied", passed: "satisfied", success: "satisfied", succeeded: "satisfied",
+  "not-satisfied": "not-satisfied", "not-met": "not-satisfied", unmet: "not-satisfied",
+  incomplete: "not-satisfied", fail: "not-satisfied", failed: "not-satisfied",
+  "not-applicable": "not-applicable", "n-a": "not-applicable", na: "not-applicable",
+  skip: "not-applicable", skipped: "not-applicable",
+};
+
+/** Canonical command-result enum. Synonyms a child emits map here. */
+const COMMAND_RESULT_CANON: Record<string, "passed" | "failed" | "not-run"> = {
+  passed: "passed", pass: "passed", success: "passed", successful: "passed", succeeded: "passed", ok: "passed",
+  failed: "failed", fail: "failed", failure: "failed", error: "failed",
+  "not-run": "not-run", "not-executed": "not-run", skip: "not-run", skipped: "not-run",
+};
+
+/** ②b Normalize a criterion `.status` to the canonical enum; non-strings/unknown values pass through. */
+export function normalizeCriterionStatus(status: unknown): unknown {
+  if (typeof status !== "string") return status;
+  return CRITERION_STATUS_CANON[status.toLowerCase().trim()] ?? status;
+}
+
+/** ②b Normalize a command `.result` to the canonical enum; non-strings/unknown values pass through. */
+export function normalizeCommandResult(result: unknown): unknown {
+  if (typeof result !== "string") return result;
+  return COMMAND_RESULT_CANON[result.toLowerCase().trim()] ?? result;
+}
+
+/** Map .status over each criteriaSatisfied item (non-object items pass through unchanged). */
+function normalizeCriterionItem(item: unknown): unknown {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  const obj = item as Record<string, unknown>;
+  return { ...obj, status: normalizeCriterionStatus(obj.status) };
+}
+
+/** Map .result over each commandsRun item (non-object items pass through unchanged). */
+function normalizeCommandItem(item: unknown): unknown {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  const obj = item as Record<string, unknown>;
+  return { ...obj, result: normalizeCommandResult(obj.result) };
+}
+
 /**
  * ② Canonicalize a parsed report for robustness (slimmed port of upstream's canonicalization):
  * snake_case keys → camelCase, string booleans → boolean, bare scalars → single-item arrays.
- * Purely ADDITIVE — accepts MORE shapes; a well-formed report canonicalizes to itself. */
+ * ②b enum synonym normalization: criteriaSatisfied[].status → {satisfied,not-satisfied,not-applicable};
+ * commandsRun[].result → {passed,failed,not-run} (synonym maps). Purely ADDITIVE — accepts MORE
+ * shapes; a well-formed report canonicalizes to itself. */
 function canonicalizeReport(raw: unknown): AcceptanceReport {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {} as AcceptanceReport;
   const src = raw as Record<string, unknown>;
@@ -390,9 +600,19 @@ function canonicalizeReport(raw: unknown): AcceptanceReport {
   ]);
   for (const [k, v] of Object.entries(src)) {
     const key = camel(k);
-    if (key === "noStagedFiles") out[key] = asBool(v);
-    else if (ARRAY_FIELDS.has(key)) out[key] = asArray(v) ?? v;
-    else out[key] = v;
+    if (key === "noStagedFiles") {
+      out[key] = asBool(v);
+    } else if (key === "criteriaSatisfied") {
+      const arr = asArray(v);
+      out[key] = arr ? arr.map(normalizeCriterionItem) : v;
+    } else if (key === "commandsRun") {
+      const arr = asArray(v);
+      out[key] = arr ? arr.map(normalizeCommandItem) : v;
+    } else if (ARRAY_FIELDS.has(key)) {
+      out[key] = asArray(v) ?? v;
+    } else {
+      out[key] = v;
+    }
   }
   return out as AcceptanceReport;
 }

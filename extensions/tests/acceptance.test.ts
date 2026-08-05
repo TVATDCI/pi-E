@@ -18,6 +18,11 @@ import {
   evaluateAcceptance,
   formatAcceptancePrompt,
   stripAcceptanceReport,
+  classifyTaskIntent,
+  taskMayMutate,
+  inferLevelFromRoleAndTask,
+  normalizeCriterionStatus,
+  normalizeCommandResult,
 } from "../acceptance.ts";
 
 let pass = 0;
@@ -165,6 +170,98 @@ async function main(): Promise<void> {
   check("F3: cached verify (all passed) ⇒ verified (no verify command re-run)", cachedPass.provenance === "verified");
   const cachedFail = await evaluateAcceptance(verifiedCfg, `impl\n${REPORT}`, "/tmp", undefined, undefined, [{ id: "t", kind: "test", status: "failed", durationMs: 5 }]);
   check("F3: cached verify (failed) ⇒ rejected (verify not met)", cachedFail.provenance === "rejected");
+
+  // --- 14. ②b classifyTaskIntent (slimmed task-intent classifier) ---
+  check("classify: implement verb ⇒ implementation", classifyTaskIntent("implement the auth module").kind === "implementation");
+  check("classify: edit verb ⇒ implementation", classifyTaskIntent("edit src/index.ts to add the handler").kind === "implementation");
+  check("classify: fix the failing test ⇒ implementation", classifyTaskIntent("fix the failing test").kind === "implementation");
+  check("classify: scoped no-edit + implement ⇒ implementation (scoped constraint doesn't blanket-suppress)", classifyTaskIntent("do not edit files outside src/; implement the fix in src/foo.ts").kind === "implementation");
+  check("classify: blanket no-edit ⇒ read-only", classifyTaskIntent("review the diff, do not modify any files").kind === "read-only");
+  check("classify: 'review only' ⇒ read-only", classifyTaskIntent("review only, return findings").kind === "read-only");
+  check("classify: read-only deliverable 'write a summary report' ⇒ read-only", classifyTaskIntent("write a summary report of the architecture").kind === "read-only");
+  check("classify: bare question ⇒ unknown", classifyTaskIntent("what does this function do").kind === "unknown");
+
+  // --- 15. ②b taskMayMutate (broad write-verb detector) ---
+  check("mayMutate: implement ⇒ true", taskMayMutate("implement the feature") === true);
+  check("mayMutate: update ⇒ true", taskMayMutate("update the config") === true);
+  check("mayMutate: blanket no-edit ⇒ false", taskMayMutate("do not modify any files") === false);
+  check("mayMutate: read-only deliverable 'write a report' suppressed ⇒ false", taskMayMutate("write a report of findings") === false);
+
+  // --- 16. ②b inferLevelFromRoleAndTask (role/task → level override) ---
+  check("inferLevel: read-only role ⇒ attested (even with implement task)", inferLevelFromRoleAndTask("read-only", "implement the feature") === "attested");
+  check("inferLevel: writer role ⇒ checked (even with review task)", inferLevelFromRoleAndTask("writer", "review the code") === "checked");
+  check("inferLevel: no role + read-only task ⇒ attested", inferLevelFromRoleAndTask(undefined, "review only, return findings") === "attested");
+  check("inferLevel: no role + implementation task ⇒ undefined (defer to tools)", inferLevelFromRoleAndTask(undefined, "implement the feature") === undefined);
+  check("inferLevel: no role + unknown + 'inspect' keyword ⇒ attested", inferLevelFromRoleAndTask(undefined, "inspect the logs") === "attested");
+  check("inferLevel: no role + unknown + no keyword ⇒ undefined", inferLevelFromRoleAndTask(undefined, "explain the design") === undefined);
+  check("inferLevel: no role + no task ⇒ undefined", inferLevelFromRoleAndTask(undefined, undefined) === undefined);
+
+  // --- 17. ②b resolveAcceptance — role/task level-override (THE B feature, integrated) ---
+  const roOverride = resolveAcceptance({ acceptanceRole: "read-only" }, "checked", "implement the auth module");
+  check("B: read-only role OVERRIDES edit-tools ⇒ level attested", roOverride?.level === "attested");
+  check("B: read-only role ⇒ badge-only (inferred true)", roOverride?.inferred === true);
+  check("B: read-only role ⇒ no risky review (isWriter false)", !roOverride?.review);
+  check("B: writer role OVERRIDES read-only-tools ⇒ level checked", resolveAcceptance({ acceptanceRole: "writer" }, "attested", "draft a summary report")?.level === "checked");
+  check("B: read-only TASK wording downgrades edit-tools ⇒ level attested", resolveAcceptance({}, "checked", "review only, return findings")?.level === "attested");
+  // INVARIANT: existing chains (no role + non-read-only task) ⇒ tools-based level UNCHANGED
+  check("B INVARIANT: no role + implementation task + checked tools ⇒ unchanged (checked)", resolveAcceptance({}, "checked", "implement the feature")?.level === "checked");
+  check("B INVARIANT: no role + unknown task + attested tools ⇒ unchanged (attested)", resolveAcceptance({}, "attested", "explain the design")?.level === "attested");
+  // explicit level always wins over role/task inference
+  const explicitWins = resolveAcceptance({ level: "verified", acceptanceRole: "read-only" }, "checked", "review only");
+  check("B: explicit level verified wins over read-only role", explicitWins?.level === "verified" && explicitWins?.inferred === false);
+
+  // --- 18. ②b normalizeCriterionStatus — every synonym → canonical (spec independently stated) ---
+  const CRIT_SPEC: Array<[string, "satisfied" | "not-satisfied" | "not-applicable"]> = [
+    ["satisfied", "satisfied"], ["met", "satisfied"], ["complete", "satisfied"], ["completed", "satisfied"], ["done", "satisfied"],
+    ["pass", "satisfied"], ["passed", "satisfied"], ["success", "satisfied"], ["succeeded", "satisfied"],
+    ["not-satisfied", "not-satisfied"], ["not-met", "not-satisfied"], ["unmet", "not-satisfied"],
+    ["incomplete", "not-satisfied"], ["fail", "not-satisfied"], ["failed", "not-satisfied"],
+    ["not-applicable", "not-applicable"], ["n-a", "not-applicable"], ["na", "not-applicable"],
+    ["skip", "not-applicable"], ["skipped", "not-applicable"],
+  ];
+  for (const [syn, want] of CRIT_SPEC) check(`critStat: '${syn}' → '${want}'`, normalizeCriterionStatus(syn) === want);
+  check("critStat: case-insensitive 'MET' → satisfied", normalizeCriterionStatus("MET") === "satisfied");
+  check("critStat: trims ' passed ' → satisfied", normalizeCriterionStatus(" passed ") === "satisfied");
+  check("critStat: unknown value passes through", normalizeCriterionStatus("maybe") === "maybe");
+  check("critStat: non-string passes through (42)", normalizeCriterionStatus(42) === 42);
+
+  // --- 19. ②b normalizeCommandResult — every synonym → canonical ---
+  const CMD_SPEC: Array<[string, "passed" | "failed" | "not-run"]> = [
+    ["passed", "passed"], ["pass", "passed"], ["success", "passed"], ["successful", "passed"], ["succeeded", "passed"], ["ok", "passed"],
+    ["failed", "failed"], ["fail", "failed"], ["failure", "failed"], ["error", "failed"],
+    ["not-run", "not-run"], ["not-executed", "not-run"], ["skip", "not-run"], ["skipped", "not-run"],
+  ];
+  for (const [syn, want] of CMD_SPEC) check(`cmdRes: '${syn}' → '${want}'`, normalizeCommandResult(syn) === want);
+  check("cmdRes: unknown value passes through", normalizeCommandResult("pending") === "pending");
+  check("cmdRes: non-string passes through (null)", normalizeCommandResult(null) === null);
+
+  // --- 20. ②b canonicalizeReport wires enum normalization end-to-end (via parseAcceptanceReport) ---
+  const synonymReport = "```acceptance-report\n" + JSON.stringify({
+    criteriaSatisfied: [
+      { id: "c1", status: "met", evidence: "x" },
+      { id: "c2", status: "fail", evidence: "y" },
+      { id: "c3", status: "skipped", evidence: "z" },
+    ],
+    commandsRun: [
+      { command: "npm test", result: "success", summary: "ok" },
+      { command: "tsc", result: "failure", summary: "type errors" },
+    ],
+  }) + "\n```";
+  const syn = parseAcceptanceReport(synonymReport).report;
+  check("canon e2e: criterion 'met' → 'satisfied'", syn?.criteriaSatisfied?.[0]?.status === "satisfied");
+  check("canon e2e: criterion 'fail' → 'not-satisfied'", syn?.criteriaSatisfied?.[1]?.status === "not-satisfied");
+  check("canon e2e: criterion 'skipped' → 'not-applicable'", syn?.criteriaSatisfied?.[2]?.status === "not-applicable");
+  check("canon e2e: command 'success' → 'passed'", syn?.commandsRun?.[0]?.result === "passed");
+  check("canon e2e: command 'failure' → 'failed'", syn?.commandsRun?.[1]?.result === "failed");
+
+  // --- 21. ②b ADDITIVE invariant: a well-formed report canonicalizes to ITSELF ---
+  const wellFormed = "```acceptance-report\n" + JSON.stringify({
+    criteriaSatisfied: [{ id: "c1", status: "satisfied", evidence: "proof" }],
+    commandsRun: [{ command: "npm test", result: "passed", summary: "ok" }],
+  }) + "\n```";
+  const wf = parseAcceptanceReport(wellFormed).report;
+  check("additive: canonical 'satisfied' status unchanged", wf?.criteriaSatisfied?.[0]?.status === "satisfied");
+  check("additive: canonical 'passed' result unchanged", wf?.commandsRun?.[0]?.result === "passed");
 
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
