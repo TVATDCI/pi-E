@@ -192,6 +192,8 @@ export default function (pi: ExtensionAPI) {
     overrides: ChainOverrides | undefined,
     opts?: { background?: boolean; id?: number },
     context?: string,
+    /** Edit 7: run_chain caller's wall-clock timeout (ms) — threaded to runChainByName. */
+    callerTimeoutMs?: number,
   ): Promise<ChainRunResult> => {
     widgetCtx = ctx;
     const chain = chains.get(chainName);
@@ -240,6 +242,7 @@ export default function (pi: ExtensionAPI) {
       signal,
       overrides,
       context,
+      callerTimeoutMs,
     );
 
     chainState.status = result.ok ? "done" : "error";
@@ -314,6 +317,7 @@ export default function (pi: ExtensionAPI) {
     cwd: string | undefined,
     overrides: ChainOverrides | undefined,
   context?: string,
+  callerTimeoutMs?: number,
 ): { runId: number } | { error: "cap" } => {
     const activeBg = [...running.values()].filter((c) => c.background && c.status === "running").length;
     if (activeBg >= MAX_BACKGROUND) return { error: "cap" };
@@ -321,7 +325,7 @@ export default function (pi: ExtensionAPI) {
     const controller = new AbortController();
     bgRegistry.set(id, { controller, stopped: false });
     // controller.signal — NOT the tool-call signal (that is turn-coupled). Voided: returns immediately.
-    void runWithWidget(ctx, chainName, task, cwd, false, controller.signal, overrides, { background: true, id }, context)
+    void runWithWidget(ctx, chainName, task, cwd, false, controller.signal, overrides, { background: true, id }, context, callerTimeoutMs)
       .then((result) => onBgSettle(ctx, id, chainName, result, undefined))
       .catch((err) => onBgSettle(ctx, id, chainName, undefined, err));
     return { runId: id };
@@ -448,6 +452,7 @@ export default function (pi: ExtensionAPI) {
       clarify: Type.Optional(Type.Boolean({ description: "If true, show a preview/edit overlay (task + per-step model/thinking/prompt) before running. TUI mode only; no-op otherwise. Esc/abort cancels with no spawn." })),
       background: Type.Optional(Type.Boolean({ description: "If true, run in the background (fire-and-forget): returns immediately with a runId, shows in the widget, notifies on completion. TUI mode only. /stop <runId> cancels. Max " + MAX_BACKGROUND + " concurrent." })),
       context: Type.Optional(Type.String({ description: "Handoff context — appended to every step's system prompt as '## Handoff Context'. Findings, constraints, prior decisions. Keep concise (truncated >2000 chars)." })),
+      timeoutMs: Type.Optional(Type.Number({ description: "Edit 7: wall-clock timeout (ms) applied to every step's spawn. Per-step `timeoutMs` and chain `default_timeout_ms` take precedence. Opt-in — unset ⇒ no limit. On expiry the step is SIGTERM→SIGKILL'd and the chain aborts at that step with a `timeout` outcome. Best-effort, not a hard bound (a D-state child can't be killed)." })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       widgetCtx = ctx;
@@ -483,7 +488,7 @@ export default function (pi: ExtensionAPI) {
 
       // Background (fire-and-forget). Returns immediately with a runId; completion → toast + dispatch-log.
       if (params.background && ctx.mode === "tui") {
-        const bg = runBackground(ctx, chainName, params.task, params.cwd, overrides, params.context);
+        const bg = runBackground(ctx, chainName, params.task, params.cwd, overrides, params.context, params.timeoutMs);
         if ("error" in bg) {
           return {
             content: [{ type: "text" as const, text: `Background cap reached (${MAX_BACKGROUND} concurrent). Wait for one to finish or /stop one, then retry.` }],
@@ -496,7 +501,7 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const result = await runWithWidget(ctx, chainName, params.task, params.cwd, params.returnAllSteps, signal, overrides, undefined, params.context);
+      const result = await runWithWidget(ctx, chainName, params.task, params.cwd, params.returnAllSteps, signal, overrides, undefined, params.context, params.timeoutMs);
 
       if (!result.ok) {
         const trimmed = result.error?.output && result.error.output.length > 3000

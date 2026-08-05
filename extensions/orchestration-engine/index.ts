@@ -295,6 +295,12 @@ export default function (pi: ExtensionAPI) {
           "mini-damage-control rules (.pi/mini-dc-rules.yaml) instead of the parent's. " +
           "Both read-only and gated-bash personas honor this.",
       })),
+      timeoutMs: Type.Optional(Type.Number({
+        description: "Edit 7: wall-clock timeout (ms) for the spawn. Opt-in — unset ⇒ no limit (today's behavior; " +
+          "a hung model or trapped child otherwise runs until operator-Esc). On expiry the sub-agent is " +
+          "SIGTERM→SIGKILL'd and the dispatch returns a distinct `timeout` outcome. Bounds a stuck dispatch. " +
+          "Best-effort, not a hard bound (a D-state child ignores both signals and can't be killed).",
+      })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       widgetCtx = ctx;
@@ -388,7 +394,7 @@ export default function (pi: ExtensionAPI) {
         },
         signal,
         agentSource,
-        { budgets },
+        { budgets, timeoutMs: params.timeoutMs },
       ));
 
       sub.status = result.code === 0 ? "done" : "error";
@@ -404,10 +410,13 @@ export default function (pi: ExtensionAPI) {
 
       const tag = agentName ? ` (${agentName})` : "";
       const dsTag = result.downshiftedFrom ? ` [downshifted from ${result.downshiftedFrom}]` : "";
+      // Edit 7: surface the classified outcome distinctly — "timed out"/"aborted" beat the generic
+      // done/failed so a stuck dispatch is legible in the tool result + dispatch-log.
+      const statusLabel = result.outcome === "timeout" ? "timed out" : result.outcome === "aborted" ? "aborted" : result.code === 0 ? "done" : "failed";
       const trimmed = result.output.length > 6000 ? result.output.slice(0, 6000) + "\n...[truncated]" : result.output;
       return {
-        content: [{ type: "text" as const, text: `[${category} → ${result.modelFlag} @${result.thinkingLevel ?? "off"}]${tag}${dsTag} sub-agent ${result.code === 0 ? "done" : "failed"}:\n\n${trimmed}` }],
-        details: { category, modelFlag: result.modelFlag, code: result.code, persona: agentName ?? null, downshifted: !!result.downshiftedFrom, budget: budgets.enforcement, ...(budgets.warnings.length ? { budgetWarnings: budgets.warnings } : {}), sessionUsage: { ...sessionUsage } },
+        content: [{ type: "text" as const, text: `[${category} → ${result.modelFlag} @${result.thinkingLevel ?? "off"}]${tag}${dsTag} sub-agent ${statusLabel}:\n\n${trimmed}` }],
+        details: { category, modelFlag: result.modelFlag, code: result.code, outcome: result.outcome, persona: agentName ?? null, downshifted: !!result.downshiftedFrom, budget: budgets.enforcement, ...(budgets.warnings.length ? { budgetWarnings: budgets.warnings } : {}), sessionUsage: { ...sessionUsage } },
       };
     },
   });

@@ -12,7 +12,7 @@ export interface DispatchLogEntry {
   source?: string; // "tier-map" | "persona-override" | "downshift-unavailable"
   downshiftedFrom?: string;
   agent?: string | null;
-  outcome?: string; // "done" | "error"
+  outcome?: string; // "done" | "error" | "timeout" | "aborted"  (F6: timeout counts as fail; aborted is operator-initiated, not a fail)
   elapsedMs?: number;
   task?: string;
   usage?: UsageStats; // 1b/1c: token/cost capture (present when the dispatch produced an assistant turn)
@@ -71,7 +71,9 @@ export function aggregateDispatchLog(
   opts: { peak: boolean; promo: boolean },
 ): RoutingStats {
   const n = entries.length;
-  const fails = entries.filter((e) => e.outcome === "error").length;
+  // F6 (Edit 7): count `timeout` as a failure (a hung model IS a routing problem) but NOT `aborted`
+  // (operator-initiated cancel — not the model's fault; counting it would unfairly penalize models).
+  const fails = entries.filter((e) => e.outcome === "error" || e.outcome === "timeout").length;
   const overrides = entries.filter((e) => e.source === "persona-override").length;
   const lines: string[] = [];
   const flags: string[] = [];
@@ -99,7 +101,7 @@ export function aggregateDispatchLog(
   );
   const byCat = group(entries, (e) => e.category ?? "?");
   for (const [c, es] of [...byCat].sort((a, b) => b[1].length - a[1].length)) {
-    const f = es.filter((e) => e.outcome === "error").length;
+    const f = es.filter((e) => e.outcome === "error" || e.outcome === "timeout").length;
     const ms = es.map((e) => e.elapsedMs ?? 0);
     const mc = group(es, (e) => e.modelFlag ?? "?");
     const topM = [...mc].sort((a, b) => b[1].length - a[1].length)[0]?.[0] ?? "?";
@@ -123,7 +125,7 @@ export function aggregateDispatchLog(
   );
   const byModel = group(entries, (e) => e.modelFlag ?? "?");
   for (const [m, es] of [...byModel].sort((a, b) => b[1].length - a[1].length)) {
-    const f = es.filter((e) => e.outcome === "error").length;
+    const f = es.filter((e) => e.outcome === "error" || e.outcome === "timeout").length;
     const ms = es.map((e) => e.elapsedMs ?? 0);
     lines.push(
       pad(m, 26) +
@@ -144,7 +146,7 @@ export function aggregateDispatchLog(
   const byAgent = group(entries, (e) => e.agent ?? "(none/tier-map)");
   for (const [a, es] of [...byAgent].sort((x, y) => y[1].length - x[1].length)) {
     const ov = es.filter((e) => e.source === "persona-override").length;
-    const f = es.filter((e) => e.outcome === "error").length;
+    const f = es.filter((e) => e.outcome === "error" || e.outcome === "timeout").length;
     lines.push(pad(a, 22) + pad(es.length, 4) + pad(pctStr(ov, es.length), 9) + pad(pctStr(f, es.length), 6));
     if (es.length >= 2 && ov === es.length)
       flags.push(`⚠ ${a} overrides 100% (${ov}/${es.length}) — check its .md \`model:\` pin`);

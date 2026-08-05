@@ -5,6 +5,10 @@ import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModel, orderedFallbacks, FALLBACK, type TaskCategory } from "./tier-map.ts";
 import { appendBudgetNudges, type ResolvedBudgets } from "../budgets/index.ts";
+import { classifySpawnOutcome, type SpawnOutcome } from "./spawn-outcome.ts";
+// Edit 7: re-export the outcome type so consumers keep importing from spawn.ts (the canonical spawn
+// surface); the pure classifier + type live in the zero-dep spawn-outcome.ts (unit-testable).
+export type { SpawnOutcome } from "./spawn-outcome.ts";
 
 // Global FALLBACK as a "provider/id" flag string — the ordered-retry tail appended by orderedFallbacks().
 const GLOBAL_FALLBACK_FLAG = `${FALLBACK.provider}/${FALLBACK.id}`;
@@ -93,6 +97,10 @@ export interface SpawnResult {
   rationale: string;
   source: string;
   toolCount: number;
+  /** Edit 7: classified spawn outcome. REQUIRED — set on every resolveAndSpawn return path
+   *  (spawn.ts isn't machine-tsc'd, so the required type documents intent; setting it on all
+   *  paths is what delivers the contract). Consumers (index.ts, chain-runner) read this directly. */
+  outcome: SpawnOutcome;
   downshiftedFrom?: string;
   usage?: UsageStats;
 }
@@ -148,7 +156,11 @@ export function spawnSub(
   budgets?: ResolvedBudgets,
   toolsOverride?: string,
   skillOverride?: string,
-): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined }> {
+  /** Edit 7: wall-clock timeout (ms) for this spawn. Opt-in — undefined/<=0 ⇒ no timer (today's
+   *  behavior). On expiry the child is SIGTERM→SIGKILL'd (killProc escalation) and the spawn
+   *  resolves with `timedOut: true` + whatever partial output was captured. */
+  timeoutMs?: number,
+): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined; timedOut: boolean }> {
   const tools = toolsOverride ?? persona?.tools ?? "read,grep,find,ls";
   const needsBash = tools.includes("bash");
 
@@ -195,19 +207,36 @@ export function spawnSub(
   return new Promise((resolve) => {
     const proc = spawn("pi", args, { cwd: cwd ?? ctx.cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
 
-    // TODO(Edit 7): wrap spawn in Promise.race([spawn, sleep(timeoutMs)]) when
-    // dispatch gains a timeoutMs param; on expiry SIGTERM the child and return
-    // {outcome: "timeout", downshiftedFrom: "timeout"} in the dispatch-log
-    // receipt. Tracked in graph-engineering absorption plan; unblocks
-    // review-loop Mode A hung-reviewer INCONCLUSIVE escape (Edit 4a). Until
-    // this lands, the only abort is operator-Esc (manual).
+    // Edit 7 (was TODO Edit 7): wall-clock timeout + robust kill, implemented INSIDE spawnSub (it
+    // owns the proc handle — racing from resolveAndSpawn would have nothing to kill). On timeout
+    // expiry we flip `timedOut` + killProc; the existing single close-handler then resolves naturally
+    // with the partial output + timedOut:true (NO Promise.race — that would need a second resolve
+    // path and risks double-settle). Unblocks review-loop Mode A's hung-reviewer INCONCLUSIVE escape
+    // (Edit 4a) and ships the kill primitive ①'s future turn-termination will reuse.
     // 0a: Esc/abort must terminate the sub-agent process — no orphan subprocesses.
     let killed = false;
+    let escalateTimer: ReturnType<typeof setTimeout> | undefined;
+    // SIGTERM → SIGKILL escalation: a child that traps/ignores SIGTERM must not defeat the kill.
+    // NOTE: intentionally DIVERGES from acceptance.ts runVerify — there, finish() clears the escalate
+    // timer synchronously after kill, so its SIGKILL never fires (latent dead code on the verify path;
+    // separate issue). Here the escalateTimer persists until the close handler clears it, so the SIGKILL
+    // ACTUALLY fires. Do NOT "align" the two — that would silently break this escalation.
+    // Lives in killProc so EVERY kill path (abort, timeout, ①'s future turn-kill) inherits robust termination.
     const killProc = () => {
       if (killed) return;
       killed = true;
       try { proc.kill("SIGTERM"); } catch { /* already exited */ }
+      escalateTimer = setTimeout(() => {
+        try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+      }, 1000);
     };
+    // Edit 7: opt-in wall-clock timer. On expiry → killProc + flip timedOut. Cleared on close/error
+    // (the close handler resolves with the partial output + the flag; classifySpawnOutcome turns it
+    // into the `timeout` outcome in resolveAndSpawn). <=0/undefined ⇒ no timer ⇒ today's behavior.
+    let timedOut = false;
+    const timeoutTimer = typeof timeoutMs === "number" && timeoutMs > 0
+      ? setTimeout(() => { timedOut = true; killProc(); }, timeoutMs)
+      : undefined;
     if (signal) {
       if (signal.aborted) killProc();
       else signal.addEventListener("abort", killProc, { once: true });
@@ -264,19 +293,29 @@ export function spawnSub(
     proc.stderr!.on("data", (c: string) => { stderrBuf += c; });
 
     proc.on("close", (code) => {
-      if (signal && !killed) signal.removeEventListener("abort", killProc);
+      // Edit 7 review-fix (morpheus): drop the `!killed` guard. Pre-Edit-7 it was a safe micro-opt
+      // (abort was the only kill cause, and {once:true} already auto-removed on fire). Post-Edit-7
+      // TIMEOUT is a 2nd kill cause that sets killed=true WITHOUT the abort listener firing, so the
+      // guard would LEAK the listener on the shared signal (widened by chain/reviewer reuse).
+      // removeEventListener is idempotent; matches acceptance.ts runVerify's unconditional removal.
+      if (signal) signal.removeEventListener("abort", killProc);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (escalateTimer) clearTimeout(escalateTimer);
       const elapsed = Date.now() - startTime;
       const raw = chunks.join("");
       const parts: string[] = [raw];
       if (inbandError) parts.push(`\n[agent error]\n${inbandError}`);
       if ((code !== 0 || parts[0].length === 0) && stderrBuf.trim()) parts.push(`\n[stderr]\n${stderrBuf.trim()}`);
-      resolve({ output: parts.join("").trim(), code: code ?? 1, elapsedMs: elapsed, toolCount, usage: usage.turns > 0 ? usage : undefined });
+      resolve({ output: parts.join("").trim(), code: code ?? 1, elapsedMs: elapsed, toolCount, usage: usage.turns > 0 ? usage : undefined, timedOut });
     });
 
     proc.on("error", (err) => {
-      if (signal && !killed) signal.removeEventListener("abort", killProc);
+      // Edit 7 review-fix: unconditional removal (see close handler note) — the !killed guard leaks.
+      if (signal) signal.removeEventListener("abort", killProc);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (escalateTimer) clearTimeout(escalateTimer);
       const elapsed = Date.now() - startTime;
-      resolve({ output: `spawn error: ${err.message}\n[stderr]\n${stderrBuf.trim() || "(none)"}`, code: 1, elapsedMs: elapsed, toolCount, usage: usage.turns > 0 ? usage : undefined });
+      resolve({ output: `spawn error: ${err.message}\n[stderr]\n${stderrBuf.trim() || "(none)"}`, code: 1, elapsedMs: elapsed, toolCount, usage: usage.turns > 0 ? usage : undefined, timedOut });
     });
   });
 }
@@ -293,6 +332,12 @@ export interface ResolveAndSpawnOptions {
    *  name resolves under ~/.pi/agent/skills/ (mirrors loadPersona); a value containing "/" is a
    *  literal path. Additive — unset = no change to the child's normal skill discovery. */
   skill?: string;
+  /** Edit 7: wall-clock timeout (ms) for each spawn. Opt-in — undefined ⇒ no timer (today's
+   *  behavior). On expiry the spawn is SIGTERM→SIGKILL'd and the dispatch ABORTs with a distinct
+   *  `timeout` outcome (retrying the fallback won't help a hung model). BEST-EFFORT, not a hard
+   *  bound: a child stuck in uninterruptible sleep (D state) ignores both signals and can't be
+   *  killed — the spawn hangs despite the timer. Bounds the normal hung-model/trapped-signal case. */
+  timeoutMs?: number;
 }
 
 export async function resolveAndSpawn(
@@ -307,7 +352,7 @@ export async function resolveAndSpawn(
   agentSource?: string,
   options?: ResolveAndSpawnOptions,
 ): Promise<SpawnResult> {
-  const { modelOverride, thinkingOverride, context, budgets, toolsOverride, skill } = options ?? {};
+  const { modelOverride, thinkingOverride, context, budgets, toolsOverride, skill, timeoutMs } = options ?? {};
   const persona = agent ? loadPersona(agent) : undefined;
   if (agent && !persona) {
     return {
@@ -318,6 +363,7 @@ export async function resolveAndSpawn(
       rationale: "persona-not-found",
       source: "error",
       toolCount: 0,
+      outcome: "error",
     };
   }
 
@@ -362,6 +408,7 @@ export async function resolveAndSpawn(
         rationale,
         source: "error",
         toolCount: 0,
+        outcome: "error",
       };
     }
   }
@@ -370,7 +417,11 @@ export async function resolveAndSpawn(
   // the active model during a run (reads the live `modelFlag` let, so a fallback/downshift is
   // reflected on the retried spawn). spawnSub itself stays unchanged.
   const progressWithModel = onProgress ? (p: SpawnProgress) => onProgress({ ...p, modelFlag }) : undefined;
-  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride, skill);
+  const primary = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride, skill, timeoutMs);
+  let { output, code, elapsedMs, toolCount, usage } = primary;
+  // Edit 7: track whether ANY spawn in this dispatch timed out (primary or a fallback). Classified
+  // once, below, via classifySpawnOutcome — aborted > timeout > done/error.
+  let dispatchTimedOut = primary.timedOut;
 
   // Cross-provider fallback chain when the primary silently returns empty (quota exhausted — the
   // Z-AI plan has NO balance fallback, so exhaustion = hard fail = empty output). Walk the per-tier
@@ -378,7 +429,10 @@ export async function resolveAndSpawn(
   // until one produces output; merge usage/elapsed/tools across all hops. Mirrors upstream
   // "auto-trigger on rate-limit/overload" detection — empty-output is the Z-AI manifestation; live
   // 429/529 detection is deferred (PORT-PLAN-v0.40.md ③). Previously this tried exactly ONE fallback.
-  if (output.length === 0 && !signal?.aborted) {
+  // Edit 7: a timed-out dispatch ABORTs the fallback chain — retrying won't help a hung model.
+  // (dispatchTimedOut breaks AFTER the first timeout, so worst-case wall-clock = timeoutMs × the
+  // number of fallback candidates that hang before one succeeds or all are tried — not a per-dispatch budget.)
+  if (!dispatchTimedOut && output.length === 0 && !signal?.aborted) {
     const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG).filter(isAvail);
     if (candidates.length > 0) {
       const exhaustedFrom = modelFlag;
@@ -387,10 +441,11 @@ export async function resolveAndSpawn(
         retriedWith.push(cand);
         modelFlag = cand;
         thinkingLevel = "high";
-        const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride, skill);
+        const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride, skill, timeoutMs);
         elapsedMs += fbResult.elapsedMs;
         toolCount += fbResult.toolCount;
         usage = mergeUsage(usage, fbResult.usage);
+        if (fbResult.timedOut) { dispatchTimedOut = true; break; } // ABORT on timeout
         if (fbResult.output.length > 0) {
           output = fbResult.output;
           code = fbResult.code;
@@ -410,6 +465,11 @@ export async function resolveAndSpawn(
     }
   }
 
+  // Edit 7: classify once from the accumulated kill causes + final exit code. aborted > timeout
+  // (operator's intentional Esc wins the race window) > done/error (by code). Replaces the prior
+  // `code === 0 ? "done" : "error"` — timeout/aborted now surface distinctly.
+  const outcome = classifySpawnOutcome({ timedOut: dispatchTimedOut, aborted: !!signal?.aborted, code });
+
   pi.appendEntry("dispatch-log", {
     category,
     modelFlag,
@@ -419,7 +479,7 @@ export async function resolveAndSpawn(
     agent: agent ?? null,
     cwd: cwd ?? ctx.cwd,
     cwdOverride: cwd ? true : false,
-    outcome: code === 0 ? "done" : "error",
+    outcome,
     elapsedMs,
     task: task.slice(0, 200),
     ...(downshiftedFrom ? { downshiftedFrom } : {}),
@@ -436,6 +496,7 @@ export async function resolveAndSpawn(
     rationale,
     source,
     toolCount,
+    outcome,
     ...(downshiftedFrom ? { downshiftedFrom } : {}),
     ...(usage ? { usage } : {}),
   };

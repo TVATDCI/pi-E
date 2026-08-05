@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
-import { resolveAndSpawn, loadPersona, type UsageStats, type SpawnProgress } from "./orchestration-engine/spawn.ts";
+import { resolveAndSpawn, loadPersona, type UsageStats, type SpawnProgress, type SpawnOutcome } from "./orchestration-engine/spawn.ts";
 import type { TaskCategory } from "./orchestration-engine/tier-map.ts";
 import { READ_ONLY_CATEGORIES, tierEntryFor } from "./orchestration-engine/tier-map.ts";
 import { resolveBudgets, budgetUsageState } from "./budgets/index.ts";
@@ -28,11 +28,15 @@ export interface ChainStep {
   category?: TaskCategory;
   prompt: string;
   acceptance?: AcceptanceInput;
+  /** Edit 7: per-step wall-clock timeout (ms). Precedence: step > run_chain param > chain.default_timeout_ms. Opt-in. */
+  timeoutMs?: number;
 }
 
 export interface Chain {
   description: string;
   default_category?: TaskCategory;
+  /** Edit 7: chain-wide default wall-clock timeout (ms) for steps that don't set their own. */
+  default_timeout_ms?: number;
   steps: ChainStep[];
 }
 
@@ -51,6 +55,9 @@ export interface ChainStepResult {
   thinkingLevel?: string;
   usage?: UsageStats;
   acceptance?: StepAcceptance;
+  /** Edit 7: classified spawn outcome (done/error/timeout/aborted). Required — the single
+   *  construction site (the step loop) always sets it from result.outcome. */
+  outcome: SpawnOutcome;
 }
 
 export interface ChainRunResult {
@@ -117,11 +124,13 @@ function normalizeChainsFile(raw: ChainsFile): ChainsFile {
         category: sr.category as TaskCategory | undefined,
         prompt: String(sr.prompt ?? ""),
         ...(acceptance ? { acceptance } : {}),
+        ...(typeof sr.timeoutMs === "number" && sr.timeoutMs > 0 ? { timeoutMs: sr.timeoutMs } : {}),
       };
     });
     chains[name] = {
       description: String(chain.description ?? ""),
       default_category: chain.default_category as TaskCategory | undefined,
+      ...(typeof chain.default_timeout_ms === "number" && chain.default_timeout_ms > 0 ? { default_timeout_ms: chain.default_timeout_ms } : {}),
       steps,
     };
   }
@@ -182,6 +191,9 @@ export async function runChainByName(
   signal?: AbortSignal,
   overrides?: ChainOverrides,
   context?: string,
+  /** Edit 7: wall-clock timeout (ms) from the run_chain caller — applies to every step's spawn.
+   *  Precedence: step.timeoutMs > this > chain.default_timeout_ms. Opt-in. */
+  callerTimeoutMs?: number,
 ): Promise<ChainRunResult> {
   const chains = loadChains(ctx);
   const chain = chains.get(chainName);
@@ -247,6 +259,8 @@ export async function runChainByName(
     }
 
     onStepStart?.(step.name);
+    // Edit 7: 3-level timeout resolution — most specific wins (step > caller > chain-default).
+    const stepTimeoutMs = step.timeoutMs ?? callerTimeoutMs ?? chain.default_timeout_ms;
     const result = await resolveAndSpawn(
       pi,
       prompt,
@@ -257,12 +271,16 @@ export async function runChainByName(
       onStepProgress ? (p) => onStepProgress(step.name, p) : undefined,
       signal,
       undefined,
-      { modelOverride: stepOverride?.model, thinkingOverride: stepOverride?.thinking, context, budgets: stepBudgets, skill: stepOverride?.skill },
+      { modelOverride: stepOverride?.model, thinkingOverride: stepOverride?.thinking, context, budgets: stepBudgets, skill: stepOverride?.skill, ...(stepTimeoutMs ? { timeoutMs: stepTimeoutMs } : {}) },
     );
     // ① accumulate this step's reported usage into the shared session total (counts toward the gate).
     accumulateUsage(result.usage);
 
     let stepCode = result.code;
+    // Edit 7: a timed-out/aborted step fails the chain at this step (abort-on-timeout policy). A
+    // killed child usually exits non-zero anyway, but forcing it makes the intent explicit and is
+    // robust against a graceful SIGTERM handler that exits 0.
+    if (result.outcome === "timeout" || result.outcome === "aborted") stepCode = 1;
     let stepAcceptance: StepAcceptance | undefined;
     if (resolvedAcceptance && result.code === 0) {
       stepAcceptance = await evaluateAcceptance(resolvedAcceptance, result.output, cwd ?? ctx.cwd, signal);
@@ -309,6 +327,7 @@ export async function runChainByName(
       thinkingLevel: result.thinkingLevel,
       ...(result.usage ? { usage: result.usage } : {}),
       ...(stepAcceptance ? { acceptance: stepAcceptance } : {}),
+      outcome: result.outcome,
     };
     onStepEnd?.(step.name, stepResult);
     stepResults.push(stepResult);
@@ -317,12 +336,18 @@ export async function runChainByName(
       const gateNote = stepAcceptance?.failStep
         ? `\n[acceptance gate failed: provenance=${stepAcceptance.provenance} (requested ${stepAcceptance.level})]`
         : "";
+      // Edit 7: tag the abort cause distinctly so a timed-out/aborted step is legible in the chain error.
+      const timeoutNote = result.outcome === "timeout"
+        ? `\n[timed out after ${result.elapsedMs}ms]`
+        : result.outcome === "aborted"
+          ? `\n[aborted]`
+          : "";
       return {
         ok: false,
         chainName,
         finalOutput,
         stepResults,
-        error: { step: step.name, output: result.output + gateNote },
+        error: { step: step.name, output: result.output + gateNote + timeoutNote },
       };
     }
 
