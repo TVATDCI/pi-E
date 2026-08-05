@@ -1,51 +1,44 @@
-# Pi Handoff — graph-engineering absorption + independence corrections (2026-08-04)
+# Pi Handoff — pi-subagents v0.40 absorption: Tier 1 + Tier 2 + Edit-7 + B+C complete (2026-08-05)
 
-**Written at:** 2026-08-04T13:01:07Z
-**Pi session:** 019fca45-8539-70e4-8afe-fa4f1e27c2c4
-**Original intent:** Verify Sisyphus's inventory of pi, explore the graph-engineering folder, implement the approved absorption spec, then (follow-up) correct stale independence claims in README + memory.
+**Written at:** 2026-08-05T20:34:18Z
+**Pi session:** pi-subagents absorption session (writer/verifier pane) — see `~/.pi/agent/sessions/`
+**Original intent:** Analyze the pi-subagents v0.34→v0.40 delta for features worth porting, then absorb them into the pi harness.
 
 ## Summary
-Absorbed the graph-engineering discipline into pi's review machinery (commit 00dd49d, zero TS behavior change), then corrected two stale independence claims: the README "Two-platform architecture" section said pi "loads sisyphus skills" (false since delinking commit 1dfdf30) — fixed in commit 253f5f7; and the memory constraint `pi_independent_from_opencode` overstated "COMPLETELY independent" (ignored provider coupling) — tightened to "skills-independent; provider-coupled" and renamed `skills_delinked_from_opencode` → `pi_skills_independent_provider_coupled` for symmetric framing. The absorption was RENAME + ENFORCE, not BUILD. The commit-message chain (seraph→reviewer) was dogfooded for 00dd49d.
+Absorbed the pi-subagents v0.40 delta across two operator-driven panes (pi = writer/verifier + scoping; a fresh pane = implementation). **Tier 1 (① budgets, ② acceptance review gate) and the Tier 2 flagship items (③ per-agent fallbackModels + taste/intent tier, ④ clarify `s` skill-picker) are implemented, review-loop'd, committed, and writer-pane verified — 399 tests green.** Edit-7 (the ①-deferred spawn `timeoutMs` + SIGTERM→SIGKILL kill primitive) and ② B+C parity (`acceptanceRole` level-override + parser enum synonyms) also landed. The absorption is at a natural completion point; ⑤ (capability ceilings) is async-gated and a few items remain deferred/parked. Authoritative state: `~/developer/ytdl/about-pi/pi-subagents/PORT-PLAN-v0.40.md`.
 
 ## Files touched
-- `skills/review-loop/SKILL.md` — §15 vocab glossary; Mode A step 3 fan-in completeness check (+ preserved buckets/escalation); step 5 reserved for future timeout; step 6 conditional Lane-6 oracle *(in 00dd49d)*
-- `AGENTS.md` — "No cheap model at a judging node" rule *(in 00dd49d)*
-- `extensions/orchestration-engine/tier-map.ts` — STRONG-MODEL-AT-JUDGING invariant comment above TIERS *(in 00dd49d)*
-- `extensions/bd-bridge.ts` — header NOTE: memory-projection only, no opencode tool/MCP access *(in 00dd49d)*
-- `extensions/orchestration-engine/spawn.ts` — TODO(Edit 7) tracking deferred dispatch-timeout BUILD *(in 00dd49d)*
-- `README.md` — corrected stale "loads sisyphus skills" line + couplings-table row + footer date; noted skills-independent/provider-coupled *(in 253f5f7)*
-- `skills/session-close/SKILL.md` — two-commit-type separation (Step 3) + clean-tree Done-when + strand guard *(this session)*
-- `exports/pi-handoff.md` — this file (session close)
-- Memory (`store.jsonl`, NOT git-tracked): renamed `skills_delinked_from_opencode` → `pi_skills_independent_provider_coupled`; tightened `pi_independent_from_opencode`; added `codegraph_defer_basis_corrected` + `edit7_dispatch_timeout_build_tracked`
+- `extensions/budgets/` (6 files) — ① budget primitives (faithful port + resolver + tests).
+- `extensions/acceptance.ts` (+ `tests/acceptance.test.ts`, 133 tests) — ② review gate + B+C parity (role level-override, parser enum synonyms).
+- `extensions/orchestration-engine/{spawn,index,tier-map,session-state,review-helpers,spawn-outcome,routing-stats}.ts` — ① wiring, ③ fallbackModels, ②b reviewer orchestration, Edit-7 timeoutMs+outcome, F6 routing-stats.
+- `extensions/{chain-runner,chain-clarify,agent-chain}.ts` — chain-step budgets/review/timeoutMs/skill-picker wiring.
+- `about-pi/pi-subagents/PORT-PLAN-v0.40.md` — state doc (①②③④✅, Edit-7✅, B+C✅; deferred logged).
 
 ## Decisions made
-- **Absorption = RENAME + ENFORCE, not BUILD** — Phase-1 audit (16-row inventory + 5 questions, all file-cited) showed pi already had 2/5 graph-eng "missing pieces" (review-loop = orchestrator-review; dispatch-log = execution-receipt).
-- **scout-twice is LINEAR, not a diamond** — corrected Sisyphus's inventory; documented the contrast in the glossary.
-- **Strong-model rule as hard rule + defense-in-depth** — AGENTS.md (policy) + tier-map.ts comment at the breach point (the file a human edits to change models).
-- **Lane-6 oracle fires post-synthesis, conditional only** — cost-discipline (ultrabrain is the expensive tier).
-- **Edit 4a hung-reviewer timeout DEFERRED** — unexecutable in pi's foreground-dispatch model (no timeout param); tracked as Edit 7 BUILD.
-- **Independence correction (operator-driven #1)** — pi is skills-INDEPENDENT (settings:[] + 6 native skills + 0 symlinks) but PROVIDER-COUPLED (tier-map.ts routes quick/git-commit/ultrabrain + fallbacks to opencode/opencode-go). README + memory updated to stop overstating "completely independent."
-- **Commit-type separation (operator-stated principle)** — two distinct commit aims kept separate: (1) **implementation commits** (`feat/fix/docs` — tested-pass checkpoints securing the codebase) and (2) the **session-close commit** (`pi: session-close` — the handoff, session metadata). The handoff is NEVER folded into an implementation commit. Stranding is solved by making "close" terminal (clean tree = closed), not by folding.
+- **Reviewer model = glm-5.2 (`deep`)** for ②b — Z-AI docs: glm-5.2 is optimized for engineering-standards judgment (the reviewer's job); glm-5-turbo is agent-execution. Operator-provided docs.
+- **Opt-in budgets, NO default `usageBudget`** — upstream `UsageBudgetLimitConfig` requires `hard`, so any default activates the gate; visibility via cumulative `sessionUsage` instead.
+- **Conservative orchestration policy** — hard turn/tool budgets only on read-only categories; writers get none (never hard-kill a mutation worker mid-work).
+- **`aborted > timeout` precedence** — operator-Esc intent dominates a racing timeout (least-surprising label).
+- **A (dispatch-acceptance) deferred** — no consumer for single-dispatch verify; anti-over-engineering (D5 marginal-value).
 
-## Dead ends
-- **Edit 3 REPLACE collapsed Mode A step 3's content** — the spec said REPLACE; literal execution dropped the 3-bucket synthesis + escalation. Surfaced (not freehanded); Sisyphus confirmed it was his spec error (should've been INSERT-before). Resolved by the Item-2 delta.
-- **"codegraph reachable via bridge" claim** — wrong; `bd-bridge.ts` is memory-projection only, subprocesses run `--no-extensions`. Corrected; persisted as `codegraph_defer_basis_corrected`.
-- **Edit 4 step-5 timeout as a documented rule** — unexecutable (no dispatch timeout); deferred to Edit 7 BUILD.
-- **commit-message reviewer miscount** — chain reviewer PASSed a ~65-char subject claiming "exactly 50"; caught + trimmed to 48.
-- **Misnamed memory key** — I called the skills-delinking fact `pi_delinked_from_opencode` in Phase-1, but the actual store.jsonl key was `skills_delinked_from_opencode`. Caught before renaming (verified via grep); renamed the real key.
+## Dead ends (high-value — don't repeat)
+- **glm-4.7 for B+C implementation FAILED.** A fresh pane running glm-4.7 (writing/taste tier) produced an *accurate scope* (real line refs) but could not *implement*: it lost the file path between scope and implement (searched the pi-subagents clone + pi-coding-agent package, not `~/.pi/agent/extensions/`) and hit the task-gate without reading the embedded fix. **Root cause: glm-4.7 reads/reasons well but cannot drive the autonomous implementation loop (navigation across respawns, tool-gate satisfaction, error-recovery). Fix: strong tier (glm-5.2) for implementation** — glm-5.2 succeeded first try. Lesson: discussion/scoping ≠ implementation (the ③ tiering point).
+- **The `store_jsonl_cross_process_race` "active bug" was a STALE FACT.** I re-saved it as an "every-session reminder" constraint WITHOUT reading the code; the race was ALREADY fixed (W8b, 2026-07-28: append-only writes + `withFileLock` O_EXCL lockfile). **Root cause: trusted a memory fact over verifying against code** (violated verify-before-asserting). Fix: corrected the fact (FIXED — don't re-flag). Meta-lesson: memory is a hint, not ground truth.
+- **The "git push" alarm was a guardrail, not an action.** Operator saw `git push` in `mini-dc-rules.yaml`; it's the gate's ASK rule (how a push is treated *if* attempted), not an instruction. No remote configured; nothing pushed.
 
 ## Incomplete work
-- **Edit 7 BUILD — dispatch-level timeout** (`spawn.ts`): `Promise.race([spawn, sleep(timeoutMs)])` → SIGTERM → `{outcome:"timeout", downshiftedFrom:"timeout"}` receipt. Enables review-loop Mode A step 5 (reserved). Tracked via TODO(Edit 7) + reserved step 5.
-- **#2 — the "5 missing pieces" table walkthrough** — operator asked for a deeper explanation; deferred ("come back after #1"). Still pending.
-- **session-close skill refinement** — **DONE this session**: two-commit-type separation (Step 3) + clean-tree Done-when + strand guard encoded in `skills/session-close/SKILL.md`. (Was the recurring "handoff strands uncommitted" bug; fix encoded so close is terminal = clean tree.)
+- None mid-flight. Working tree clean (after the `pi:` handoff commit below). All implemented items committed + writer-pane verified.
 
-## Proposed bd facts
-- scope=global | category=decision | key=pi_graph_eng_absorbed | value="pi absorbed graph-engineering discipline in commit 00dd49d (2026-08-04): skills/review-loop/SKILL.md gains §15 vocab glossary + Mode A fan-in completeness check + conditional Lane-6 oracle; AGENTS.md + tier-map.ts enforce strong-model-at-judging invariant. Zero TS behavior change."
-- scope=global | category=reason | key=pi_dispatch_log_is_log_not_gate | value="pi's dispatch-log (spawn.ts:354) is a per-dispatch log with NO fan-out-completion gate; pi's barrier is de-facto (blocking dispatch) + review-loop convention only."
-- scope=global | category=reason | key=pi_independence_skills_vs_provider | value="pi is skills-INDEPENDENT from opencode (settings.json:[] + 6 native skills + 0 symlinks, delinked 1dfdf30) but PROVIDER-COUPLED (tier-map.ts routes quick/git-commit-message/ultrabrain + fallbacks to opencode/opencode-go FREE providers). NOT 'completely independent.'"
-- scope=global | category=decision | key=pi_commit_type_separation | value="pi keeps two commit types separate: (1) implementation commits (feat/fix/docs — tested-pass checkpoints) and (2) the session-close commit (pi: session-close — the handoff, session metadata, never folded into implementation commits)."
+## Proposed bd facts (pi proposes; sisyphus reviews + promotes)
+- scope=global | category=decision | key=pi_subagents_v040_absorption_state | value="pi-subagents v0.40 delta absorption COMPLETE for the in-scope items: ① budgets, ② acceptance review (+B+C parity), ③ fallbackModels+taste/intent tier, ④ clarify s-key, Edit-7 timeoutMs+kill primitive — all DONE+committed+verified (399 tests green, HEAD 03ea46e). Deferred: A dispatch-acceptance (no consumer), ⑤ capability ceilings (async-gated), ④ w/r/p keys, R1 spawn-loop polish (parked), D1-D3. PORT-PLAN-v0.40.md is authoritative."
+- scope=global | category=reason | key=model_tier_implementation_vs_discussion | value="glm-4.7 (writing/taste tier) reads+reasons about code accurately but CANNOT drive autonomous implementation (navigation across respawns, task-gate satisfaction, error-recovery). For code implementation use a strong tier (glm-5.2/glm-5-turbo); reserve glm-4.7 for scoping/prose. Verified 2026-08-05: glm-4.7 pane failed B+C impl (lost file path + gate); glm-5.2 pane succeeded first try."
+- scope=global | category=reason | key=store_jsonl_race_already_fixed | value="store.jsonl cross-process write race is FIXED (W8b, 2026-07-28): append-only writes + withFileLock (O_EXCL lockfile + stale/dead-holder stealing). A stale memory fact claimed it unfixed; corrected 2026-08-05 after code verification. Do NOT re-flag as a bug."
+- scope=global | category=decision | key=reviewer_orchestration_model_glm52 | value="②b independent-reviewer spawn uses category deep (glm-5.2 @high) — engineering-standards judgment per Z-AI docs; glm-5-turbo is agent-execution (wrong for review). Read-only enforced end-to-end via toolsOverride."
 
 ## Next steps for opencode
-- **Round-trip pending:** sisyphus's next session-begin surfaces a `[FROM pi]` block; promote the 4 proposed bd facts after review. pi has NOT written bd.
-- **#2 deferred:** the 5-missing-pieces table explanation is pending on pi's side (operator will resume).
-- **session-close skill refinement:** pending operator go on pi's side.
+- **A (dispatch/single-dispatch acceptance)** — deferred until a concrete single-dispatch-verify consumer exists.
+- **⑤ capability ceilings** — defer until Group 3 async (PORT-PLAN §⑤); foreground-slimmed has no current consumer.
+- **R1** (spawn retry-loop: `downshiftedFrom` overwrite + abort-not-rechecked) — parked; ~½-day focused pass when wanted (extract a pure walk-planning helper → testable + fixes both).
+- **`agent_chain_widget_abort_clear_bug`** — the live stuck-widget bug (abort/error path doesn't clear `running`); small fix, hit during this session.
+- **D1-D3** (Edit-7 polish: timeout widget glyph, PID-reuse, `acceptance.ts` latent escalation bug).
+- **④ `w`/`r`/`p` clarify keys** — nice-to-haves.
