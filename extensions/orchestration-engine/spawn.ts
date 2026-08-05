@@ -3,8 +3,11 @@ import { mkdirSync, readFileSync, existsSync, statSync, renameSync } from "node:
 import { join, resolve, dirname } from "node:path";
 import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resolveModel, FALLBACK, type TaskCategory } from "./tier-map.ts";
+import { resolveModel, orderedFallbacks, FALLBACK, type TaskCategory } from "./tier-map.ts";
 import { appendBudgetNudges, type ResolvedBudgets } from "../budgets/index.ts";
+
+// Global FALLBACK as a "provider/id" flag string — the ordered-retry tail appended by orderedFallbacks().
+const GLOBAL_FALLBACK_FLAG = `${FALLBACK.provider}/${FALLBACK.id}`;
 
 // 0b: stable session key per {agent, project}. Sanitized git-root path → zero collision.
 function findGitRoot(cwd: string): string | null {
@@ -322,17 +325,21 @@ export async function resolveAndSpawn(
   };
   let downshiftedFrom: string | undefined;
   if (!isAvail(modelFlag)) {
+    // Primary unavailable (no configured key). Walk the per-tier fallback chain then the global
+    // FALLBACK tail, picking the FIRST available (PORT-PLAN-v0.40.md ③). Previously this leapt
+    // straight to the global FALLBACK, ignoring the per-tier array entirely.
     downshiftedFrom = modelFlag;
-    const fb = `${FALLBACK.provider}/${FALLBACK.id}`;
-    if (isAvail(fb)) {
-      modelFlag = fb;
+    const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG);
+    const pick = candidates.find(isAvail);
+    if (pick) {
+      modelFlag = pick;
       thinkingLevel = "high";
       source = "downshift-unavailable";
-      rationale = `${downshiftedFrom} unavailable (no configured key) → fell back to ${fb}`;
-      if (ctx.hasUI) ctx.ui.notify(`⚠ ${downshiftedFrom} unavailable → downshifted to ${fb}`, "info");
+      rationale = `${downshiftedFrom} unavailable (no configured key) → fell back to ${pick}`;
+      if (ctx.hasUI) ctx.ui.notify(`⚠ ${downshiftedFrom} unavailable → downshifted to ${pick}`, "info");
     } else {
       return {
-        output: `Dispatch aborted: '${downshiftedFrom}' is unavailable (no configured key) and fallback '${fb}' is too. Run /tiers to see which models have keys.`,
+        output: `Dispatch aborted: '${downshiftedFrom}' is unavailable (no configured key) and no fallback in [${candidates.join(", ")}] has a key either. Run /tiers to see which models have keys.`,
         code: 1,
         elapsedMs: 0,
         modelFlag,
@@ -350,26 +357,41 @@ export async function resolveAndSpawn(
   const progressWithModel = onProgress ? (p: SpawnProgress) => onProgress({ ...p, modelFlag }) : undefined;
   let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride);
 
-  // Cross-provider fallback when the primary model silently returns empty (e.g., quota exhausted).
-  if (output.length === 0 && !signal?.aborted && tierDefault.fallbackFlag && tierDefault.fallbackFlag !== modelFlag && isAvail(tierDefault.fallbackFlag)) {
-    const fbDownshiftedFrom = modelFlag;
-    const fb = tierDefault.fallbackFlag;
-    modelFlag = fb;
-    thinkingLevel = "high";
-    source = "downshift-exhausted";
-    rationale = `${fbDownshiftedFrom} returned empty (likely quota exhausted) → retried with ${fb}`;
-    if (ctx.hasUI) ctx.ui.notify(`⚠ ${fbDownshiftedFrom} exhausted → retried with ${fb}`, "info");
-    const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride);
-    output = fbResult.output;
-    code = fbResult.code;
-    elapsedMs = fbResult.elapsedMs;
-    toolCount = fbResult.toolCount;
-    usage = mergeUsage(usage, fbResult.usage);
-    if (output.length === 0) {
-      output = `Both ${fbDownshiftedFrom} and fallback ${fb} returned empty. Check quota or run /tiers to verify model availability.`;
-      code = 1;
-    } else {
-      downshiftedFrom = fbDownshiftedFrom;
+  // Cross-provider fallback chain when the primary silently returns empty (quota exhausted — the
+  // Z-AI plan has NO balance fallback, so exhaustion = hard fail = empty output). Walk the per-tier
+  // fallbackModels array in order, then the global FALLBACK tail, spawning each available model
+  // until one produces output; merge usage/elapsed/tools across all hops. Mirrors upstream
+  // "auto-trigger on rate-limit/overload" detection — empty-output is the Z-AI manifestation; live
+  // 429/529 detection is deferred (PORT-PLAN-v0.40.md ③). Previously this tried exactly ONE fallback.
+  if (output.length === 0 && !signal?.aborted) {
+    const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG).filter(isAvail);
+    if (candidates.length > 0) {
+      const exhaustedFrom = modelFlag;
+      const retriedWith: string[] = [];
+      for (const cand of candidates) {
+        retriedWith.push(cand);
+        modelFlag = cand;
+        thinkingLevel = "high";
+        const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride);
+        elapsedMs += fbResult.elapsedMs;
+        toolCount += fbResult.toolCount;
+        usage = mergeUsage(usage, fbResult.usage);
+        if (fbResult.output.length > 0) {
+          output = fbResult.output;
+          code = fbResult.code;
+          break;
+        }
+      }
+      downshiftedFrom = exhaustedFrom;
+      source = "downshift-exhausted";
+      if (output.length > 0) {
+        rationale = `${exhaustedFrom} returned empty (likely quota exhausted) → retried with ${retriedWith.join(" → ")}`;
+        if (ctx.hasUI) ctx.ui.notify(`⚠ ${exhaustedFrom} exhausted → retried with ${retriedWith.join(" → ")}`, "info");
+      } else {
+        output = `${exhaustedFrom} and fallback${retriedWith.length > 1 ? "s" : ""} ${retriedWith.join(", ")} all returned empty. Check quota or run /tiers to verify model availability.`;
+        code = 1;
+        rationale = `all of ${[exhaustedFrom, ...retriedWith].join(" → ")} returned empty`;
+      }
     }
   }
 

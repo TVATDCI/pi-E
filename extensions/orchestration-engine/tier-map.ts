@@ -82,6 +82,11 @@ export type ThinkingLevel =
   | "high"
   | "xhigh";
 
+export interface FallbackModel {
+  provider: string;
+  id: string;
+}
+
 export interface TierEntry {
   provider: string;
   id: string;
@@ -94,8 +99,15 @@ export interface TierEntry {
   thinkingLevel?: ThinkingLevel;
   /** Surfaced in logs/receipts — load-bearing for observable tuning. */
   rationale: string;
-  fallbackProvider?: string;
-  fallbackId?: string;
+  /**
+   * ORDERED cross-provider fallback chain (PORT-PLAN-v0.40.md ③). Tried in order by spawn.ts when
+   * the primary is unavailable (no key) or returns empty (quota exhausted — the Z-AI plan has NO
+   * balance fallback, so exhaustion = hard fail = empty output). Cross-provider entries survive a
+   * single provider's outage/quota drain. The global FALLBACK const is always appended as the final
+   * tail by orderedFallbacks(), so every category has at least one retry. Strong-model-at-judging
+   * invariant: the 3 judging categories (deep/ultrabrain/unspecified-high) carry arrays that land
+   * ONLY on glm-5.x/kimi — never cheap/FREE tiers (see MODEL TIERING + header comment). */
+  fallbackModels?: FallbackModel[];
   /**
    * Per-dispatch turn/tool budget DEFAULTS (PORT-PLAN-v0.40.md ①). Read-only categories carry
    * generous turn budgets to bound runaway recon; writers carry NONE by default (conservative
@@ -115,7 +127,9 @@ export interface ResolvedModel {
   rationale: string;
   /** "tier-map" | "fallback" (tier model missing, used configured fallback). */
   source: "tier-map" | "fallback";
-  fallbackFlag?: string;
+  /** Ordered retry chain as "provider/id" strings (per-tier fallbackModels; the global FALLBACK tail
+   *  is appended by spawn.ts via orderedFallbacks). Possibly empty. Walked on unavailable + empty. */
+  fallbackFlags: string[];
 }
 
 /** Minimal slice of Pi's ModelRegistry. Framework-agnostic → unit-testable. */
@@ -163,12 +177,29 @@ export function isPeakHours(now = new Date()): boolean {
 // cheap tier (deepseek-v4-flash-free / ling-*-flash-free / minimax-m2.7):
 // one cheap-model review inside a fan-out cascades untraceably. See AGENTS.md
 // "Model selection". If you weaken this, update both files.
+//
+// ─── MODEL TIERING (PORT-PLAN-v0.40.md ③) ──────────────────────────────────
+// Adapted from the pi-subagents README 4-tier mental model, mapped to our narrowed Z-AI Coding
+// Plan (4 callable models: glm-5.2 · glm-5.2-highspeed · glm-5-turbo · glm-4.7):
+//   Tier 1 fast workhorse       → quick / git-commit-message          (FREE external; preserves quota)
+//   Tier 2 standard well-scoped → unspecified-low / writing / research (glm-4.7 @ off/medium)
+//   Tier 3 deep but bounded     → deep / ultrabrain / unspecified-high / visual-engineering
+//                                 (glm-5.2 / kimi-k3 / glm-5-turbo @ high) — top reasoning, ONLY for
+//                                 well-scoped hard tasks with explicit goals + completion criteria.
+//   Tier 4 taste and intent     → ⚠ NO plan-eligible model exists beyond glm-4.7, and no
+//                                 anthropic/openai intent model is on our auth. So glm-4.7 @ medium
+//                                 (writing / unspecified-low) is our DE-FACTO intent tier — route
+//                                 ambiguous work (UX, product, planning, "scoping IS the task") there.
+//
+// GUARDRAIL (operative — also surfaced in the dispatch tool description, index.ts):
+//   "Deep models loop on vague goals." Don't point deep/ultrabrain at open-ended work — they burn
+//   turns without converging. Reserve tier-3 for tasks that arrive scoped. For vague/intent-shaped
+//   work, route DOWN to writing/unspecified-low (glm-4.7), not UP to deep.
 export const TIERS: Record<TaskCategory, TierEntry> = {
   quick: {
     provider: "opencode",
     id: "deepseek-v4-flash-free",
-    fallbackProvider: "opencode",
-    fallbackId: "ling-3.0-flash-free",
+    fallbackModels: [{ provider: "opencode", id: "ling-3.0-flash-free" }],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 12 },
     rationale:
@@ -177,8 +208,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "unspecified-low": {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode",
-    fallbackId: "deepseek-v4-flash-free",
+    fallbackModels: [{ provider: "opencode", id: "deepseek-v4-flash-free" }],
     thinkingLevel: "off",
     rationale:
       "1× plan tier; routine low-effort work. FAQ:29 'sufficient for daily dev'. Fallback to opencode/deepseek-v4-flash-free to preserve quota.",
@@ -186,8 +216,10 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "unspecified-high": {
     provider: "zai-coding-cn",
     id: "glm-5-turbo",
-    fallbackProvider: "opencode-go",
-    fallbackId: "kimi-k2.7-code",
+    fallbackModels: [
+      { provider: "opencode-go", id: "kimi-k2.7-code" },
+      { provider: "opencode-go", id: "glm-5.2" },
+    ],
     thinkingLevel: "high",
     rationale:
       "Flagship; high-effort fallback. PROMO 1× off-peak → 2× after " +
@@ -197,8 +229,10 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   deep: {
     provider: "zai-coding-cn",
     id: "glm-5.2",
-    fallbackProvider: "opencode-go",
-    fallbackId: "glm-5.2",
+    fallbackModels: [
+      { provider: "opencode-go", id: "glm-5.2" },
+      { provider: "opencode-go", id: "kimi-k2.7-code" },
+    ],
     thinkingLevel: "high",
     rationale:
       "Deep codebase investigation/execution; glm-5.2 — moved from glm-5.1 on 2026-08-04 because glm-5.1 was DROPPED from the Coding Plan (plan narrowed to 4 models; glm-5.2 is the remaining flagship reasoning model). PROMO 1× off-peak → 2× after " +
@@ -208,8 +242,10 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   ultrabrain: {
     provider: "opencode-go",
     id: "kimi-k3",
-    fallbackProvider: "zai-coding-cn",
-    fallbackId: "glm-5.2",
+    fallbackModels: [
+      { provider: "zai-coding-cn", id: "glm-5.2" },
+      { provider: "opencode-go", id: "glm-5.2" },
+    ],
     thinkingLevel: "high",
     rationale:
       "Hardest logic. Primary opencode-go/kimi-k3 (reasoning model); per-tier fallback zai-coding-cn/glm-5.2. OmO variant=high. (Earlier glm-5.1 assignment superseded — see README table + PROBE-RESULTS.)",
@@ -217,8 +253,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   writing: {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode",
-    fallbackId: "deepseek-v4-flash-free",
+    fallbackModels: [{ provider: "opencode", id: "deepseek-v4-flash-free" }],
     thinkingLevel: "medium",
     rationale:
       "Prose/docs; glm-4.7 per OmO (LR-0019). Always 1×. Downshifted from 5.1 — 4.7 is capable for writing and conserves 5.1 concurrency. Fallback to opencode/deepseek-v4-flash-free to preserve quota.",
@@ -226,8 +261,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "visual-engineering": {
     provider: "zai-coding-cn",
     id: "glm-5-turbo",
-    fallbackProvider: "opencode-go",
-    fallbackId: "glm-5.2",
+    fallbackModels: [{ provider: "opencode-go", id: "glm-5.2" }],
     thinkingLevel: "high",
     rationale:
       "UI/frontend/styling code = text work; glm-5-turbo @high. OmO moved this off glm-5v-turbo (vision model, NOT on Coding Plan — standard-API-only) to an on-plan text model — category is mostly code, not images. PROMO 1× off-peak → 2× after " +
@@ -237,19 +271,17 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   artistry: {
     provider: "zai-coding-cn",
     id: "glm-5.2",
-    fallbackProvider: "opencode-go",
-    fallbackId: "glm-5.1",
+    fallbackModels: [{ provider: "opencode-go", id: "glm-5.1" }],
     thinkingLevel: "high",
     rationale:
       "Creative/design; glm-5.2 — moved from glm-5.1 on 2026-08-04 because glm-5.1 was DROPPED from the Coding Plan (OmO LR-0019 had standardized on 5.1). PROMO 1× off-peak → 2× after " +
       PROMO_SUNSET_ISO +
-      ". Per-tier fallback opencode-go/glm-5.1. Loses gemini's creative-domain strength (flagged in LR-0019).",
+      ". Per-tier fallback opencode-go/glm-5.1 — cross-provider (opencode-go has its own auth/quota, so this sidesteps the Z-AI plan narrowing that dropped glm-5.1 from zai-coding-cn). Loses gemini's creative-domain strength (flagged in LR-0019).",
   },
   research: {
     provider: "zai-coding-cn",
     id: "glm-4.7",
-    fallbackProvider: "opencode-go",
-    fallbackId: "minimax-m2.7",
+    fallbackModels: [{ provider: "opencode-go", id: "minimax-m2.7" }],
     thinkingLevel: "medium",
     turnBudget: { maxTurns: 20 },
     rationale:
@@ -258,8 +290,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "git-commit-message": {
     provider: "opencode",
     id: "deepseek-v4-flash-free",
-    fallbackProvider: "opencode-go",
-    fallbackId: "minimax-m2.7",
+    fallbackModels: [{ provider: "opencode-go", id: "minimax-m2.7" }],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 6 },
     rationale:
@@ -334,6 +365,11 @@ export function resolveModel(
       : DEFAULT_CATEGORY;
 
   const entry = TIERS[cat];
+  // Per-tier ordered fallback chain (PORT-PLAN-v0.40.md ③). spawn.ts appends the global FALLBACK
+  // tail via orderedFallbacks() and walks this on unavailable-primary + empty-output.
+  const tierFallbackFlags = (entry.fallbackModels ?? []).map(
+    (f) => `${f.provider}/${f.id}`,
+  );
   const found = registry.find(entry.provider, entry.id);
 
   if (found) {
@@ -345,14 +381,11 @@ export function resolveModel(
       category: cat,
       rationale: entry.rationale,
       source: "tier-map",
-      fallbackFlag:
-        entry.fallbackProvider && entry.fallbackId
-          ? `${entry.fallbackProvider}/${entry.fallbackId}`
-          : undefined,
+      fallbackFlags: tierFallbackFlags,
     };
   }
 
-  // Tier model undefined — try configured fallback.
+  // Tier model undefined — try configured (global) fallback.
   const fb = registry.find(fbProvider, fbId);
   if (fb) {
     return {
@@ -362,10 +395,7 @@ export function resolveModel(
       category: cat,
       rationale: `tier '${cat}' model ${entry.provider}/${entry.id} not in registry; fell back to ${fbProvider}/${fbId}. Check opencode auth.json or ~/.pi/agent/models.json.`,
       source: "fallback",
-      fallbackFlag:
-        entry.fallbackProvider && entry.fallbackId
-          ? `${entry.fallbackProvider}/${entry.fallbackId}`
-          : undefined,
+      fallbackFlags: tierFallbackFlags,
     };
   }
 
@@ -373,6 +403,39 @@ export function resolveModel(
     `resolveModel: tier '${cat}' needs ${entry.provider}/${entry.id} and fallback ${fbProvider}/${fbId}; NEITHER resolves. ` +
       `For vision/artistry: configure opencode (gemini) in auth.json. For Z AI tiers: they are built-in — verify with 'pi --list-models'.`,
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fallback chain resolver (PORT-PLAN-v0.40.md ③) — PURE, unit-testable (no registry/spawn).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build the ordered, deduped retry chain for a primary model: the per-tier fallback array, then the
+ * global FALLBACK tail, with the primary and any `exclude`d models removed. spawn.ts filters the
+ * result by availability (isAvail) and walks it on (a) unavailable primary (pick first available)
+ * and (b) empty-output retry (try each available in order, merging usage across hops).
+ *
+ * @param primaryFlag         "provider/id" that just failed / is about to be tried first — excluded
+ * @param tierFallbacks       per-tier ordered fallbacks as "provider/id" (possibly empty)
+ * @param globalFallbackFlag  global FALLBACK as "provider/id" — appended last (dropped if == primary)
+ * @param exclude             extra "provider/id" to drop (e.g. models already tried this walk)
+ * @returns                   deduped ordered list; primary + excluded removed; global tail appended once
+ */
+export function orderedFallbacks(
+  primaryFlag: string,
+  tierFallbacks: string[],
+  globalFallbackFlag: string,
+  exclude: string[] = [],
+): string[] {
+  const drop = new Set([primaryFlag, ...exclude].filter((f) => f.length > 0));
+  const seen = new Set<string>();
+  const chain: string[] = [];
+  for (const f of [...tierFallbacks, globalFallbackFlag]) {
+    if (f.length === 0 || drop.has(f) || seen.has(f)) continue;
+    seen.add(f);
+    chain.push(f);
+  }
+  return chain;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
