@@ -66,6 +66,10 @@ export interface ChainStepOverride {
   model?: string;
   thinking?: string;
   prompt?: string;
+  /** ④ (PORT-PLAN-v0.40): pin a skill to this step's sub-agent via pi's `--skill <path>` flag. The
+   *  clarify picker stores the skill's filePath (robust across skill shapes); spawn.ts also accepts
+   *  a bare name (resolved under ~/.pi/agent/skills/) for programmatic callers. */
+  skill?: string;
 }
 export interface ChainOverrides {
   task?: string;
@@ -253,7 +257,7 @@ export async function runChainByName(
       onStepProgress ? (p) => onStepProgress(step.name, p) : undefined,
       signal,
       undefined,
-      { modelOverride: stepOverride?.model, thinkingOverride: stepOverride?.thinking, context, budgets: stepBudgets },
+      { modelOverride: stepOverride?.model, thinkingOverride: stepOverride?.thinking, context, budgets: stepBudgets, skill: stepOverride?.skill },
     );
     // ① accumulate this step's reported usage into the shared session total (counts toward the gate).
     accumulateUsage(result.usage);

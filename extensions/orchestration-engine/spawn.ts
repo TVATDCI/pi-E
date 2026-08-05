@@ -147,6 +147,7 @@ export function spawnSub(
   context?: string,
   budgets?: ResolvedBudgets,
   toolsOverride?: string,
+  skillOverride?: string,
 ): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined }> {
   const tools = toolsOverride ?? persona?.tools ?? "read,grep,find,ls";
   const needsBash = tools.includes("bash");
@@ -166,6 +167,16 @@ export function spawnSub(
   args.push("--tools", tools);
   args.push("--thinking", resolved.thinkingLevel ?? "off");
   args.push("--model", resolved.modelFlag);
+  // ④ (PORT-PLAN-v0.40): pin a skill to the child via pi's `--skill <path>` flag. Additive — the
+  // child keeps its own skill discovery; this just guarantees one is loaded. Bare name resolves
+  // under ~/.pi/agent/skills/ (mirrors loadPersona); a value containing "/" is a literal path.
+  if (skillOverride) {
+    const skillPath = skillOverride.includes("/")
+      ? skillOverride
+      : join(os.homedir(), ".pi", "agent", "skills", skillOverride);
+    if (existsSync(skillPath)) args.push("--skill", skillPath);
+    else console.warn(`[spawnSub] skill '${skillOverride}' not found at ${skillPath} — skipping --skill`);
+  }
   // Soft cap on handoff context: truncate + warn if exceeded (don't reject — legitimate large handoffs exist).
   let effectiveContext = context;
   if (context && context.length > HANDOFF_CAP) {
@@ -278,6 +289,10 @@ export interface ResolveAndSpawnOptions {
   /** F1 (②b): force a tools list overriding the persona's — used to guarantee the independent
    *  reviewer is read-only regardless of `review.agent` (integrity: it can't tamper with the work). */
   toolsOverride?: string;
+  /** ④ (PORT-PLAN-v0.40): pin a skill to the spawned child via pi's `--skill <path>` flag. A bare
+   *  name resolves under ~/.pi/agent/skills/ (mirrors loadPersona); a value containing "/" is a
+   *  literal path. Additive — unset = no change to the child's normal skill discovery. */
+  skill?: string;
 }
 
 export async function resolveAndSpawn(
@@ -292,7 +307,7 @@ export async function resolveAndSpawn(
   agentSource?: string,
   options?: ResolveAndSpawnOptions,
 ): Promise<SpawnResult> {
-  const { modelOverride, thinkingOverride, context, budgets, toolsOverride } = options ?? {};
+  const { modelOverride, thinkingOverride, context, budgets, toolsOverride, skill } = options ?? {};
   const persona = agent ? loadPersona(agent) : undefined;
   if (agent && !persona) {
     return {
@@ -355,7 +370,7 @@ export async function resolveAndSpawn(
   // the active model during a run (reads the live `modelFlag` let, so a fallback/downshift is
   // reflected on the retried spawn). spawnSub itself stays unchanged.
   const progressWithModel = onProgress ? (p: SpawnProgress) => onProgress({ ...p, modelFlag }) : undefined;
-  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride);
+  let { output, code, elapsedMs, toolCount, usage } = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride, skill);
 
   // Cross-provider fallback chain when the primary silently returns empty (quota exhausted — the
   // Z-AI plan has NO balance fallback, so exhaustion = hard fail = empty output). Walk the per-tier
@@ -372,7 +387,7 @@ export async function resolveAndSpawn(
         retriedWith.push(cand);
         modelFlag = cand;
         thinkingLevel = "high";
-        const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride);
+        const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride, skill);
         elapsedMs += fbResult.elapsedMs;
         toolCount += fbResult.toolCount;
         usage = mergeUsage(usage, fbResult.usage);

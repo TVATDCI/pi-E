@@ -11,7 +11,11 @@
 // Editable: task ($ORIGINAL), per-step model, per-step thinking, per-step prompt (raw, pre-sub).
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { Theme, KeybindingsManager, ExtensionContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { Theme, KeybindingsManager, ExtensionContext, ExtensionAPI, Skill } from "@earendil-works/pi-coding-agent";
+import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import * as os from "node:os";
 import { resolveModel, type TaskCategory } from "./orchestration-engine/tier-map.ts";
 import type { Chain, ChainStepOverride } from "./chain-runner.ts";
 
@@ -29,7 +33,7 @@ export interface ChainClarifyResult {
   steps?: Record<string, ChainStepOverride>;
 }
 
-type EditMode = "list" | "model" | "thinking";
+type EditMode = "list" | "model" | "thinking" | "skill";
 const THINKING_LEVELS = ["off", "low", "medium", "high"] as const;
 
 interface ModelEntry {
@@ -55,6 +59,7 @@ export class ChainClarifyComponent implements Component {
   private readonly initialTask: string;
   private readonly signal?: AbortSignal;
   private readonly availableModels: ModelEntry[];
+  private readonly availableSkills: Skill[];
 
   private editMode: EditMode = "list";
   private selectedStep = 0;
@@ -65,7 +70,7 @@ export class ChainClarifyComponent implements Component {
   private settled = false;
 
   // picker sub-mode state
-  private pickerKind: "model" | "thinking" = "model";
+  private pickerKind: "model" | "thinking" | "skill" = "model";
   private pickerItems: string[] = [];
   private pickerLabels: string[] = [];
   private pickerIndex = 0;
@@ -96,6 +101,9 @@ export class ChainClarifyComponent implements Component {
     this.signal = signal;
     const avail = (ctx.modelRegistry.getAvailable?.() ?? []) as Array<{ provider: string; id: string }>;
     this.availableModels = avail.map((m) => ({ value: `${m.provider}/${m.id}`, label: m.id, description: m.provider }));
+    // ④ (PORT-PLAN-v0.40): skills for the 's' picker — global dir only (mirrors availableModels from modelRegistry).
+    const skillsDir = join(os.homedir(), ".pi", "agent", "skills");
+    this.availableSkills = existsSync(skillsDir) ? loadSkillsFromDir({ dir: skillsDir, source: "global" }).skills : [];
     if (signal) {
       if (signal.aborted) queueMicrotask(() => this.finish({ confirmed: false }));
       else signal.addEventListener("abort", this.onAbort, { once: true });
@@ -191,6 +199,10 @@ export class ChainClarifyComponent implements Component {
       this.enterThinkingPicker();
       return;
     }
+    if (data === "s") {
+      this.enterSkillPicker();
+      return;
+    }
   }
 
   private handlePicker(data: string): void {
@@ -244,6 +256,25 @@ export class ChainClarifyComponent implements Component {
     this.tui.requestRender();
   }
 
+  private enterSkillPicker(): void {
+    const step = this.chain.steps[this.selectedStep];
+    if (!step) return;
+    if (!this.availableSkills.length) {
+      this.flash("no skills available");
+      return;
+    }
+    this.pickerKind = "skill";
+    // "(none)" first lets the operator clear a pinned skill (value "" → no --skill pushed).
+    // Value = filePath (robust: works when name≠dirname and for root-.md skills; spawn's literal-path
+    // branch passes it through, existsSync succeeds). Label = name — description (display only).
+    this.pickerItems = ["", ...this.availableSkills.map((s) => s.filePath)];
+    this.pickerLabels = ["(none)", ...this.availableSkills.map((s) => `${s.name} — ${s.description.split("\n")[0].slice(0, 48)}`)];
+    const cur = this.stepOverrides[step.name]?.skill ?? "";
+    this.pickerIndex = Math.max(0, this.pickerItems.indexOf(cur));
+    this.editMode = "skill";
+    this.tui.requestRender();
+  }
+
   private applyPicker(): void {
     const step = this.chain.steps[this.selectedStep];
     const value = this.pickerItems[this.pickerIndex];
@@ -254,9 +285,10 @@ export class ChainClarifyComponent implements Component {
     }
     const ov: ChainStepOverride = { ...(this.stepOverrides[step.name] ?? {}) };
     if (this.pickerKind === "model") ov.model = value;
-    else ov.thinking = value;
+    else if (this.pickerKind === "thinking") ov.thinking = value;
+    else if (this.pickerKind === "skill") ov.skill = value; // "" (the "(none)" entry) clears the pin
     this.stepOverrides[step.name] = ov;
-    this.flash(`${this.pickerKind} → ${value}`);
+    this.flash(`${this.pickerKind} → ${value || "none"}`);
   }
 
   // --- render ---
@@ -284,6 +316,7 @@ export class ChainClarifyComponent implements Component {
       if (ov?.model) flags.push("model");
       if (ov?.thinking) flags.push("thinking");
       if (ov?.prompt) flags.push("prompt");
+      if (ov?.skill) flags.push("skill");
       const flagStr = flags.length ? this.theme.fg("warning", ` [edited: ${flags.join(",")}]`) : "";
       const cat = step.category ?? this.chain.default_category ?? "?";
       const head = `${sel ? "▸ " : "  "}${step.agent} · ${cat} · ${model}${flagStr}`;
@@ -292,7 +325,7 @@ export class ChainClarifyComponent implements Component {
       rows.push(this.row(this.theme.fg("dim", `    ${firstLine || "(empty)"}`)));
     });
     if (this.notice) rows.push(this.row(this.theme.fg("warning", this.notice)));
-    rows.push(this.footer("↵ run · Esc cancel · ↑↓ nav · e task · p prompt · m model · t thinking"));
+    rows.push(this.footer("↵ run · Esc cancel · ↑↓ nav · e task · p prompt · m model · t thinking · s skill"));
     return rows;
   }
 
@@ -304,7 +337,9 @@ export class ChainClarifyComponent implements Component {
     rows.push(this.row(""));
     const cur = this.pickerKind === "model"
       ? this.resolvedModelForStep(this.selectedStep)
-      : (this.stepOverrides[step?.name ?? ""]?.thinking ?? "off");
+      : this.pickerKind === "thinking"
+        ? (this.stepOverrides[step?.name ?? ""]?.thinking ?? "off")
+        : (this.stepOverrides[step?.name ?? ""]?.skill ?? "");
     const max = 10;
     const start = Math.max(0, Math.min(this.pickerIndex - Math.floor(max / 2), Math.max(0, this.pickerItems.length - max)));
     const end = Math.min(start + max, this.pickerItems.length);
