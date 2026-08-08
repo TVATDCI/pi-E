@@ -32,6 +32,8 @@ Not the session JSONL, not `/note`, not compaction summaries — those are ephem
 
 **Integrity:** never report a fact as "remembered"/"saved" unless it's actually in `store.jsonl` (or `memory.md` for narrative). Confirming persistence you didn't perform is lying to the operator.
 
+**Resolve → Forget Hygiene:** Whenever a fix, refactor, or decision resolves a tracked constraint or issue in memory, immediately run `memory_forget` on the corresponding `[constraint]` or `[fact]` in `store.jsonl`. Resolved problems must not remain in the active self-model.
+
 **Compaction capture (Phase 2 — built):** the `compaction-capture` extension hooks pi's `session_compact` event and appends pi's generated summary to `memory.md` as a dated block — *before* compaction discards it. This realizes "preserve what the compactor drops" for the NARRATIVE arc (pi already emits the summary; we persist it). Atomic facts still go to `store.jsonl` via `memory_remember`. Bound growth with `scripts/rotate-memory-md.ts [activeKB]` (default 12).
 
 **Security:** never store secrets, keys, tokens, or sensitive personal data in `memory.md`, `memory/store.jsonl`, or any context file — redact first. (Both the structured store AND the compaction-capture hook run `scanSecrets` at the write boundary and refuse on a hit — but that's a backstop, not license to try.)

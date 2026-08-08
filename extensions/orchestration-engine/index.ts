@@ -282,7 +282,7 @@ export default function (pi: ExtensionAPI) {
       "Categories (tier-map.ts is authoritative): quick (deepseek-v4-flash-free/FREE), unspecified-low (glm-4.7), unspecified-high (glm-5-turbo), " +
       "deep (glm-5.2), ultrabrain (opencode-go/kimi-k3), writing (glm-4.7), visual-engineering (glm-5-turbo), artistry (glm-5.2), research (glm-4.7), git-commit-message (deepseek-v4-flash-free/FREE). " +
       "Routing: for vague/ambiguous work (UX, product, planning, 'scoping IS the task') prefer writing/unspecified-low (glm-4.7, reads intent) — reserve deep/ultrabrain for well-scoped hard tasks; they loop on open-ended goals (tier-map.ts MODEL TIERING). " +
-      "0 of 14 agents pin a model — category is the sole model authority. " +
+      "0 of 15 agents pin a model — category is the sole model authority. " +
       "One focused objective per dispatch.",
     parameters: Type.Object({
       task: Type.String({ description: "The complete, self-contained sub-task" }),

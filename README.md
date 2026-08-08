@@ -14,7 +14,7 @@ This is **not** a showcase. It's a single-operator production config: narrow and
 | **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (quota-based, **no** balance fallback)       |
 | **Default model**      | `glm-5.2` @ `medium` thinking, theme `encom`                                    |
 | **Extensions**         | 16 active (~8,300 LOC; 14 feature + 2 host hooks) + 2 disabled — incl. chain widget, acceptance gates, clarify, background dispatch |
-| **Agents**             | 14 (6 personas + 8 Matrix operatives; 0 model pins)                             |
+| **Agents**             | 15 (7 personas + 8 Matrix operatives; 0 model pins)                             |
 | **Governance**         | 13 ADRs in `decisions/`                                                         |
 | **Secondary provider** | `opencode` (FREE tier — `git-commit-message` category + gemini vision fallback) |
 
@@ -62,7 +62,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── tsconfig.json
 ├── bin/                      # vendored CLIs: fd, rg
 ├── themes/encom.json         # the one theme
-├── agents/                   # 14 agents: 6 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
+├── agents/                   # 15 agents: 7 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
 ├── agent-chain.yaml        # global chain definitions (deny-additive)
 └── extensions/
@@ -166,11 +166,11 @@ Encom-themed single-line footer that **replaces Pi's built-in footer** via the c
 
 ---
 
-## Agents (14)
+## Agents (15)
 
-Specialist system prompts in `agents/*.md` — **0 of 14 pin a `model:` frontmatter**; `tier-map.ts` is the sole model authority. Two classes:
+Specialist system prompts in `agents/*.md` — **0 of 15 pin a `model:` frontmatter**; `tier-map.ts` is the sole model authority. Two classes:
 
-**Personas (6)** — invoked explicitly via `agent=`:
+**Personas (7)** — invoked explicitly via `agent=`:
 
 | Persona             | Depth    | Tools          | Role                                                                                                                                |
 | ------------------- | -------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -180,6 +180,7 @@ Specialist system prompts in `agents/*.md` — **0 of 14 pin a `model:` frontmat
 | `oracle`            | 30 lines | read-only      | architecture/debug reasoning consultant (persona-only; `ultrabrain` now maps to `neo`)                                              |
 | `librarian`         | 36 lines | read-only      | docs / external-reference specialist                                                                                                |
 | `archivist`         | 20 lines | **gated-bash** | file-operations executor                                                                                                            |
+| `system-thinker`     | ~198 lines | read + write/edit | pre-flight system reasoning — models a system (incl. pi itself) before builders arrive; manual-only, never auto-dispatched         |
 
 **Matrix operatives (8)** — auto-resolved from the dispatch category when `agent=` (and `team=`) are omitted — see `agent-map.ts`:
 
@@ -353,7 +354,7 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 - `persona-forge` meta-agent (2026-07-11). `evolve` → `generate` → `momus` review → operator `approve`/`reject` write with full provenance; pending personas persisted to `sessions/persona-forge/`.
 - F3 runtime retry with per-tier opencode fallback (2026-07-11). `resolveAndSpawn` retries once on empty primary output; surfaced in `/routing-stats` as `downshift-exhausted`.
 - Structured memory extension (2026-07-13). `memory_remember` tool + `before_agent_start` injection. 3-tier design (pure functions → JSONL store → Pi wiring) with secret scan, provenance write-guard, dedup, atomic writes. 147 assertions + live-verified.
-- **Persistent sub-agent sessions + usage + functional agents** (2026-07-15, “the bridge”). Tier 0: stable `{agent,project}` session files (`sub-<agent>--<gitRoot>.jsonl`) + rotation at 100KB (not truncation) + Esc/signal-abort + per-`{agent,project}` mutex (delete-only-if-tail). Tier 1: `message_end` usage capture (cost/tokens/turns) into `dispatch-log` + a `▌ usage` view in `/routing-stats`; latent error-path bug fixed (`ev.message.stopReason`, not `ev.stopReason`). Tier 2: `agent-map.ts` auto-resolves a Matrix operative per category when `agent=` is omitted (explicit agent always wins). 6 personas + 8 operatives; 0 model pins.
+- **Persistent sub-agent sessions + usage + functional agents** (2026-07-15, “the bridge”). Tier 0: stable `{agent,project}` session files (`sub-<agent>--<gitRoot>.jsonl`) + rotation at 100KB (not truncation) + Esc/signal-abort + per-`{agent,project}` mutex (delete-only-if-tail). Tier 1: `message_end` usage capture (cost/tokens/turns) into `dispatch-log` + a `▌ usage` view in `/routing-stats`; latent error-path bug fixed (`ev.message.stopReason`, not `ev.stopReason`). Tier 2: `agent-map.ts` auto-resolves a Matrix operative per category when `agent=` is omitted (explicit agent always wins). 7 personas + 8 operatives; 0 model pins.
 - **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + batched toasts + cap 3); **fleet view** (`/chain-status`); **transcript tail** (`/chain-transcript`); **curated handoff** (`context:` param — briefed delegates); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per feature; 110 unit tests across 7 test files.
 
 **Deferred by design (not gaps):** F1 LLM intent-classifier (🔒 CLOSED — explicit-category chosen; reopen only on `/routing-stats` evidence). F2 peak-hour auto-downshift — still open.
