@@ -29,6 +29,10 @@ teams:
         file: agents/architect.md
       - id: seraph
         file: agents/seraph.md
+      - id: system-thinker
+        file: agents/system-thinker.md
+      - id: researcher
+        file: agents/researcher.md
 
   matrix:
     description: Matrix operatives — functional agents auto-resolved from categories
