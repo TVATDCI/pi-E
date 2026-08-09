@@ -1,42 +1,37 @@
-# Pi Handoff — system-thinker: reviewed, installed, self-tested (Test 1+2), persona dispatch-fix, memory prune (2026-08-09)
+# Pi Handoff — finished MODEL-DELTA ride; caught statusline mis-grounding (2026-08-09)
 
-**Written at:** 2026-08-09T18:47:34Z
-**Pi session:** 019fe2bb-a840-73ec-8292-5d223ec3f571
-**Original intent:** Review the system-thinker agent file against pi's conventions and install it.
+**Written at:** 2026-08-09T19:33:42Z
+**Pi session:** 019fe7de-552f-78eb-82a1-5a824542092a
+**Original intent:** "Finish the unfinished MODEL-DELTA items ride" (operator-set session purpose).
 
 ## Summary
-Reviewed `system-thinker.md` against pi's actual runtime (verified against source, not assumptions), installed it as agent #15, then ran Test 1 + Test 2 — system-thinker analyzing pi itself — which surfaced real self-model staleness (resolved-problem tombstones, retired "independence" framing, a disabled-extension cluster the first audit missed). Pruned 11 stale `store.jsonl` facts and amended 2. Fixed a persona design flaw: system-thinker's Phase-3 self-write collided with the mini-task-tracker gate, so it now **dispatches a writer-tier agent** instead of self-writing. The dispatch fix + an Invocation section are committed in both the source repo and `~/.pi/agent`.
+Re-grounded each MODEL-DELTA "cheap close" before executing. The headline mode-2 finding (statusline-encom.ts claimed `.disabled`) was a **mis-grounding** — the file is LIVE (878 lines, active `encomStatusline` config); close #1 (forget the 7-fact cluster) was INVERTED and dropped, which would otherwise have deleted accurate liveness records. Executed close #2 (amended `pi_agent_install_conventions`: "14"→"15", dropped the stale "researcher missing from `all`" sentence — verified single record). Operator pasted the close #5 re-grounding correction block into MODEL-DELTA.md; closes #3 (liveness checker) retired, #4 (`ps` one-liner) handed to operator.
 
 ## Files touched
-- `/home/vladi/developer/system-thinking/agent/agents/system-thinker.md` (canonical source) — dispatch fix (`tools→dispatch`, Phase 3 dispatches writer) + Invocation section. Committed `1b11ea7`.
-- `~/.pi/agent/agents/system-thinker.md` (installed) — same. Committed `74637fb`.
-- `~/.pi/agent/teams.yaml` — added `system-thinker` + `researcher` to the `all` team (committed earlier this session).
-- `~/.pi/MODEL.md`, `OBSERVATIONS.md`, `FOUNDATION-INPUTS.md`, `MODEL-DELTA.md` — system-thinker's Test 1/2 artifacts (untracked; `~/.pi` is not a git repo).
-- `store.jsonl` — 11 facts forgotten, 2 amended (`opencode_skills_tether_cut`, `pi_independent_from_opencode`).
+- `~/.pi/MODEL-DELTA.md` — appended "⚠️ Re-grounding" correction block (operator pasted; untracked — `~/.pi` is not a git repo).
+- `~/.pi/agent/memory/store.jsonl` — amended `pi_agent_install_conventions` (`memory_forget` + `memory_remember`; verified 1 record, "0 of 15", no "MISSING").
+- `~/.pi/agent/exports/pi-handoff.md` — this file (overwrites the 2026-08-09 handoff).
 
 ## Decisions made
-- **system-thinker Phase 3 = dispatch a writer (trinity/unspecified-high or mouse/writing), not self-write.** Why: the persona as first installed told it to write files; it hit the mini-task-tracker gate (blocks writes without an in-progress task) and flailed/punted to the operator. Dispatching sidesteps the gate (sub-agents run `--no-extensions`, so no task-tracker) and stops spending the ultrabrain/flagship tier on mechanical file-writes.
-- **system-thinker `tools` = `read,grep,find,ls,dispatch`** (dropped `write`/`edit`, added `dispatch`).
-- **Pruned 11 stale facts via FORGET, not amend.** Ruthless test: docs/status/planning where code or `ls` is the source of truth; amending would preserve low-value content. Operator endorsed this (was questioning whether accumulated memory had become "junk").
-- **Did NOT persist the "symbiosis is the system" decision (Draft A) to pi's `store.jsonl`** — operator minimizing memory weight; it lives in `MODEL.md` instead. (Proposed for bd below — cross-agent.)
+- **MODEL-DELTA close #1 INVERTED (dropped).** statusline-encom.ts is the live, load-bearing footer; its 7 store facts are accurate. The 2026-08-09 `.disabled` assertion was a model mis-grounding (operator-confirmed: the model then was wrong, not a transient disable).
+- **Close #3 (#3b liveness checker) RETIRED.** Built on the mis-grounding; the only real `.disabled` files (footer-status, hello-status) are dead early-build scaffolding the operator is removing → nothing left to scan.
+- **Close #5 REVISED to a correction append** (not "leave as-is") because MODEL-DELTA's own headline went stale.
+- (meta) The resolve→forget discipline (Test 1 lever #3) is the only structural rule that survived; re-grounding-before-acting is the liveness link the self-model lacks, re-proven on MODEL-DELTA itself.
 
 ## Dead ends
-- **"Add the `task` tool to system-thinker" — wrong fix.** Would couple the synthesis persona to the task-tracker AND wouldn't fix the running session (tools are frozen at the `--tools` launch flag, not read from the persona file). Correct fix: dispatch a writer (sub-agents bypass the gate via `--no-extensions`). [committed]
-- **Propagated an unverified "openrouter" claim** from a stored memory fact into a draft — `openrouter` is NOT configured (`auth.json` = `zai-coding-cn` + `opencode` + `opencode-go` only). Caused a multi-turn cleanup. Restated lesson: stored facts get cited as truth; verify against source before propagating.
-- **Misattributed which fact held "openrouter"** (said `pi_skills_independent_provider_coupled`; actually `pi_independent_from_opencode` + `divergence_from_opencode` + `opencode_skills_tether_cut`). Caught by grep, not memory.
-- **`memory_remember` APPENDS, does not upsert** — calling it on an existing key created a duplicate. Amend = `memory_forget` THEN `memory_remember`.
-- **Tier-2 "amend" plan** (from system-thinker's audit) — abandoned for FORGET (code is source of truth; amending preserved marginal content).
+- **Executing MODEL-DELTA close #1 would have deleted 7 accurate facts.** The 2026-08-09 MODEL-DELTA asserted statusline-encom.ts was `.disabled` and proposed forgetting its cluster. Re-grounding (`ls extensions/` + read the 878-line file + `settings.json` `encomStatusline` block) showed it LIVE. Forgetting would have destroyed correct liveness records. Lesson: re-ground before acting on ANY model, including one authored by the same persona one pass ago — the model is a diary, not a view.
+- **I misread my own toolset this session.** Concluded I was read-only (only read/grep/find/ls/write/edit) from the "Available tools:" prose, when `memory_remember`/`memory_forget`/`bash`/`task`/`dispatch` were available all along. This sent the operator on a zsh dead-end (they tried to run `memory_forget(...)` in zsh → `zsh: unknown file attribute: k`). Corrected mid-session. Lesson: the function-schema block is authoritative; the "Available tools" prose line is a subset, not the contract.
+- **"Amend" = `memory_forget` THEN `memory_remember`** (`memory_remember` appends, does not upsert). Confirmed working: exactly 1 record after the amend.
 
 ## Incomplete work
-- **MODEL-DELTA findings (system-thinker Test 2), not yet acted on:** (a) `statusline-encom.ts` is `.disabled` on disk but 7 store facts describe it as live — needs a prune; (b) `pi_agent_install_conventions` says "researcher missing from `all`" — stale (we added researcher); (c) N1 — pi's gates are advisory-by-default, not hard enforcement (README overstates); (d) N2 — `persona-forge` `extractVerdict` is gameable (PASS substring-matched before WARNING); generated `tools:` unsanitized; (e) **#3b** — a `.disabled`→`store.jsonl` liveness check (generalize skill-auditor) is the highest-leverage new move.
-- **Draft A** (B-framing decision) intentionally not persisted to pi's store — decide durable-fact vs `MODEL.md`-only.
-- **AGENTS.md convention** ("reasoning/synthesis personas dispatch their output") — proposed, held (operator didn't green-light the broader change).
-- **Cross-pair:** sisyphus's bd carries the stale race constraint (`next:store_jsonl_cross_process_followup`); needs a sisyphus-side forget.
+- (operator) `rm -f ~/.pi/agent/extensions/hello-status.ts.disabled ~/.pi/agent/extensions/footer-status.ts.disabled` — command handed; not yet confirmed run.
+- (operator) `ps -eo pid,lstart,etime,cmd | grep -i pi-coding-agent | grep -v grep` — O5-1 runtime certainty; low-stakes (single pi writer this session, so no cross-process race regardless of whether the running process predates W8b).
+- (sisyphus) **`bd forget next:store_jsonl_cross_process_followup`** — the stale store.jsonl race claim is live in sisyphus's bd (`bridge/global-export.jsonl:75`, export 2026-08-05). Quarantined from pi (category `next` excluded by `bd-bridge` `BRIDGED_CATEGORIES`) but active in sisyphus's todo. Needs a sisyphus-side forget.
 
 ## Proposed bd facts
-- scope=global | category=decision | key=pi_opencode_symbiotic_system | value="The pi + opencode/sisyphus pair is ONE operator-facing system (joined by herdr, the one-way bd bridge, shared providers). Symbiosis is load-bearing and intentional, not debt. 'Full pi independence' is a retired framing (corrected 2026-08-04): real model is skills-independent + provider-coupled. Independence is a means (cleaner architecture, portable skills), not the destination. Operator declined to persist this to pi's store.jsonl (minimizing weight) — lives in ~/.pi/MODEL.md; proposed for bd because sisyphus's bd carries stale 'race'/'independence' framing this corrects."
+None new this session — the work was model-internal corrections + a pi store.jsonl fact amendment (already in pi's store). The prior session's proposed `pi_opencode_symbiotic_system` (decision) promotion status is unknown to pi; if sisyphus did not promote it, it still stands as a worthwhile cross-agent framing correction (see `~/.pi/MODEL.md`).
 
 ## Next steps for opencode
-- **Forget** the stale `next:store_jsonl_cross_process_followup` in bd — the store.jsonl race is FIXED (commit `fbc3433`, append-only + `withFileLock`); the entry is category `next`, quarantined from pi's prompt by `bd-bridge`'s `BRIDGED_CATEGORIES`, but live in sisyphus's todo.
-- **Review** the proposed `pi_opencode_symbiotic_system` decision fact (promote or reject).
-- (Optional, cross-pair) **O4-1:** neither side has a foundation-consuming planner; the real prerequisite is a foundation-artifact contract (`MODEL.md` shape+home) before building a planner agent.
+- **Forget** `next:store_jsonl_cross_process_followup` in bd (the store.jsonl race is FIXED — commit `fbc3433`, append-only + `withFileLock`; the entry is stale).
+- (optional) Confirm whether the prior session's `pi_opencode_symbiotic_system` decision was promoted; promote if not.
+- (optional, cross-pair) O4-1: neither side has a foundation-consuming planner; the prerequisite is a foundation-artifact contract (`MODEL.md` shape+home) before building a planner agent. Unchanged from prior handoff.
