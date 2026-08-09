@@ -1,44 +1,42 @@
-# Pi Handoff — pi-subagents v0.40 absorption: Tier 1 + Tier 2 + Edit-7 + B+C complete (2026-08-05)
+# Pi Handoff — system-thinker: reviewed, installed, self-tested (Test 1+2), persona dispatch-fix, memory prune (2026-08-09)
 
-**Written at:** 2026-08-05T20:34:18Z
-**Pi session:** pi-subagents absorption session (writer/verifier pane) — see `~/.pi/agent/sessions/`
-**Original intent:** Analyze the pi-subagents v0.34→v0.40 delta for features worth porting, then absorb them into the pi harness.
+**Written at:** 2026-08-09T18:47:34Z
+**Pi session:** 019fe2bb-a840-73ec-8292-5d223ec3f571
+**Original intent:** Review the system-thinker agent file against pi's conventions and install it.
 
 ## Summary
-Absorbed the pi-subagents v0.40 delta across two operator-driven panes (pi = writer/verifier + scoping; a fresh pane = implementation). **Tier 1 (① budgets, ② acceptance review gate) and the Tier 2 flagship items (③ per-agent fallbackModels + taste/intent tier, ④ clarify `s` skill-picker) are implemented, review-loop'd, committed, and writer-pane verified — 399 tests green.** Edit-7 (the ①-deferred spawn `timeoutMs` + SIGTERM→SIGKILL kill primitive) and ② B+C parity (`acceptanceRole` level-override + parser enum synonyms) also landed. The absorption is at a natural completion point; ⑤ (capability ceilings) is async-gated and a few items remain deferred/parked. Authoritative state: `~/developer/ytdl/about-pi/pi-subagents/PORT-PLAN-v0.40.md`.
+Reviewed `system-thinker.md` against pi's actual runtime (verified against source, not assumptions), installed it as agent #15, then ran Test 1 + Test 2 — system-thinker analyzing pi itself — which surfaced real self-model staleness (resolved-problem tombstones, retired "independence" framing, a disabled-extension cluster the first audit missed). Pruned 11 stale `store.jsonl` facts and amended 2. Fixed a persona design flaw: system-thinker's Phase-3 self-write collided with the mini-task-tracker gate, so it now **dispatches a writer-tier agent** instead of self-writing. The dispatch fix + an Invocation section are committed in both the source repo and `~/.pi/agent`.
 
 ## Files touched
-- `extensions/budgets/` (6 files) — ① budget primitives (faithful port + resolver + tests).
-- `extensions/acceptance.ts` (+ `tests/acceptance.test.ts`, 133 tests) — ② review gate + B+C parity (role level-override, parser enum synonyms).
-- `extensions/orchestration-engine/{spawn,index,tier-map,session-state,review-helpers,spawn-outcome,routing-stats}.ts` — ① wiring, ③ fallbackModels, ②b reviewer orchestration, Edit-7 timeoutMs+outcome, F6 routing-stats.
-- `extensions/{chain-runner,chain-clarify,agent-chain}.ts` — chain-step budgets/review/timeoutMs/skill-picker wiring.
-- `about-pi/pi-subagents/PORT-PLAN-v0.40.md` — state doc (①②③④✅, Edit-7✅, B+C✅; deferred logged).
+- `/home/vladi/developer/system-thinking/agent/agents/system-thinker.md` (canonical source) — dispatch fix (`tools→dispatch`, Phase 3 dispatches writer) + Invocation section. Committed `1b11ea7`.
+- `~/.pi/agent/agents/system-thinker.md` (installed) — same. Committed `74637fb`.
+- `~/.pi/agent/teams.yaml` — added `system-thinker` + `researcher` to the `all` team (committed earlier this session).
+- `~/.pi/MODEL.md`, `OBSERVATIONS.md`, `FOUNDATION-INPUTS.md`, `MODEL-DELTA.md` — system-thinker's Test 1/2 artifacts (untracked; `~/.pi` is not a git repo).
+- `store.jsonl` — 11 facts forgotten, 2 amended (`opencode_skills_tether_cut`, `pi_independent_from_opencode`).
 
 ## Decisions made
-- **Reviewer model = glm-5.2 (`deep`)** for ②b — Z-AI docs: glm-5.2 is optimized for engineering-standards judgment (the reviewer's job); glm-5-turbo is agent-execution. Operator-provided docs.
-- **Opt-in budgets, NO default `usageBudget`** — upstream `UsageBudgetLimitConfig` requires `hard`, so any default activates the gate; visibility via cumulative `sessionUsage` instead.
-- **Conservative orchestration policy** — hard turn/tool budgets only on read-only categories; writers get none (never hard-kill a mutation worker mid-work).
-- **`aborted > timeout` precedence** — operator-Esc intent dominates a racing timeout (least-surprising label).
-- **A (dispatch-acceptance) deferred** — no consumer for single-dispatch verify; anti-over-engineering (D5 marginal-value).
+- **system-thinker Phase 3 = dispatch a writer (trinity/unspecified-high or mouse/writing), not self-write.** Why: the persona as first installed told it to write files; it hit the mini-task-tracker gate (blocks writes without an in-progress task) and flailed/punted to the operator. Dispatching sidesteps the gate (sub-agents run `--no-extensions`, so no task-tracker) and stops spending the ultrabrain/flagship tier on mechanical file-writes.
+- **system-thinker `tools` = `read,grep,find,ls,dispatch`** (dropped `write`/`edit`, added `dispatch`).
+- **Pruned 11 stale facts via FORGET, not amend.** Ruthless test: docs/status/planning where code or `ls` is the source of truth; amending would preserve low-value content. Operator endorsed this (was questioning whether accumulated memory had become "junk").
+- **Did NOT persist the "symbiosis is the system" decision (Draft A) to pi's `store.jsonl`** — operator minimizing memory weight; it lives in `MODEL.md` instead. (Proposed for bd below — cross-agent.)
 
-## Dead ends (high-value — don't repeat)
-- **glm-4.7 for B+C implementation FAILED.** A fresh pane running glm-4.7 (writing/taste tier) produced an *accurate scope* (real line refs) but could not *implement*: it lost the file path between scope and implement (searched the pi-subagents clone + pi-coding-agent package, not `~/.pi/agent/extensions/`) and hit the task-gate without reading the embedded fix. **Root cause: glm-4.7 reads/reasons well but cannot drive the autonomous implementation loop (navigation across respawns, tool-gate satisfaction, error-recovery). Fix: strong tier (glm-5.2) for implementation** — glm-5.2 succeeded first try. Lesson: discussion/scoping ≠ implementation (the ③ tiering point).
-- **The `store_jsonl_cross_process_race` "active bug" was a STALE FACT.** I re-saved it as an "every-session reminder" constraint WITHOUT reading the code; the race was ALREADY fixed (W8b, 2026-07-28: append-only writes + `withFileLock` O_EXCL lockfile). **Root cause: trusted a memory fact over verifying against code** (violated verify-before-asserting). Fix: corrected the fact (FIXED — don't re-flag). Meta-lesson: memory is a hint, not ground truth.
-- **The "git push" alarm was a guardrail, not an action.** Operator saw `git push` in `mini-dc-rules.yaml`; it's the gate's ASK rule (how a push is treated *if* attempted), not an instruction. No remote configured; nothing pushed.
+## Dead ends
+- **"Add the `task` tool to system-thinker" — wrong fix.** Would couple the synthesis persona to the task-tracker AND wouldn't fix the running session (tools are frozen at the `--tools` launch flag, not read from the persona file). Correct fix: dispatch a writer (sub-agents bypass the gate via `--no-extensions`). [committed]
+- **Propagated an unverified "openrouter" claim** from a stored memory fact into a draft — `openrouter` is NOT configured (`auth.json` = `zai-coding-cn` + `opencode` + `opencode-go` only). Caused a multi-turn cleanup. Restated lesson: stored facts get cited as truth; verify against source before propagating.
+- **Misattributed which fact held "openrouter"** (said `pi_skills_independent_provider_coupled`; actually `pi_independent_from_opencode` + `divergence_from_opencode` + `opencode_skills_tether_cut`). Caught by grep, not memory.
+- **`memory_remember` APPENDS, does not upsert** — calling it on an existing key created a duplicate. Amend = `memory_forget` THEN `memory_remember`.
+- **Tier-2 "amend" plan** (from system-thinker's audit) — abandoned for FORGET (code is source of truth; amending preserved marginal content).
 
 ## Incomplete work
-- None mid-flight. Working tree clean (after the `pi:` handoff commit below). All implemented items committed + writer-pane verified.
+- **MODEL-DELTA findings (system-thinker Test 2), not yet acted on:** (a) `statusline-encom.ts` is `.disabled` on disk but 7 store facts describe it as live — needs a prune; (b) `pi_agent_install_conventions` says "researcher missing from `all`" — stale (we added researcher); (c) N1 — pi's gates are advisory-by-default, not hard enforcement (README overstates); (d) N2 — `persona-forge` `extractVerdict` is gameable (PASS substring-matched before WARNING); generated `tools:` unsanitized; (e) **#3b** — a `.disabled`→`store.jsonl` liveness check (generalize skill-auditor) is the highest-leverage new move.
+- **Draft A** (B-framing decision) intentionally not persisted to pi's store — decide durable-fact vs `MODEL.md`-only.
+- **AGENTS.md convention** ("reasoning/synthesis personas dispatch their output") — proposed, held (operator didn't green-light the broader change).
+- **Cross-pair:** sisyphus's bd carries the stale race constraint (`next:store_jsonl_cross_process_followup`); needs a sisyphus-side forget.
 
-## Proposed bd facts (pi proposes; sisyphus reviews + promotes)
-- scope=global | category=decision | key=pi_subagents_v040_absorption_state | value="pi-subagents v0.40 delta absorption COMPLETE for the in-scope items: ① budgets, ② acceptance review (+B+C parity), ③ fallbackModels+taste/intent tier, ④ clarify s-key, Edit-7 timeoutMs+kill primitive — all DONE+committed+verified (399 tests green, HEAD 03ea46e). Deferred: A dispatch-acceptance (no consumer), ⑤ capability ceilings (async-gated), ④ w/r/p keys, R1 spawn-loop polish (parked), D1-D3. PORT-PLAN-v0.40.md is authoritative."
-- scope=global | category=reason | key=model_tier_implementation_vs_discussion | value="glm-4.7 (writing/taste tier) reads+reasons about code accurately but CANNOT drive autonomous implementation (navigation across respawns, task-gate satisfaction, error-recovery). For code implementation use a strong tier (glm-5.2/glm-5-turbo); reserve glm-4.7 for scoping/prose. Verified 2026-08-05: glm-4.7 pane failed B+C impl (lost file path + gate); glm-5.2 pane succeeded first try."
-- scope=global | category=reason | key=store_jsonl_race_already_fixed | value="store.jsonl cross-process write race is FIXED (W8b, 2026-07-28): append-only writes + withFileLock (O_EXCL lockfile + stale/dead-holder stealing). A stale memory fact claimed it unfixed; corrected 2026-08-05 after code verification. Do NOT re-flag as a bug."
-- scope=global | category=decision | key=reviewer_orchestration_model_glm52 | value="②b independent-reviewer spawn uses category deep (glm-5.2 @high) — engineering-standards judgment per Z-AI docs; glm-5-turbo is agent-execution (wrong for review). Read-only enforced end-to-end via toolsOverride."
+## Proposed bd facts
+- scope=global | category=decision | key=pi_opencode_symbiotic_system | value="The pi + opencode/sisyphus pair is ONE operator-facing system (joined by herdr, the one-way bd bridge, shared providers). Symbiosis is load-bearing and intentional, not debt. 'Full pi independence' is a retired framing (corrected 2026-08-04): real model is skills-independent + provider-coupled. Independence is a means (cleaner architecture, portable skills), not the destination. Operator declined to persist this to pi's store.jsonl (minimizing weight) — lives in ~/.pi/MODEL.md; proposed for bd because sisyphus's bd carries stale 'race'/'independence' framing this corrects."
 
 ## Next steps for opencode
-- **A (dispatch/single-dispatch acceptance)** — deferred until a concrete single-dispatch-verify consumer exists.
-- **⑤ capability ceilings** — defer until Group 3 async (PORT-PLAN §⑤); foreground-slimmed has no current consumer.
-- **R1** (spawn retry-loop: `downshiftedFrom` overwrite + abort-not-rechecked) — parked; ~½-day focused pass when wanted (extract a pure walk-planning helper → testable + fixes both).
-- **`agent_chain_widget_abort_clear_bug`** — the live stuck-widget bug (abort/error path doesn't clear `running`); small fix, hit during this session.
-- **D1-D3** (Edit-7 polish: timeout widget glyph, PID-reuse, `acceptance.ts` latent escalation bug).
-- **④ `w`/`r`/`p` clarify keys** — nice-to-haves.
+- **Forget** the stale `next:store_jsonl_cross_process_followup` in bd — the store.jsonl race is FIXED (commit `fbc3433`, append-only + `withFileLock`); the entry is category `next`, quarantined from pi's prompt by `bd-bridge`'s `BRIDGED_CATEGORIES`, but live in sisyphus's todo.
+- **Review** the proposed `pi_opencode_symbiotic_system` decision fact (promote or reject).
+- (Optional, cross-pair) **O4-1:** neither side has a foundation-consuming planner; the real prerequisite is a foundation-artifact contract (`MODEL.md` shape+home) before building a planner agent.
