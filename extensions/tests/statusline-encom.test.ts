@@ -29,6 +29,7 @@ import {
   PRESETS,
   SEP_GLYPHS,
   separatorFor,
+  computeBridgeBadge,
 } from "../statusline-encom.ts";
 
 test("parseGitPorcelain: counts staged/unstaged/untracked from XY porcelain", () => {
@@ -116,6 +117,36 @@ test("resolveLayout: preset switch + disabledSegments + layout override + custom
     resolveLayout({ preset: "minimal", customItems: [{ id: "ci" }], disabledSegments: ["custom:ci"] }),
     ["dir", "git", "context"],
   );
+});
+
+test("computeBridgeBadge: fresh -> hidden (null)", () => {
+  const now = 1_800_000_000_000;
+  assert.equal(computeBridgeBadge(now - 3_600_000, now - 3_600_000, now), null); // same age = fresh
+  assert.equal(computeBridgeBadge(now - 86_400_000, null, now), null); // 1d old, no db found
+});
+
+test("computeBridgeBadge: bd newer than export (+60s grace) -> red stale!", () => {
+  const now = 1_800_000_000_000;
+  const exportAt = now - 7_200_000;
+  const withinGrace = computeBridgeBadge(exportAt, exportAt + 30_000, now); // db 30s newer than export
+  assert.equal(withinGrace, null); // inside 60s grace: not stale
+  const stale = computeBridgeBadge(exportAt, now, now); // db 2h newer than export
+  assert.ok(stale && stale.text === "⛓ stale!" && stale.fg === "error");
+});
+
+test("computeBridgeBadge: export age >= 3d -> amber Nd; missing -> red no-export", () => {
+  const now = 1_800_000_000_000;
+  const d4 = computeBridgeBadge(now - 4 * 86_400_000, now - 5 * 86_400_000, now); // db older than export
+  assert.ok(d4 && d4.text === "⛓ 4d" && d4.fg === "warning");
+  const d2 = computeBridgeBadge(now - 2 * 86_400_000, now - 3 * 86_400_000, now);
+  assert.equal(d2, null); // under 3d stays hidden
+  const missing = computeBridgeBadge(null, now, now);
+  assert.ok(missing && missing.text === "⛓ no-export" && missing.fg === "error");
+});
+
+test("PRESETS + registry: bridge segment wired into default and full", () => {
+  assert.ok(PRESETS.default.includes("bridge") && PRESETS.full.includes("bridge"));
+  assert.ok(!PRESETS.minimal.includes("bridge")); // minimal stays 3-segment
 });
 
 test("SEP_GLYPHS: all 10 styles, each with a nerd + plain form", () => {

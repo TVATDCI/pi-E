@@ -112,7 +112,7 @@
 
 import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -484,11 +484,75 @@ const timeSpentSegment: SegmentDef = {
   render: (s) => single(humanizeDuration(Date.now() - s.rt.sessionStartMs), "muted", SOLID.clock),
 };
 
+// ── V10: bridge staleness badge (operator-ruled reminder, 2026-08-14) ───────
+// NO cron — the operator runs bridge/export-bd-global.sh by hand; this segment
+// is the reminder. Mirrors bd-bridge.ts checkStale()'s db candidates + 60s grace:
+//   hidden    export fresh (< 3d) and bd not newer — zero noise when healthy
+//   amber     "⛓ 4d"  export older than 3 days
+//   red       "⛓ stale!"  bd db mtime > export mtime + 60s (bd changed since export)
+//   red       "⛓ no-export"  export file missing/unstatable
+// Pure core (computeBridgeBadge) is unit-tested with synthetic mtimes; the
+// wrapper stats real paths under a 2s TTL (footer renders every tick).
+export type BridgeBadge = { text: string; fg: ThemeColor } | null;
+
+export function computeBridgeBadge(
+  exportMtime: number | null,
+  dbMtime: number | null,
+  now: number,
+): BridgeBadge {
+  if (exportMtime == null) return { text: "⛓ no-export", fg: "error" };
+  if (dbMtime != null && dbMtime > exportMtime + 60_000) return { text: "⛓ stale!", fg: "error" };
+  const ageDays = (now - exportMtime) / 86_400_000;
+  if (ageDays >= 3) return { text: `⛓ ${Math.floor(ageDays)}d`, fg: "warning" };
+  return null; // fresh → hidden
+}
+
+let bridgeCache: { at: number; badge: BridgeBadge } = { at: 0, badge: null };
+const BRIDGE_TTL_MS = 2_000;
+
+function bridgeBadge(): BridgeBadge {
+  const now = Date.now();
+  if (now - bridgeCache.at < BRIDGE_TTL_MS) return bridgeCache.badge;
+  let badge: BridgeBadge;
+  try {
+    const home = os.homedir();
+    const exportPath = path.join(home, ".pi", "agent", "bridge", "global-export.jsonl");
+    badge = computeBridgeBadge(statSync(exportPath).mtimeMs, bridgeDbMtime(), now);
+  } catch {
+    badge = computeBridgeBadge(null, null, now);
+  }
+  bridgeCache = { at: now, badge };
+  return badge;
+}
+
+// First existing bd db path's mtime (candidates mirror checkStale; null if none).
+function bridgeDbMtime(): number | null {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, "Main-vault", ".beads", "embeddeddolt"),
+    path.join(home, ".beads", "beads_global.db"),
+    path.join(home, ".local", "share", "beads", "beads_global.db"),
+  ];
+  for (const p of candidates) {
+    try { return statSync(p).mtimeMs; } catch { /* next candidate */ }
+  }
+  return null;
+}
+
+const bridgeSegment: SegmentDef = {
+  id: "bridge",
+  render: () => {
+    const b = bridgeBadge();
+    if (!b) return null; // fresh → hidden (byte-identical footer when healthy)
+    return single(b.text, b.fg, SOLID.tokens);
+  },
+};
+
 // Registry + default order. Phase 3 will let the operator override the order via
 // the encomStatusline.layout / preset settings. Unknown ids are silently dropped.
 const SEGMENT_REGISTRY: Record<string, SegmentDef> = {
   dir: dirSegment, git: gitSegment, context: contextSegment, tokens: tokensSegment,
-  cache_read: cacheReadSegment, cache_write: cacheWriteSegment,
+  cache_read: cacheReadSegment, cache_write: cacheWriteSegment, bridge: bridgeSegment,
   model: modelSegment, tps: tpsSegment, cost: costSegment, time_spent: timeSpentSegment,
   session: sessionSegment, clock: clockSegment,
 };
@@ -513,9 +577,9 @@ type EncomConfig = {
 // Preset → ordered segment-id list. "default" mirrors the V8 layout, so an
 // unconfigured footer is byte-identical to V8. "full" adds cache_write + time_spent.
 export const PRESETS: Record<string, string[]> = {
-  default: ["dir", "git", "context", "tokens", "cache_read", "model", "tps", "cost", "session", "clock"],
+  default: ["dir", "git", "bridge", "context", "tokens", "cache_read", "model", "tps", "cost", "session", "clock"],
   minimal: ["dir", "git", "context"],
-  full: ["dir", "git", "context", "tokens", "cache_read", "cache_write", "model", "tps", "cost", "time_spent", "session", "clock"],
+  full: ["dir", "git", "bridge", "context", "tokens", "cache_read", "cache_write", "model", "tps", "cost", "time_spent", "session", "clock"],
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
