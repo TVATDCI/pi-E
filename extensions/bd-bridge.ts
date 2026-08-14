@@ -16,7 +16,7 @@
 // dispatched subprocesses run --no-extensions, so they cannot call codegraph or other MCP tools.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFileSync, existsSync, statSync, appendFileSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { scanSecrets } from "../memory/scanner.ts";
 import { join } from "node:path";
 import * as os from "node:os";
@@ -24,14 +24,6 @@ import * as os from "node:os";
 const BRIDGE_FILE = join(os.homedir(), ".pi", "agent", "bridge", "global-export.jsonl");
 
 const BRIDGED_CATEGORIES = ["constraint", "exact", "preference", "reason", "decision"];
-
-const CATEGORY_PRIORITY: Record<string, number> = {
-    constraint: 0,
-    decision: 1,
-    reason: 2,
-    exact: 3,
-    preference: 4,
-};
 
 /**
  * Parse a raw export entry into a clean bridged entry.
@@ -72,15 +64,13 @@ function parseBridgeEntry(raw: BridgeEntry): BridgeEntry | null {
     return null;
 }
 
-const MAX_CHARS = 6000;
-
-interface BridgeEntry {
+export interface BridgeEntry {
     export_timestamp: string;
     key: string;
     value: string;
 }
 
-function readBridgeExport(): { entries: BridgeEntry[]; exportTimestamp: string | null; telemetry: { read: number; parsed: number; dropped: number; secret: number } } {
+export function readBridgeExport(): { entries: BridgeEntry[]; exportTimestamp: string | null; telemetry: { read: number; parsed: number; dropped: number; secret: number } } {
     if (!existsSync(BRIDGE_FILE)) return { entries: [], exportTimestamp: null, telemetry: { read: 0, parsed: 0, dropped: 0, secret: 0 } };
 
     const content = readFileSync(BRIDGE_FILE, "utf-8");
@@ -109,7 +99,7 @@ function readBridgeExport(): { entries: BridgeEntry[]; exportTimestamp: string |
     return { entries, exportTimestamp, telemetry: { read, parsed, dropped, secret } };
 }
 
-function checkStale(_exportTimestamp: string): string | null {
+export function checkStale(_exportTimestamp: string): string | null {
     const candidates = [
         join(os.homedir(), "Main-vault", ".beads", "embeddeddolt"),
         join(os.homedir(), ".beads", "beads_global.db"),
@@ -126,49 +116,17 @@ function checkStale(_exportTimestamp: string): string | null {
     return null;
 }
 
-export default function (pi: ExtensionAPI) {
-    pi.on("before_agent_start", async (event) => {
-        const { entries, exportTimestamp, telemetry } = readBridgeExport();
-        if (entries.length === 0 || !exportTimestamp) return;
-
-        entries.sort((a, b) => {
-            const catA = a.value.split(":")[0];
-            const catB = b.value.split(":")[0];
-            return (CATEGORY_PRIORITY[catA] ?? 99) - (CATEGORY_PRIORITY[catB] ?? 99);
-        });
-
-        const lines = entries.map(e => `- ${e.value}`);
-        let block = lines.join("\n");
-        let injected = entries.length;
-        let omittedBudget = 0;
-
-        if (block.length > MAX_CHARS) {
-            let fitLen = 0;
-            let fitCount = 0;
-            for (const line of lines) {
-                const candidate = fitLen === 0 ? line.length : fitLen + 1 + line.length;
-                if (candidate > MAX_CHARS) break;
-                fitLen = candidate;
-                fitCount++;
-            }
-            injected = fitCount;
-            omittedBudget = entries.length - fitCount;
-            block = lines.slice(0, fitCount).join("\n") + `\n…+${omittedBudget} bridge entries omitted`;
-        }
-
-        const stale = checkStale(exportTimestamp);
-        const header = stale
-            ? `[FROM bridge, exported ${exportTimestamp} — ⚠️ STALE: bd modified after export]`
-            : `[FROM bridge, exported ${exportTimestamp}]`;
-
-        const TELEMETRY_FILE = join(os.homedir(), ".pi", "agent", "bridge", "telemetry.log");
-        try {
-            appendFileSync(TELEMETRY_FILE,
-                `${new Date().toISOString()} read=${telemetry.read} parsed=${telemetry.parsed} dropped=${telemetry.dropped} secret=${telemetry.secret} injected=${injected} omitted_budget=${omittedBudget}\n`);
-        } catch { /* non-critical */ }
-
-        // XML-tagged so prompt-hash.ts can strip this VOLATILE block (timestamp/entries/stale
-        // change every re-export) before hashing — keeps drift detection meaningful.
-        return { systemPrompt: event.systemPrompt + "\n\n<bridge-context>\n" + header + "\n" + block + "\n</bridge-context>" };
-    });
+/**
+ * Pure formatter for bridged entries: one `- category:value` line per entry, joined by newline.
+ * NO truncation, NO header, NO sort — the coordinator owns ranking + budget + framing. Preserves
+ * the exact line shape the old handler emitted so prompt-hash.ts volatility stripping is unchanged.
+ */
+export function formatBridgeLines(entries: readonly BridgeEntry[]): string {
+    return entries.map((e) => `- ${e.value}`).join("\n");
 }
+
+// bd-bridge is now a LIBRARY consumed by prompt-coordinator.ts (the sole before_agent_start
+// registrant). Kept under extensions/ for path stability; this no-op factory lets pi auto-discover
+// the file without a "no valid factory" warning. Composition (dedup/rank/budget/format/telemetry)
+// moved to the coordinator; this module owns only the pure read/format/stale primitives.
+export default function (_pi: ExtensionAPI) {}

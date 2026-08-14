@@ -16,14 +16,16 @@ import { createHash } from "node:crypto";
 
 /**
  * Strip the VOLATILE, by-design-changing blocks before hashing, so drift fires only on real
- * system-prompt composition changes — not on memory growth or bridge re-exports. Volatile
- * blocks are XML-tagged by convention: <memory-context> (memory/formatter.ts) and
- * <bridge-context> (bd-bridge.ts). Absent tags ⇒ no-op (safe). Non-greedy + multiline.
+ * system-prompt composition changes — not on memory growth, bridge re-exports, or per-session
+ * purpose. Volatile blocks are XML-tagged by convention: <memory-context> (memory/formatter.ts),
+ * <bridge-context> (bd-bridge.ts), and <purpose> (mini-purpose-gate — per-session, so stripping
+ * it makes the hash purpose-independent). Absent tags ⇒ no-op (safe). Non-greedy + multiline.
  */
 export function stableParts(prompt: string): string {
   return prompt
     .replace(/<memory-context>[\s\S]*?<\/memory-context>/g, "")
-    .replace(/<bridge-context>[\s\S]*?<\/bridge-context>/g, "");
+    .replace(/<bridge-context>[\s\S]*?<\/bridge-context>/g, "")
+    .replace(/<purpose>[\s\S]*?<\/purpose>/g, "");
 }
 
 /** 16-hex sha256 of the STABLE parts of a prompt (volatile blocks stripped first). */
@@ -33,8 +35,8 @@ export function hashPrompt(prompt: string): string {
 
 /**
  * Known-good STABLE-parts hashes (curated). hashPrompt() strips the volatile blocks
- * (<memory-context>, <bridge-context>) first, so this set tracks the STABLE composition:
- * AGENTS.md base + <purpose> + the `## Cost Discipline` / `## Session notes` sections (those
+ * (<memory-context>, <bridge-context>, <purpose>) first, so this set tracks the STABLE
+ * composition: AGENTS.md base + the `## Cost Discipline` / `## Session notes` sections (those
  * are markdown headings, NOT XML blocks). A hash NOT in this set = drift — an unintended
  * composition change (investigate) or a legit one (add the hash here, reviewed).
  *
@@ -43,8 +45,19 @@ export function hashPrompt(prompt: string): string {
  * STABLE composition legitimately changes (AGENTS.md edit, <purpose> change, a section added).
  */
 export const KNOWN_GOOD_HASHES: Set<string> = new Set<string>([
-  "c2bfe1b57f74616f", // stable-parts (post memory+bridge strip), pi 0.82.1, captured 2026-07-30
-  "7f21df25f4181676", // stable-parts, pi 0.83.0 (base prompt changed in the update), captured 2026-07-30
+  // c2bf/7f21 predate the <purpose> strip (captured with purpose in stable-parts); kept as
+  // historical markers — they no longer match.
+  "c2bfe1b57f74616f", // stable-parts (memory+bridge strip), pi 0.82.1, captured 2026-07-30 [pre-<purpose>-strip]
+  "7f21df25f4181676", // stable-parts, pi 0.83.0, captured 2026-07-30 [pre-<purpose>-strip]
+  // 41ecd is the STABLE purpose-INSENSITIVE known-good hash (verified cross-session 2026-08-14:
+  // two sessions with different live purposes — "checking the system workflow" vs "testing #1
+  // injection coordinator" — both hashed to 41ecd). It is NOT an interim/2-strip value and will
+  // NOT change on restart. Corrects the prior "INTERIM/2-strip/not-live" misdiagnosis. Why the
+  // pre-restart (2-strip-era) process produced the same value is unresolved (candidates: the
+  // 3-strip was already live there via /reload, or <purpose> was absent from its hashed
+  // snapshot) — immaterial to this entry: every fresh process runs the on-disk 3-strip
+  // stableParts, which is purpose-independent by construction (verified by direct test).
+  "41ecd366ca2476dd", // 3-strip, purpose-insensitive, post-prompt-coordinator order
 ]);
 
 export function isKnownGood(hash: string): boolean {

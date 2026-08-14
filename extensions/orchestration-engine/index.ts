@@ -16,6 +16,14 @@ import { resolveBudgets, budgetUsageState } from "../budgets/index.ts";
 import { accumulateUsage, sessionUsage, resetUsage } from "./session-state.ts";
 import { resolveFunctionalAgent } from "./agent-map.ts";
 
+// Cost Discipline behavioral framing — consumed by prompt-coordinator.ts (sole before_agent_start
+// registrant). Co-located here because the text is about the dispatch() tool this module owns.
+export const COST_DISCIPLINE_TEXT =
+  "## Cost Discipline\n" +
+  "Delegate grunt work to dispatch(category) — cheaper sub-agents do the work, you synthesize results. " +
+  "Codebase search, implementation, investigation, writing, UI work — all have dedicated operatives. " +
+  "Reserve your tokens for decisions and synthesis. The cheapest model that does the job is the right model.";
+
 // 0b: per-{agent, project} Promise mutex. Corrected delete-only-if-tail pattern
 // (Oracle Q2): only the tail holder deletes the map entry → no delete-after-clobber.
 // In-process only (known limitation #4).
@@ -261,14 +269,8 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("before_agent_start", async (event, _ctx) => {
-    return {
-      systemPrompt: event.systemPrompt + "\n\n## Cost Discipline\n" +
-        "Delegate grunt work to dispatch(category) — cheaper sub-agents do the work, you synthesize results. " +
-        "Codebase search, implementation, investigation, writing, UI work — all have dedicated operatives. " +
-        "Reserve your tokens for decisions and synthesis. The cheapest model that does the job is the right model.",
-    };
-  });
+  // Cost Discipline before_agent_start injection moved to prompt-coordinator.ts (sole registrant).
+  // COST_DISCIPLINE_TEXT (module-level export above) is the pure string the coordinator emits.
 
   pi.registerTool({
     name: "dispatch",

@@ -14,6 +14,31 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
+/**
+ * Pure reader for the latest session purpose. Reads ctx.sessionManager fresh each call (not the
+ * module-scope `purpose` closure var), so it is safe to import across pi's per-extension module
+ * isolation — the coordinator calls this every turn. Returns undefined if no purpose is set.
+ * Mirrors reconstruct()'s scan (newest-first, latest wins).
+ */
+export function readPurpose(ctx: ExtensionContext): string | undefined {
+  try {
+    const entries = ctx.sessionManager.getEntries();
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i] as {
+        type?: string;
+        customType?: string;
+        data?: { text?: string | null };
+      };
+      if (e.type === "custom" && e.customType === "purpose" && e.data) {
+        return e.data.text ?? undefined; // latest wins (scanned newest-first)
+      }
+    }
+  } catch {
+    /* best-effort; no purpose recoverable */
+  }
+  return undefined;
+}
+
 export default function (pi: ExtensionAPI) {
   let purpose: string | undefined;
 
@@ -42,23 +67,9 @@ export default function (pi: ExtensionAPI) {
   }
 
   // --- RECONSTRUCT: restore the latest purpose from the session (survives /reload) ---
+  // Delegates to the pure readPurpose() (shared with prompt-coordinator.ts) — DRY, no drift.
   function reconstruct(ctx: ExtensionContext) {
-    try {
-      const entries = ctx.sessionManager.getEntries();
-      for (let i = entries.length - 1; i >= 0; i--) {
-        const e = entries[i] as {
-          type?: string;
-          customType?: string;
-          data?: { text?: string | null };
-        };
-        if (e.type === "custom" && e.customType === "purpose" && e.data) {
-          purpose = e.data.text ?? undefined;
-          return; // latest wins (scanned newest-first)
-        }
-      }
-    } catch {
-      /* reconstruct best-effort; fall through to prompt */
-    }
+    purpose = readPurpose(ctx);
   }
 
   // --- SINGLE PROMPT (non-looped): if input stale-no-ops or is cancelled, do NOT loop ---
@@ -103,15 +114,8 @@ export default function (pi: ExtensionAPI) {
     if (ctx.hasUI && !purpose) void promptOnce(ctx);
   });
 
-  // 2. PROMPT AUGMENTATION: inject <purpose> into the system prompt every turn
-  pi.on("before_agent_start", async (event, _ctx) => {
-    if (!purpose) return;
-    return {
-      systemPrompt:
-        event.systemPrompt +
-        `\n\n<purpose>\nYour singular purpose this session: ${purpose}\nStay focused. If a request drifts, remind the user.\n</purpose>`,
-    };
-  });
+  // 2. PROMPT AUGMENTATION moved to prompt-coordinator.ts (sole before_agent_start registrant).
+  //    readPurpose(ctx) above is the pure export the coordinator calls each turn.
 
   // 3. INPUT GATE: block prompts until a purpose is set. Points to /purpose (reliable setter).
   // LR-0017: in print mode there's no user to set a purpose → bypass (avoid swallowing every prompt).

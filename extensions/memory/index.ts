@@ -22,7 +22,6 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { JsonlMemoryStore, SecretDetectedError } from "./store.ts";
 import { classifyCategory } from "./classifier.ts";
-import { buildInjection } from "./injection.ts";
 import { normalizeKey } from "./normalizer.ts";
 import type { Category } from "./schema.ts";
 import { LockTimeoutError } from "./lock.ts";
@@ -51,26 +50,10 @@ export default function (pi: ExtensionAPI) {
     await store.init();
   });
 
-  // before_agent_start: per-turn re-injection (F1). Re-read the store every turn so
-  // mid-session writes (turn N) surface at turn N+1, same session.
-  let lastKeptSignature = "";
-  pi.on("before_agent_start", async (event) => {
-    const records = await store.snapshot({ scopes: ["global"] });
-    const result = buildInjection(records);
-    if (result.block === "") return; // empty store -> no injection
-
-    // Truncation log on signature change (not every turn) to avoid log spam.
-    const signature = result.kept.map((r) => r.key).join(",");
-    if (result.cutCount > 0 && signature !== lastKeptSignature) {
-      const cutKeys = result.cut.map((r) => r.key).join(", ");
-      console.warn(
-        `[memory] truncation: kept ${result.keptCount}, cut ${result.cutCount} (${cutKeys})`,
-      );
-      lastKeptSignature = signature;
-    }
-
-    return { systemPrompt: event.systemPrompt + "\n\n" + result.block };
-  });
+  // before_agent_start re-injection moved to prompt-coordinator.ts (sole registrant). The
+  // coordinator reads records via memory/reader.ts (pure disk read — safe across module
+  // isolation; snapshot() here is cache-dependent and would be empty in the coordinator's copy).
+  // store.init() below still runs so the memory_remember / memory_forget tools work this session.
 
   // memory_remember tool: system derives category (A2-prime); store enforces defenses.
   pi.registerTool({

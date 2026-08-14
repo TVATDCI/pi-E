@@ -10,6 +10,12 @@ import type {
 import { Type } from "typebox";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
+// Session-notes behavioral framing — consumed by prompt-coordinator.ts (sole before_agent_start
+// registrant). Co-located here because the text is about the add_note tool this module owns.
+export const SESSION_NOTES_TEXT =
+  "## Session notes\n" +
+  "You have an `add_note` tool and the user has `/note`. Use `add_note` to record decisions, TODOs, or context worth keeping visible this session.";
+
 export default function (pi: ExtensionAPI) {
   const notes: string[] = [];
   //   What this is: the factory shell. Pi calls your default-exported function with pi (the ExtensionAPI — your handle to register everything). The notes array is the extension's in-memory state — it lives for the session, shared across all primitives. This closure-over-shared-state is how extensions coordinate: the command writes to notes, the tool writes to notes, the widget reads from notes.
@@ -119,15 +125,8 @@ export default function (pi: ExtensionAPI) {
 
   //   What this is: when Pi boots, session_start fires with a fresh ctx. You call renderWidget once to paint the empty-state ("📓 session-notes: empty — ..."). Without this, the widget wouldn't appear until the first note is added.
 
-  // Step 6 — Prompt augmentation (before_agent_start)
-  // 5. PROMPT AUGMENTATION — tell the LLM the tool exists, every turn
-  pi.on("before_agent_start", async (event, _ctx) => {
-    return {
-      systemPrompt:
-        event.systemPrompt +
-        "\n\n## Session notes\nYou have an `add_note` tool and the user has `/note`. Use `add_note` to record decisions, TODOs, or context worth keeping visible this session.",
-    };
-  });
+  // Step 6 — Prompt augmentation moved to prompt-coordinator.ts (sole before_agent_start
+  // registrant). SESSION_NOTES_TEXT (module-level export above) is the pure string it emits.
 }
 // What this is: before EVERY agent turn, Pi fires before_agent_start with the current event.systemPrompt. You return a new systemPrompt — here, the original + a section telling the LLM the tool exists. This is per-turn mutation: you can change it every turn based on state, session phase, user intent.
 // This is the other port-critical primitive: Sisyphus's large fixed system prompt → before_agent_start injection. Instead of a 10K-token monolith, you inject context dynamically, per-turn, only when relevant.
