@@ -37,6 +37,24 @@
  *   fallback paths; the scoped-models + tier-map path is safe (all primaries ∈ the allowed-4).
  *   The 07-04 eligible-set record above is preserved as point-in-time probe evidence.
  *
+ * ─── GLM-5.3 RELEASE 2026-08-14 (operator-confirmed; additive to the 08-04 narrowing) ───
+ *   glm-5.3 released on Z.AI Coding Plan AND opencode-go (same base as 5.2, post-training
+ *   gains: +50% Z.ai Code Bench, 1M context, 128K max output). zai plan now includes 5.3.
+ *   QUOTA SHIELD STRATEGY (operator-stated): opencode-go is CHEAP and carries the flagships
+ *   (per-5h: kimi-k3 110, glm-5.3 220, glm-5.1 880) — burn opencode-go FIRST; zai-coding-plan
+ *   is the safety net, not the primary. This drove the 08-14 moves:
+ *     - deep: glm-5.2 → opencode-go/glm-5.3 primary, fallback [zai/glm-5.3, opencode-go/glm-5.2,
+ *       opencode-go/kimi-k2.7-code] — opencode-go first, zai breaks the shield only on exhaustion.
+ *     - ultrabrain: stays kimi-k3 primary; fallbacks re-anchored to 5.3 (opencode-go then zai).
+ *     - artistry: stays glm-5.2 (operator choice — artistry is not a coding-bench beneficiary),
+ *       fallback opencode-go/glm-5.1 (880/5h) unchanged.
+ *   6 of 10 categories now zai-plan-primary (was 7); deep joins quick/ultrabrain/git-commit-message
+ *   on opencode-primary. VERIFIED LIVE 2026-08-14: zai/glm-5.3 callable (plan includes 5.3);
+ *   opencode-go/kimi-k2.7-code present in registry. ⚠ opencode-go MONTHLY cap exhausted as of
+ *   2026-08-14 (429 GoUsageLimitError, resets ~2 days) — until reset, opencode-go primaries
+ *   (deep/ultrabrain) will fail-through to zai via the empty-output fallback chain by design.
+ *   glm-5.3 promo-multiplier status still unverified (promoModels covers only 5.2/5-turbo).
+ *
  * ─── QUOTA MULTIPLIERS (Z AI DevPack FAQ:21, /devpack/overview) ─────────────
  *   PROMO (now → 2026-09-30): glm-5.2 & glm-5-turbo = 1× off-peak  (free upgrade)
  *   POST-PROMO (2026-10-01+): glm-5.2 & glm-5-turbo = 2× off-peak, 3× peak
@@ -227,28 +245,27 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
       ".",
   },
   deep: {
-    provider: "zai-coding-cn",
-    id: "glm-5.2",
+    provider: "opencode-go",
+    id: "glm-5.3",
     fallbackModels: [
+      { provider: "zai-coding-cn", id: "glm-5.3" },
       { provider: "opencode-go", id: "glm-5.2" },
       { provider: "opencode-go", id: "kimi-k2.7-code" },
     ],
     thinkingLevel: "high",
     rationale:
-      "Deep codebase investigation/execution; glm-5.2 — moved from glm-5.1 on 2026-08-04 because glm-5.1 was DROPPED from the Coding Plan (plan narrowed to 4 models; glm-5.2 is the remaining flagship reasoning model). PROMO 1× off-peak → 2× after " +
-      PROMO_SUNSET_ISO +
-      ". Per-tier fallback opencode-go/glm-5.2 (cross-provider).",
+      "Deep codebase investigation/execution; opencode-go/glm-5.3 primary (QUOTA SHIELD: burn opencode-go's 220/5h 5.3 quota first; zai-coding-plan is the safety net — fallback zai/glm-5.3 breaks the shield only on opencode-go exhaustion, then opencode-go/glm-5.2, then kimi-k2.7-code). glm-5.3 = 5.2 base + post-training coding/agent gains (+50% Code Bench, 1M ctx). Promotional multiplier status for 5.3 unverified.",
   },
   ultrabrain: {
     provider: "opencode-go",
     id: "kimi-k3",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-5.2" },
-      { provider: "opencode-go", id: "glm-5.2" },
+      { provider: "opencode-go", id: "glm-5.3" },
+      { provider: "zai-coding-cn", id: "glm-5.3" },
     ],
-    thinkingLevel: "high",
+    thinkingLevel: "xhigh",
     rationale:
-      "Hardest logic. Primary opencode-go/kimi-k3 (reasoning model); per-tier fallback zai-coding-cn/glm-5.2. OmO variant=high. (Earlier glm-5.1 assignment superseded — see README table + PROBE-RESULTS.)",
+      "Hardest logic. Primary opencode-go/kimi-k3 (reasoning model, 110/5h); fallbacks re-anchored to 5.3 on 2026-08-14: opencode-go/glm-5.3 (220/5h, shield-preserving) then zai/glm-5.3 (shield-break on exhaustion). thinkingLevel xhigh (union max; earlier 'max' was invalid — spawn.ts passes the level verbatim to --thinking).",
   },
   writing: {
     provider: "zai-coding-cn",
@@ -290,7 +307,10 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "git-commit-message": {
     provider: "opencode",
     id: "deepseek-v4-flash-free",
-    fallbackModels: [{ provider: "opencode-go", id: "minimax-m2.7" }],
+    fallbackModels: [
+      { provider: "opencode-go", id: "minimax-m2.7" },
+      { provider: "zai-coding-cn", id: "glm-4.7" },
+    ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 6 },
     rationale:
@@ -304,11 +324,8 @@ export const DEFAULT_CATEGORY: TaskCategory = "unspecified-low";
  * Read-only categories — safe to bound with turn/tool budgets per the conservative orchestration
  * policy (PORT-PLAN-v0.40.md ①). A turn/tool budget on any OTHER (mutation) category triggers a
  * WARNING from budgets/resolver.ts. Single source of truth for the read-only taxonomy. */
-export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> = new Set<TaskCategory>([
-  "quick",
-  "research",
-  "git-commit-message",
-]);
+export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> =
+  new Set<TaskCategory>(["quick", "research", "git-commit-message"]);
 
 export const FALLBACK = { provider: "opencode-go", id: "glm-5.1" } as const;
 
@@ -318,7 +335,9 @@ export const FALLBACK = { provider: "opencode-go", id: "glm-5.1" } as const;
  *  (review-loop S1) at BOTH the dispatch site (index.ts) and the chain site (chain-runner.ts).
  *  Mirrors the guard `resolveModel` already applies. */
 export function tierEntryFor(category: TaskCategory | string): TierEntry {
-  return category in TIERS ? TIERS[category as TaskCategory] : TIERS[DEFAULT_CATEGORY];
+  return category in TIERS
+    ? TIERS[category as TaskCategory]
+    : TIERS[DEFAULT_CATEGORY];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
