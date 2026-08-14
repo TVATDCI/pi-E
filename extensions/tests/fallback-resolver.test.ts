@@ -89,16 +89,16 @@ function mockRegistry(present: Array<[string, string]>): ModelRegistryLike {
   };
 }
 
-const deepResolved = resolveModel("deep", mockRegistry([["zai-coding-cn", "glm-5.2"]]));
+const deepResolved = resolveModel("deep", mockRegistry([["opencode-go", "glm-5.3"]]));
 eq(
   "resolveModel(deep): source tier-map, modelFlag = primary",
   [deepResolved.source, deepResolved.modelFlag],
-  ["tier-map", "zai-coding-cn/glm-5.2"],
+  ["tier-map", "opencode-go/glm-5.3"],
 );
 eq(
-  "resolveModel(deep): fallbackFlags = per-tier 2-elem array (NO global tail — spawn.ts appends it)",
+  "resolveModel(deep): fallbackFlags = per-tier 3-elem array (NO global tail — spawn.ts appends it)",
   deepResolved.fallbackFlags,
-  ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"],
+  ["zai-coding-cn/glm-5.3", "opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"],
 );
 check("resolveModel(deep): fallbackFlags is an array (not undefined/string)", Array.isArray(deepResolved.fallbackFlags));
 
@@ -119,7 +119,7 @@ eq(
 eq(
   "resolveModel(deep) primary-missing: fallbackFlags still the per-tier array",
   deepFallback.fallbackFlags,
-  ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"],
+  ["zai-coding-cn/glm-5.3", "opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"],
 );
 
 // Unknown category → DEFAULT_CATEGORY (unspecified-low), whose fallback is opencode/deepseek-v4-flash-free.
