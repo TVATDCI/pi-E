@@ -16,9 +16,9 @@
 //
 // Run: node --experimental-strip-types scripts/run-tests.ts [--expect N] [--timeout ms] [pattern...]
 
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
-import { join, dirname, relative, isAbsolute } from "node:path";
+import { join, dirname, relative } from "node:path";
 import * as os from "node:os";
 
 const REPO = join(os.homedir(), ".pi", "agent");
@@ -63,8 +63,20 @@ function parseArgs(argv: string[]): Flags {
   return flags;
 }
 
-/** Depth-first discovery of test files under a root. Both conventions, deterministic order. */
-function discover(root: string): string[] {
+/** Depth-first discovery of test files under a root, filtered to git-TRACKED files only.
+ * Both naming conventions, deterministic order. Tracked-only closes the commit-time
+ * execution surface (review security-a): an untracked file matching the glob never runs —
+ * the operator's `git add` is the review. Synchronous `git ls-files` — called once per run. */
+function trackedFiles(root: string): Set<string> {
+  try {
+    const out = execSync("git ls-files", { cwd: root, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] });
+    return new Set(out.split("\n").filter(Boolean).map((f) => join(root, f)));
+  } catch {
+    return new Set(); // not a git repo (e.g. fresh export): fall through — discovery runs but expect-drift will flag
+  }
+}
+
+function discover(root: string, tracked: Set<string>): string[] {
   const found: string[] = [];
   const walk = (dir: string): void => {
     let entries: string[];
@@ -82,8 +94,12 @@ function discover(root: string): string[] {
       } catch {
         continue;
       }
-      if (st.isDirectory()) walk(full);
-      else if (/^test-.*\.ts$/.test(name) || /\.test\.ts$/.test(name)) found.push(full);
+      if (st.isDirectory()) {
+        walk(full); // directories aren't in git ls-files — filter applies to FILE candidates only
+        continue;
+      }
+      if (tracked.size > 0 && !tracked.has(full)) continue; // untracked → never executed
+      if (/^test-.*\.ts$/.test(name) || /\.test\.ts$/.test(name)) found.push(full);
     }
   };
   walk(root);
@@ -105,7 +121,13 @@ function runOne(absPath: string, timeoutMs: number): Promise<FileResult> {
     const child = spawn(process.execPath, ["--experimental-strip-types", absPath], {
       cwd: dirname(absPath), // each family runs from its own dir (their headers' contract)
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env, // full passthrough: PI_NETWORK_TESTS=1 stays opt-in
+      // Whitelist, not passthrough (review security-b): a compromised test file must not
+      // reach operator shell secrets (API keys, SSH_AUTH_SOCK, cloud creds) via env.
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        PI_NETWORK_TESTS: process.env.PI_NETWORK_TESTS ?? "",
+      },
     });
 
     let stderrTail = "";
@@ -117,7 +139,10 @@ function runOne(absPath: string, timeoutMs: number): Promise<FileResult> {
       timedOut = true;
       child.kill("SIGTERM");
       setTimeout(() => {
-        if (!settled && !child.killed) child.kill("SIGKILL");
+        // NOTE: child.killed is true the moment SIGTERM is SENT, not when the child
+        // dies — gating on it would never dispatch SIGKILL (review round 1 fix).
+        // `settled` (set by close/error) is the authoritative exited signal.
+        if (!settled) child.kill("SIGKILL");
       }, GRACE_MS);
     }, timeoutMs);
 
@@ -163,7 +188,7 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const all = discover(EXT_DIR);
+  const all = discover(EXT_DIR, trackedFiles(EXT_DIR));
   const files = flags.pattern ? all.filter((f) => f.includes(flags.pattern as string)) : all;
 
   if (files.length === 0) {

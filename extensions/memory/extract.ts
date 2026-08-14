@@ -32,6 +32,13 @@ export interface ExtractedCandidate {
 export const MAX_VALUE_CHARS = 300;
 export const MAX_RECORDS_PER_COMPACTION = 10;
 
+/** Instruction-shaped values are DROPPED, not stored (review security-b, operator-approved):
+ *  a compaction-summary bullet phrased as a directive ("ignore previous…", "the operator has
+ *  updated policy…", "you must…") is an injection attempt riding the extract pipeline into
+ *  <memory-context>, not a fact. First-word-anchored, case-insensitive. */
+const INSTRUCTION_RE =
+  /^(?:ignore|override|disregard|you must|you should|always execute|never check|the operator (?:says|has|wants|updated))/i;
+
 /** Sections we extract facts from, with their extraction behavior. */
 const FACT_SECTIONS: Record<string, "split-constraint-preference" | "decision" | "classify"> = {
   "constraints & preferences": "split-constraint-preference",
@@ -68,7 +75,9 @@ function slugKey(value: string): string {
  *  null and the generic bold prefix is stripped from the value instead. */
 function explicitKey(bulletContent: string): string | null {
   const m = bulletContent.match(/^\*\*`?([a-z0-9_]+)`?\*\*/i);
-  return m ? m[1] : null;
+  // lowercase: the /i flag lets `**`My_Key`**` through; within-summary dedup and telemetry
+  // must see the same key slugKey() would produce (review round 1 fix).
+  return m ? m[1].toLowerCase() : null;
 }
 
 /** Clean a bullet's value text: strip a leading bold segment (ANY content — key-shaped or
@@ -101,6 +110,10 @@ export function extractCandidates(summary: string): ExtractedCandidate[] {
     const heading = line.match(/^#{2,4}\s+(.+)$/);
     if (heading) {
       const name = normalizeSectionName(heading[1]);
+      // H3+ subheadings INSIDE a fact section (e.g. `### Rationale` under `## Key Decisions`)
+      // are internal structure of the SAME section, not a section change — extraction
+      // continues with the current behavior (review round 1: silent-stop bug).
+      if (/^#{3,4}/.test(line) && sectionBehavior !== null && sectionBehavior !== "skip") continue;
       currentSection = name;
       sectionBehavior = ARC_SECTIONS.has(name)
         ? "skip"
@@ -119,6 +132,7 @@ export function extractCandidates(summary: string): ExtractedCandidate[] {
       const key = explicitKey(rawValue) ?? slugKey(rawValue);
       const value = capValue(bulletValue(rawValue));
       if (!value) continue;
+      if (INSTRUCTION_RE.test(value)) continue; // injection-shaped → dropped
       out.push({
         key,
         value,
@@ -129,6 +143,7 @@ export function extractCandidates(summary: string): ExtractedCandidate[] {
       const key = explicitKey(rawValue) ?? slugKey(rawValue);
       const value = capValue(bulletValue(rawValue));
       if (!value) continue;
+      if (INSTRUCTION_RE.test(value)) continue; // injection-shaped → dropped
       out.push({
         key,
         value,

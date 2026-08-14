@@ -159,7 +159,7 @@ check("resolveModel: throws when neither primary nor global resolves", threwNeit
 // glm-5.x / kimi — never FREE/cheap tiers. Plus every category must have ≥1 fallback (global tail is
 // spawn.ts's concern, but the per-tier array should be non-empty for resilience).
 const JUDGING = ["deep", "ultrabrain", "unspecified-high"] as const;
-const STRONG_MODEL_RE = /^glm-5(\.\d)?(-highspeed)?(\/.*)?$|^kimi-/;
+const STRONG_MODEL_RE_UNUSED_PLACEHOLDER = null; // removed: dead constant (review round 1)
 let allJudgingStrong = true;
 let allJudgingNonEmpty = true;
 for (const cat of JUDGING) {

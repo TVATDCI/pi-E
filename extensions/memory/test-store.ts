@@ -89,6 +89,19 @@ if (a[0] === 'write') {
     const snap = await store.snapshot({ scopes: ["global"] });
     check("dedup: exactly one record", snap.length === 1);
     check("dedup: value is the latest", snap[0].value === "second");
+    // --- 2b. slug-key collision (review round 1): different raw keys that normalize
+    // to the same slug must UPDATE, not insert a sibling record.
+    const r3 = await store.remember(rec({ key: "My-Key", value: "titled first" }));
+    const r4 = await store.remember(rec({ key: "my_key", value: "slugged second" }));
+    check("slug-collision: second write updates", r4.action === "updated");
+    check("slug-collision: still one record", (await store.snapshot({ scopes: ["global"] })).filter((r: { key: string }) => r.key === "my_key").length === 1);
+    // --- 2c. cross-category B2 (review security-a): an OPERATOR record at ANY category
+    // with the same key must shield against an inferred write, even after E2.1 recategories.
+    await store.remember(rec({ key: "shielded_topic", value: "operator constraint text", provenance: "operator", category: "constraint" }));
+    const cross = await store.remember(rec({ key: "shielded_topic", value: "injected contradictory fact", provenance: "inferred", category: "constraint" }));
+    check("cross-category B2: inferred over operator (other category) skipped", cross.action === "skipped_inferred_over_operator");
+    const shieldSnap = (await store.snapshot({ scopes: ["global"] })).find((r: { key: string }) => r.key === "shielded_topic");
+    check("cross-category B2: operator constraint record survived unmodified", shieldSnap?.category === "constraint" && shieldSnap?.provenance === "operator");
   }
 
   // --- 3. persistence: two-session E2E (close -> new store -> init -> snapshot) ---

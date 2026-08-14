@@ -121,10 +121,15 @@ export class JsonlMemoryStore {
 
   /** Write a record through the defense pipeline. Returns the storage outcome. */
   async remember(incoming: MemoryRecord): Promise<RememberOutcome> {
-    // E1: secret scan at the write boundary (refuse + surface).
+    // E1: secret scan at the write boundary (refuse + surface) — VALUE and KEY
+    // (keys are derived from summary text in the extract pipeline; review security-c).
     const scan = scanSecrets(incoming.value);
     if (scan.detected) {
       throw new SecretDetectedError(scan.pattern ?? "unknown");
+    }
+    const keyScan = scanSecrets(incoming.key);
+    if (keyScan.detected) {
+      throw new SecretDetectedError(keyScan.pattern ?? "unknown");
     }
 
     // Normalize key (safety net for agent-supplied form).
@@ -138,7 +143,20 @@ export class JsonlMemoryStore {
     const finalRecord: MemoryRecord = { ...incoming, key: normKey, category };
     const mk = this.mapKey(finalRecord.scope, category, normKey);
 
-    // B2: provenance write-guard (asymmetric). inferred cannot overwrite operator.
+    // B2: provenance write-guard (asymmetric). inferred cannot overwrite operator —
+    // INCLUDING across categories: after E2.1 downgrades an inferred constraint to fact,
+    // `global:constraint:x` (operator) vs `global:fact:x` (inferred) would otherwise never
+    // collide and the inferred record lands as a sibling (review security-a). Any operator
+    // record with the same scope+key shields the key entirely.
+    if (finalRecord.provenance === "inferred") {
+      const suffix = `:${normKey}`;
+      for (const [k, v] of this.map.entries()) {
+        if (v.provenance === "operator" && k.endsWith(suffix)) {
+          await this.audit("SKIP", k, "inferred-over-operator-cross-category", v);
+          return { action: "skipped_inferred_over_operator", existing: v };
+        }
+      }
+    }
     const existing = this.map.get(mk);
     if (existing && existing.provenance === "operator" && finalRecord.provenance === "inferred") {
       await this.audit("SKIP", mk, "inferred-over-operator", existing);
