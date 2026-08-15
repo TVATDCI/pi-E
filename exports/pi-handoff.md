@@ -1,37 +1,46 @@
-# Pi Handoff — finished MODEL-DELTA ride; caught statusline mis-grounding (2026-08-09)
+# Pi Handoff — herdr skills install → 0.8.0 update → first live pi⇄sis collab lane, protocol v0.2.1 ratified (2026-08-15)
 
-**Written at:** 2026-08-09T19:33:42Z
-**Pi session:** 019fe7de-552f-78eb-82a1-5a824542092a
-**Original intent:** "Finish the unfinished MODEL-DELTA items ride" (operator-set session purpose).
+**Written at:** 2026-08-15T03:20:00Z
+**Pi session:** 01a0029c-931b-7e1f-9979-3fcb399a3083
+**Original intent:** Operator installed the herdr agent skill via `npx skills` and asked to verify the install, then develop the workspace from the herdr docs and skill reference.
 
 ## Summary
-Re-grounded each MODEL-DELTA "cheap close" before executing. The headline mode-2 finding (statusline-encom.ts claimed `.disabled`) was a **mis-grounding** — the file is LIVE (878 lines, active `encomStatusline` config); close #1 (forget the 7-fact cluster) was INVERTED and dropped, which would otherwise have deleted accurate liveness records. Executed close #2 (amended `pi_agent_install_conventions`: "14"→"15", dropped the stale "researcher missing from `all`" sentence — verified single record). Operator pasted the close #5 re-grounding correction block into MODEL-DELTA.md; closes #3 (liveness checker) retired, #4 (`ps` one-liner) handed to operator.
+Verified the `npx skills` CLI installs into the shared `~/.agents/skills/` store (single copy, no per-agent duplicates despite the installer UI). Updated herdr 0.7.5→0.8.0 with live handoff, reinstalled the pi integration, and pinned the release-matched skill over the repo-HEAD copy. Built the `herdr-collab` cross-agent lane skill and validated it live: booted opencode/sisyphus in a sibling pane, ran two review rounds over the protocol draft, got sign-off, folded in the final nits as v0.2.1. Lane closed cleanly (pane + shared dir).
 
 ## Files touched
-- `~/.pi/MODEL-DELTA.md` — appended "⚠️ Re-grounding" correction block (operator pasted; untracked — `~/.pi` is not a git repo).
-- `~/.pi/agent/memory/store.jsonl` — amended `pi_agent_install_conventions` (`memory_forget` + `memory_remember`; verified 1 record, "0 of 15", no "MISSING").
-- `~/.pi/agent/exports/pi-handoff.md` — this file (overwrites the 2026-08-09 handoff).
+- `~/.agents/skills/herdr/SKILL.md` — pinned to 0.8.0 binary-bundled copy via `herdr --skill` (repo-HEAD documented unimplemented semantics)
+- `~/.agents/skills/herdr-collab/SKILL.md` — NEW skill v0.2.1: pi⇄sis lane protocol (shared-store, symlinked into opencode)
+- `~/.agents/skills/herdr-collab/reviews/sis-review-v0.1.md`, `sis-review-v0.2.md` — archived review rounds
+- `~/.config/opencode/skills/herdr`, `skills/herdr-collab` — symlinks into the shared store (committed `30983f3`, pushed)
+- `~/.pi/agent/extensions/herdr-agent-state.ts` — written by `herdr integration install pi` (herdr-managed, v8; reports working/blocked/idle to the socket)
+- `~/.config/opencode/SYSTEM-NARRATIVE.md`, `COMPLETE-CODEBASE.md` — sis's own session-close docs (committed `1abb8d4`, pushed)
+- `~/Main-vault/log.md` — sis lane narrative (committed `ccd7066`, local only)
+- `/tmp/herdr-collab/` — lane channel dir, created and removed at close (contents archived first)
 
 ## Decisions made
-- **MODEL-DELTA close #1 INVERTED (dropped).** statusline-encom.ts is the live, load-bearing footer; its 7 store facts are accurate. The 2026-08-09 `.disabled` assertion was a model mis-grounding (operator-confirmed: the model then was wrong, not a transient disable).
-- **Close #3 (#3b liveness checker) RETIRED.** Built on the mis-grounding; the only real `.disabled` files (footer-status, hello-status) are dead early-build scaffolding the operator is removing → nothing left to scan.
-- **Close #5 REVISED to a correction append** (not "leave as-is") because MODEL-DELTA's own headline went stale.
-- (meta) The resolve→forget discipline (Test 1 lever #3) is the only structural rule that survived; re-grounding-before-acting is the liveness link the self-model lacks, re-proven on MODEL-DELTA itself.
+- Pin the binary-bundled skill, not repo-HEAD — doc must match the running binary; HEAD documents `agent_blocked` semantics 0.8.0's bundled copy doesn't have. Corollary hazard: `npx skills update` would clobber the pin back to HEAD.
+- Shared-file channel (`/tmp/herdr-collab/<topic>/`) is PRIMARY, pane reads are convenience — sis TUI runs alternate-screen, scrollback reads are lossy (sis finding, verified).
+- Review-class prompt timeouts ≥300000ms — sis delegates to slow tiers (Oracle/deep) and cannot answer before they finish; `working` ≠ stalled, never re-prompt while working.
+- Focus decisions stay with the operator — `agent read` doesn't mark tabs seen, so readers never need to steal focus.
+- Skills distribution model: one shared copy consumed via symlinks; "copy → N agents" in the installer UI is informational, nothing is written to per-agent dirs.
 
 ## Dead ends
-- **Executing MODEL-DELTA close #1 would have deleted 7 accurate facts.** The 2026-08-09 MODEL-DELTA asserted statusline-encom.ts was `.disabled` and proposed forgetting its cluster. Re-grounding (`ls extensions/` + read the 878-line file + `settings.json` `encomStatusline` block) showed it LIVE. Forgetting would have destroyed correct liveness records. Lesson: re-ground before acting on ANY model, including one authored by the same persona one pass ago — the model is a diary, not a view.
-- **I misread my own toolset this session.** Concluded I was read-only (only read/grep/find/ls/write/edit) from the "Available tools:" prose, when `memory_remember`/`memory_forget`/`bash`/`task`/`dispatch` were available all along. This sent the operator on a zsh dead-end (they tried to run `memory_forget(...)` in zsh → `zsh: unknown file attribute: k`). Corrected mid-session. Lesson: the function-schema block is authoritative; the "Available tools" prose line is a subset, not the contract.
-- **"Amend" = `memory_forget` THEN `memory_remember`** (`memory_remember` appends, does not upsert). Confirmed working: exactly 1 record after the amend.
+- `herdr update --handoff` from inside a herdr pane — refused by design ("run outside herdr"); no socket-API escape hatch exists (api is snapshot/schema only). Stripping `HERDR_ENV` to fool the guard was rejected: deliberately bypassing a safety check that protects pane processes. Correct path: operator runs it outside, then reconnects the TUI (the client exits by design; panes survive).
+- "Installer copied the skill to 12 other agents" — FALSE assumption from the installer UI line; verified no per-agent copies or symlinks exist (checked ~/.codex, ~/.cursor, ~/.zed, ~/.warp, ~/.amp, ~/.claude, and opencode's skills dir mtime). One shared store is the real model.
+- Compound `rm -rf /tmp/herdr-collab && herdr pane close ...` — pi's own destructive-command gate aborted the ENTIRE compound including the pane close. Lesson: run destructive cleanup stepwise, non-destructive operations first, so a gate trip doesn't strand the lane close.
+- Operator's first commit script stopped after commit 1 of 3 (no error visible; reflog shows no second commit attempt). Resume-script pattern with idempotent `git diff --cached --quiet || commit` guards recovered it cleanly — reuse that pattern for multi-commit operator scripts.
 
 ## Incomplete work
-- (operator) `rm -f ~/.pi/agent/extensions/hello-status.ts.disabled ~/.pi/agent/extensions/footer-status.ts.disabled` — command handed; not yet confirmed run.
-- (operator) `ps -eo pid,lstart,etime,cmd | grep -i pi-coding-agent | grep -v grep` — O5-1 runtime certainty; low-stakes (single pi writer this session, so no cross-process race regardless of whether the running process predates W8b).
-- (sisyphus) **`bd forget next:store_jsonl_cross_process_followup`** — the stale store.jsonl race claim is live in sisyphus's bd (`bridge/global-export.jsonl:75`, export 2026-08-05). Quarantined from pi (category `next` excluded by `bd-bridge` `BRIDGED_CATEGORIES`) but active in sisyphus's todo. Needs a sisyphus-side forget.
+- Workspace recipes proposed but not built: topology snapshot map, watchdog (pane wait-output gating), approval relay (agent wait --until blocked + notification show).
+- Toast delivery in herdr config.toml still off (dotfiles repo owns that file — needs a dotfiles commit).
+- herdr-collab v0.2.1 nits were folded in AFTER sis's sign-off (which approved v0.2) — a quick verify pass by sis at next session-begin would close the loop.
+- `~/.pi/agent/exports/` handoff commit pending operator authorization (see Next steps).
 
 ## Proposed bd facts
-None new this session — the work was model-internal corrections + a pi store.jsonl fact amendment (already in pi's store). The prior session's proposed `pi_opencode_symbiotic_system` (decision) promotion status is unknown to pi; if sisyphus did not promote it, it still stands as a worthwhile cross-agent framing correction (see `~/.pi/MODEL.md`).
+- scope=global | category=exact | key=skills_cli_shared_store | value="vercel-labs skills CLI (1.5.22) installs each skill ONCE into ~/.agents/skills/ (lockfile ~/.agents/.skill-lock.json); installer's 'copy -> N agents' line is informational — no per-agent copies or symlinks are created. pi auto-loads from the shared store; opencode needs a symlink into ~/.config/opencode/skills/ (pattern: ln -s ~/.agents/skills/<name> ~/.config/opencode/skills/<name>)."
+- scope=global | category=exact | key=herdr_update_runbook | value="herdr update --handoff must run OUTSIDE herdr (refuses in-pane); TUI client exits after handoff — reconnect with bare 'herdr', panes survive. After EVERY update: herdr integration install pi (rewrites ~/.pi/agent/extensions/herdr-agent-state.ts), then re-pin skill via herdr --skill > ~/.agents/skills/herdr/SKILL.md. HAZARD: npx skills update would clobber the pinned skill back to repo-HEAD."
 
 ## Next steps for opencode
-- **Forget** `next:store_jsonl_cross_process_followup` in bd (the store.jsonl race is FIXED — commit `fbc3433`, append-only + `withFileLock`; the entry is stale).
-- (optional) Confirm whether the prior session's `pi_opencode_symbiotic_system` decision was promoted; promote if not.
-- (optional, cross-pair) O4-1: neither side has a foundation-consuming planner; the prerequisite is a foundation-artifact contract (`MODEL.md` shape+home) before building a planner agent. Unchanged from prior handoff.
+- At session-begin Step 4/5: surface this handoff, review + promote the two proposed bd facts via scripts/bd_remember.py.
+- Verify both skill symlinks resolve in opencode's skill listing (they were committed in 30983f3).
+- Optional 2-minute task: read ~/.agents/skills/herdr-collab/SKILL.md (now v0.2.1) and confirm the two sign-off nits (anti-reflex rule, --timeout disambiguation) landed as intended.
