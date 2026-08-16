@@ -11,6 +11,25 @@
 export type SpawnOutcome = "done" | "error" | "timeout" | "aborted";
 
 /**
+ * PORT-PLAN-v0.40 ③ (live-error half, 2026-08-16): should the cross-provider fallback chain
+ * walk after a spawn? TRUE when the spawn produced no usable output — SOFT failure (empty
+ * output: Z-AI quota exhaustion has no balance fallback, exhaustion = empty) OR LOUD failure
+ * (in-band agent error: e.g. opencode-go 429 GoUsageLimitError arrives as an error event and is
+ * appended to output — non-empty, but a failure nonetheless). FALSE when timedOut (Edit 7:
+ * retrying a hung model never helps — abort the chain instead) or on real output with no error.
+ *
+ * POLICY twin of spawnSub's mechanism, kept pure + zero-dep for the same reason as
+ * classifySpawnOutcome: spawn.ts can't be imported by the test suite.
+ */
+export function spawnFailedForFallback(
+  outputLength: number,
+  inbandError: string | undefined,
+  timedOut: boolean,
+): boolean {
+  return !timedOut && (outputLength === 0 || Boolean(inbandError));
+}
+
+/**
  * Classify a spawn's outcome from its kill causes + exit code.
  *
  * Precedence: **aborted > timeout > done/error**.

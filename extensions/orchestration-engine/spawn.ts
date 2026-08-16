@@ -5,7 +5,7 @@ import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModel, orderedFallbacks, FALLBACK, type TaskCategory } from "./tier-map.ts";
 import { appendBudgetNudges, type ResolvedBudgets } from "../budgets/index.ts";
-import { classifySpawnOutcome, type SpawnOutcome } from "./spawn-outcome.ts";
+import { classifySpawnOutcome, spawnFailedForFallback, type SpawnOutcome } from "./spawn-outcome.ts";
 // Edit 7: re-export the outcome type so consumers keep importing from spawn.ts (the canonical spawn
 // surface); the pure classifier + type live in the zero-dep spawn-outcome.ts (unit-testable).
 export type { SpawnOutcome } from "./spawn-outcome.ts";
@@ -105,6 +105,10 @@ export interface SpawnResult {
   usage?: UsageStats;
 }
 
+/**
+ * PORT-PLAN-v0.40 ③ live-error fallback gate + outcome classification live in the zero-dep
+ * spawn-outcome.ts module (pure, unit-testable — spawn.ts can't be imported by tests).
+ */
 export function loadPersona(name: string): Persona | undefined {
   const file = join(os.homedir(), ".pi", "agent", "agents", `${name}.md`);
   if (!existsSync(file)) return undefined;
@@ -160,7 +164,7 @@ export function spawnSub(
    *  behavior). On expiry the child is SIGTERM→SIGKILL'd (killProc escalation) and the spawn
    *  resolves with `timedOut: true` + whatever partial output was captured. */
   timeoutMs?: number,
-): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined; timedOut: boolean }> {
+): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined; timedOut: boolean; inbandError?: string }> {
   const tools = toolsOverride ?? persona?.tools ?? "read,grep,find,ls";
   const needsBash = tools.includes("bash");
 
@@ -306,7 +310,7 @@ export function spawnSub(
       const parts: string[] = [raw];
       if (inbandError) parts.push(`\n[agent error]\n${inbandError}`);
       if ((code !== 0 || parts[0].length === 0) && stderrBuf.trim()) parts.push(`\n[stderr]\n${stderrBuf.trim()}`);
-      resolve({ output: parts.join("").trim(), code: code ?? 1, elapsedMs: elapsed, toolCount, usage: usage.turns > 0 ? usage : undefined, timedOut });
+      resolve({ output: parts.join("").trim(), code: code ?? 1, elapsedMs: elapsed, toolCount, usage: usage.turns > 0 ? usage : undefined, timedOut, inbandError });
     });
 
     proc.on("error", (err) => {
@@ -423,16 +427,18 @@ export async function resolveAndSpawn(
   // once, below, via classifySpawnOutcome — aborted > timeout > done/error.
   let dispatchTimedOut = primary.timedOut;
 
-  // Cross-provider fallback chain when the primary silently returns empty (quota exhausted — the
-  // Z-AI plan has NO balance fallback, so exhaustion = hard fail = empty output). Walk the per-tier
+  // Cross-provider fallback chain when the primary fails SOFT (empty output — Z-AI quota
+  // exhaustion) or LOUD (in-band agent error — e.g. opencode-go monthly-cap 429
+  // GoUsageLimitError, which surfaces as an error event, not silence). Walk the per-tier
   // fallbackModels array in order, then the global FALLBACK tail, spawning each available model
   // until one produces output; merge usage/elapsed/tools across all hops. Mirrors upstream
-  // "auto-trigger on rate-limit/overload" detection — empty-output is the Z-AI manifestation; live
-  // 429/529 detection is deferred (PORT-PLAN-v0.40.md ③). Previously this tried exactly ONE fallback.
+  // "auto-trigger on rate-limit/overload" detection — empty-output is the Z-AI manifestation; the
+  // in-band-error half of live 429/529 detection (PORT-PLAN-v0.40.md ③) shipped 2026-08-16.
+  // Previously this tried exactly ONE fallback.
   // Edit 7: a timed-out dispatch ABORTs the fallback chain — retrying won't help a hung model.
   // (dispatchTimedOut breaks AFTER the first timeout, so worst-case wall-clock = timeoutMs × the
   // number of fallback candidates that hang before one succeeds or all are tried — not a per-dispatch budget.)
-  if (!dispatchTimedOut && output.length === 0 && !signal?.aborted) {
+  if (spawnFailedForFallback(output.length, primary.inbandError, dispatchTimedOut) && !signal?.aborted) {
     const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG).filter(isAvail);
     if (candidates.length > 0) {
       const exhaustedFrom = modelFlag;
@@ -446,7 +452,8 @@ export async function resolveAndSpawn(
         toolCount += fbResult.toolCount;
         usage = mergeUsage(usage, fbResult.usage);
         if (fbResult.timedOut) { dispatchTimedOut = true; break; } // ABORT on timeout
-        if (fbResult.output.length > 0) {
+        // A hop that ALSO errored in-band (e.g. its own 429) is NOT success — keep walking.
+        if (!spawnFailedForFallback(fbResult.output.length, fbResult.inbandError, false)) {
           output = fbResult.output;
           code = fbResult.code;
           break;
@@ -455,12 +462,12 @@ export async function resolveAndSpawn(
       downshiftedFrom = exhaustedFrom;
       source = "downshift-exhausted";
       if (output.length > 0) {
-        rationale = `${exhaustedFrom} returned empty (likely quota exhausted) → retried with ${retriedWith.join(" → ")}`;
+        rationale = `${exhaustedFrom} failed (empty output or in-band error — likely quota/limit) → retried with ${retriedWith.join(" → ")}`;
         if (ctx.hasUI) ctx.ui.notify(`⚠ ${exhaustedFrom} exhausted → retried with ${retriedWith.join(" → ")}`, "info");
       } else {
-        output = `${exhaustedFrom} and fallback${retriedWith.length > 1 ? "s" : ""} ${retriedWith.join(", ")} all returned empty. Check quota or run /tiers to verify model availability.`;
+        output = `${exhaustedFrom} and fallback${retriedWith.length > 1 ? "s" : ""} ${retriedWith.join(", ")} all failed (empty output or in-band error). Check quota or run /tiers to verify model availability.`;
         code = 1;
-        rationale = `all of ${[exhaustedFrom, ...retriedWith].join(" → ")} returned empty`;
+        rationale = `all of ${[exhaustedFrom, ...retriedWith].join(" → ")} failed (empty or in-band error)`;
       }
     }
   }
