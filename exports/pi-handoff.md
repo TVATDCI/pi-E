@@ -1,42 +1,46 @@
-# Pi Handoff — pi 0.84.2 update + 4-layer keybinding map + README syncs (2026-08-16)
+# Pi Handoff — davidondrej skills absorption + guard + web access; pi-as-daily-driver progress (2026-08-16)
 
-**Written at:** 2026-08-16T14:01:00Z
-**Pi session:** 01a00a57-6c7b-7254-abb4-56cdc4fb5a9b
-**Original intent:** Check the "pi update 0.84.2" reminder against the current workflow before applying.
+**Written at:** 2026-08-16T23:39:24Z
+**Pi session:** 2026-08-16T14-08-02-225Z_01a00ae6-a2b1-7d80-8557-007b1d1a97d7 (+ restarts)
+**Original intent:** explore /home/vladi/developer/davidondrej-skills/skills via find-skills, then validate→absorb what fits pi.
 
 ## Summary
-Updated pi 0.84.1→0.84.2 after a compatibility pre-check (extension seams untouched; 16/16 test suites green post-update; `pi update --extensions` confirmed N/A — local extensions are source files, not packages). Resolved the one real conflict the update introduced: pi's new transcript search defaulted to ctrl+shift+f, which ghostty consumes; rebound to ctrl+alt+f, enabled pi fullscreen mode, live-verified search end-to-end. Mapped the full 4-layer key-claiming stack (ghostty→herdr→opencode/pi) with local evidence, correcting two misattributions along the way (opencode ctrl+x IS a true leader; ctrl+enter is ghostty's fullscreen, not herdr's). Validated and synced both READMEs (dotfiles: 4 drifts; ~/.pi/agent: 8 drifts incl. tier-table rebuild from live tier-map.ts data).
+Full absorption cycle executed: 48-skill repo explored → candidates/rejects verdict → oracle second opinion via herdr-collab lane (GO-WITH-CHANGES) → D1–D5 plan → executed + review-looped (2 rounds) + committed. pi gained a tested command-guard extension, 4 new skills (git-worktree, decisions, pi-web-search, research-prompt), a skill-creator upgrade, herdr-collab v0.2.2, real web access (pi-web-access), and a live-verified 429-fallback fix in dispatch orchestration. ~/dotfiles adopted the shared denylist + herdr-collab (new agents/ tree, ghostty-pattern symlinks). Operator articulated the umbrella model: dotfiles → ghostty/herdr/pi/opencode, with pi being developed into the daily driver inside herdr (in progress, not settled).
 
 ## Files touched
-- `~/.pi/agent/README.md` — 8 drift fixes (pi 0.84.2, glm-5.3@high, auth keys opencode-go not openrouter, tier table rebuilt from tier-map.ts data, structure tree +skills/scripts/compaction/prompt/lib/budgets/security/tests, test-count 16, stray `---READ` artifact removed, date) — commit `d7d551c`
-- `~/dotfiles/README.md` — 4 drift fixes (ADR count 7→6 no phantom gap-closure, herdr scope: only config.toml symlinked / layouts+recipes consumed in place, sisyphus-ADR location claim corrected, .vscode added) — commit `f3b8099`
-- `~/.pi/agent/keybindings.json` — NEW: `{"tui.altScreen.search": ["ctrl+alt+f"]}` — commit `b9ee716` (operator)
-- `~/.pi/agent/settings.json` (gitignored) — `tuiMode: "fullscreen"` added via /settings
-- memory store (store.jsonl) — 6 facts: verify_stack_answers_local_evidence, umbrella_stack_daily_driver (pi-daily-driver = PLANNED ONLY, not decided), fullscreen_stack_keybinding_map (corrected ctrl+enter attribution), key_handling_model_per_layer, herdr_prefix_stays_ctrl_b, pi_0842_update_completed
+- ~/.pi/agent — NEW: extensions/command-guard.ts, extensions/lib/command-guard-core.ts, extensions/tests/command-guard.test.ts (119/119), skills/{git-worktree,decisions,pi-web-search,research-prompt}/SKILL.md; MODIFIED: extensions/orchestration-engine/{spawn.ts,spawn-outcome.ts} (+ tests 15/15), skills/skill-creator/SKILL.md, README.md, settings.json (pi-web-access), .gitignore-adjacent npm/.gitignore now tracked; exports/{absorption-plan-davidondrej.md,absorption-oracle-review.md}. Zone.Identifier junk removed.
+- ~/dotfiles — NEW: agents/hooks/dangerous-patterns.txt, agents/skills/herdr-collab/ (commit 3c7c3a7).
+- ~/.agents — symlinks into dotfiles (hooks + herdr-collab).
+- pi commits: d355973, 250d48c, 91e8dea, 97d8488, 246b9bf (+ this handoff commit).
 
 ## Decisions made
-- Apply pi 0.84.2 — pre-checked compatibility: upstream-adapter seams (input.source, dialog API) untouched; triggerTurn fix doesn't affect mini-task-tracker; agent frontmatter comma-strings still valid. nanoid DoS fix + nanoid-adjacent security was a plus.
-- Search rebind Option A (pi-side, ghostty untouched) — operator chose keeping terminal-wide ctrl+shift+f muscle memory; ctrl+alt+f verified unclaimed by ghostty AND herdr AND (per-pane) opencode.
-- Keyboard layout FROZEN — herdr prefix stays ctrl+b; operator explicitly declined all changes after evidence review; recorded "do not resurface prefix-change proposals uninvited".
-- No pi version pin in dotfiles README — validated as intentional (ADR-0006 self-versioned refs; doctor.sh reads `pi --version` dynamically). The update event needed no dotfiles edit.
-- Accountability: after I answered opencode's ctrl+x from memory (wrong), operator set a hard rule — all stack-layer answers must be verified against LOCAL evidence (config file / binary grep / docs) before asserting. Stored as constraint; changed behavior for the rest of the session.
+- D1 GO command guard; D3 shared patterns at ~/.agents/hooks, dotfiles-owned — one tuning point, matches source design; asymmetry vs sisyphus-gates is deliberate (seatbelt vs policy gate).
+- D2 absorb git-worktree (tool-agnostic core; Cursor ~15% stripped). D4 take decisions (manual-only; pi honors disable-model-invocation — verified). D5 herdr sharp edges went into herdr-collab skill (shared substrate).
+- effective-agent-skills MERGED into skill-creator (dedupe-then-compress, ~33 lines), not installed alongside — two authoring skills = routing collision.
+- pi-web-access installed after sis lane review (low-risk, kills lane round-trips, no duplication); keyless first (150/day), EXA_API_KEY only if it pins.
+- Division of labor ratified: pi = breadth web, opencode = depth (Context7, cross-repo, blocked sites, synthesis). Paid keys in ONE stack.
 
 ## Dead ends
-- herdr prefix ctrl+b→ctrl+X — REJECTED with evidence: `"leader": "ctrl+x"` is explicitly set in ~/.config/opencode/tui.json; herdr claiming ctrl+X would starve the entire <leader>* family (~16 chords: models m, agents a, sessions n/l, compact c, status s, theme t, sidebar b, timeline g, copy/undo/redo, conceal h, editor e, export x, quit q, quick-switch 1-9) inside herdr panes, plus pi's ctrl+x copy/clear binds. Structural rule discovered: ANY chord used as herdr prefix is dead to every app in every pane — pick the chord that costs least, and ctrl+X costs the most. Operator withdrew the whole idea.
-- F12 as alternative herdr prefix — technically clean (verified unclaimed across ghostty 72 binds, herdr defaults, opencode tui.json+bundle, pi keybindings.md) but operator declined ANY rebind ("stays all as it is").
-- `pi extensions list` from agent bash — HANGS (interactive TUI command blocks outside a TTY; cost a 6-minute stall this session). For package questions use `pi update --help` or docs/packages.md instead.
-- `pi update --extensions` — investigated, confirmed N/A: pi's "extensions" there = installed npm/git packages under ~/.pi/agent/npm/; our 18 extensions are local source files loaded at startup, never package-managed. The "Extensions are skipped" notice is expected, not a gap.
+- "Operation aborted" during E2E guard probe — was the operator's own mini-damage-control aborting the NESTED pi (force-push BLOCK, mode=abort), not a guard fault. Discriminator-probe technique: use an uninstalled password-manager CLI so guard-failure = harmless command-not-found; NEVER probe with `gh auth token` (failure prints a real token).
+- spawn.ts mid-fix corruption: a malformed edit left a broken function (helper body fused into loadPersona). Caught by immediate post-edit syntax checks, repaired; round-2 reviewer verified clean. Lesson: verify edit results immediately when edits share anchors.
+- One davidondrej herdr edge is STALE on herdr 0.8.0 ("pane read --lines below viewport → empty" does NOT reproduce; probed --lines 1/5/10/42). Probes before enshrining third-party claims — the local-evidence rule paid off.
+- reviewer-security `deep` dispatch 429'd terminally pre-fix — root cause: fallback gate only fired on EMPTY output; in-band error text makes output non-empty. Fixed (spawnFailedForFallback), live-verified opencode-go→zai glm-5.3.
+- Lane prompt --wait timed out at 6min while oracle was mid-review (working ≠ stalled). Anti-reflex rule: agent get + read BEFORE any input decision.
 
 ## Incomplete work
-- `extensions/orchestration-engine/tier-map.ts` line 186 comment still says "7 of 10 categories Z-AI-plan-primary" — contradicts its own data (6 of 10; deep moved to opencode-go/glm-5.3 on 2026-08-14). One-line comment fix flagged but deliberately kept out of the docs commit (code file). pi-side follow-up.
-- Live pi sessions still on 0.84.1 code until restart — by design non-disruptive; this close + operator restart resolves it.
+- herdr-collab description fix (audit finding: how-summary + missing Do-NOT-use-for boundary) — one dotfiles commit, deliberately pending operator timing.
+- pi-custom-model skill still parked (trigger: next scoped-models/tier-map session; re-probe bundled-models-list path then).
+- Lane dirs /tmp/herdr-collab/{absorb-davidondrej,pi-daily-driver}/ — pi created them; pi cleans them next session or on request (sis-response.md worth archiving first if wanted).
+- planning/ PLAN docs lack SHIPPED/SUPERSEDED status headers (flag-only nicety).
 
 ## Proposed bd facts
-- scope=global | category=constraint | key=stack_key_claims | value="4-layer key map (verified 2026-08-16, local evidence): ghostty consumes ctrl+shift+f (custom) AND ctrl+enter (ghostty DEFAULT) = both toggle ghostty WINDOW fullscreen; ctrl+enter is NOT herdr's — herdr never receives it. herdr prefix ctrl+b shadows opencode ctrl+b session_background + pi cursor-left inside panes (arrow-key fallback works). opencode leader = ctrl+x (tui.json). pi transcript search = ctrl+alt+f, only inside pi fullscreen (tuiMode setting)."
-- scope=global | category=decision | key=keyboard_layout_final | value="Stack keyboard layout frozen 2026-08-16: herdr prefix stays ctrl+b. ctrl+X rejected (is opencode's leader — claiming it kills ~18 <leader> chords in panes); F12 clean but declined. Do not resurface prefix-change proposals uninvited."
-- scope=global | category=exact | key=pi_version | value="pi 0.84.2 (updated from 0.84.1 2026-08-16; 16/16 extension test suites green; search rebound to ctrl+alt+f; tuiMode fullscreen). opencode stays HELD at 1.17.12 pending PR anomalyco/opencode#40472."
+- scope=global | category=constraint | key=lane_citation_contract | value="Lane research claims carry provider+URL per load-bearing finding so the peer spot-verifies instead of re-searching (ratified pi+sis 2026-08-16); confirmed/inference/unresolved separated, no fake consensus."
+- scope=global | category=constraint | key=web_division_of_labor | value="pi handles breadth web research (keyless Exa 150/day, news/blogs/forums/release notes/GitHub reads); opencode/sisyphus handles depth (Context7, cross-repo code search, blocked/anti-bot sites, multi-source synthesis). Paid keys live in ONE stack's config."
+- scope=global | category=dependency | key=shared_command_denylist | value="~/.agents/hooks/dangerous-patterns.txt is a shared catastrophic-command denylist (32 POSIX-ERE, Linux), owned by ~/dotfiles/agents (symlinked), re-read per call by pi's command-guard. Deliberate asymmetry vs sisyphus-gates stands; an opencode-side consumer is possible later if ever wanted."
+- scope=global | category=exact | key=pi_web_access_install | value="pi runs pi-web-access v0.23.0 (keyless Exa: 3 QPS / 150 calls/day; web_search always workflow:none). Installed 2026-08-16 after sis review; add EXA_API_KEY only if the 150/day ceiling pins."
 
 ## Next steps for opencode
-- Review/promote the three proposed bd facts above (stack_key_claims is the load-bearing one — the ctrl+enter/ctrl+b shadow facts affect every opencode session inside herdr panes).
-- pi-side follow-up exists (tier-map.ts stale comment) — pi will handle; nothing blocking sisyphus.
-- No cross-agent work was mid-flight this session.
+- Review/promote the proposed bd facts above (Step 5); the citation contract + division of labor are the load-bearing ones for future lanes.
+- Note herdr-collab is now v0.2.2 with probe-verified sharp edges (send-text no-submit + separate enter for TUI composers; C0 bytes erase typed text; foreground_cwd vs frozen cwd; verify submit by lifecycle flip, never content-change).
+- pi's herdr-collab reviews (sis-review-v0.1/v0.2) moved with the skill into ~/dotfiles/agents/skills/herdr-collab/reviews/.
+- pi-as-daily-driver development continues (operator-driven, inside herdr); pi's repo is clean at 246b9bf with this handoff on top.
