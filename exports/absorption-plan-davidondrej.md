@@ -97,7 +97,7 @@ Conditional: yolo-launch safety line if C2 lands.
 |---|---|---|
 | `git-worktree` | **D2 = absorb** | DONE — `~/.pi/agent/skills/git-worktree/SKILL.md` (pi-native adaptation; Cursor ~15% stripped; herdr-worktree boundary in description) |
 | `decisions` | **D4 = take** | DONE — `~/.pi/agent/skills/decisions/SKILL.md` (manual-only via `disable-model-invocation`, verified honored) |
-| `research-prompt` | named reject-for-now | NOT DeepAPI-coupled (verdict correction); revisit when pi-side deep-research flows exist |
+| `research-prompt` | **ABSORBED 2026-08-17** | woke early: pi-web-access installed (sis lane review, operator GO) → now ~/.pi/agent/skills/research-prompt with provider+URL citation contract |
 | `create-readonly-db-role` | named reject | portable pattern, no current Postgres in stack |
 | `teach` | named reject | multi-file violates lean one-file convention; opencode-side teach exists → divergence risk |
 | `pi-custom-model` | defer + revisit trigger | next scoped-models/tier-map session; re-probe bundled-list path (version-drift prone) |
@@ -105,7 +105,7 @@ Conditional: yolo-launch safety line if C2 lands.
 | `distribute-skill-to-all-agents` | named reject | doctrine-reinforcing: symlink layout = anti-pi-independence |
 | `read-all-adrs` | named reject | unfinished stub |
 | `brain-to-docs` | named reject | same family turf as ask-then-build |
-| `pi-web-search` | reject stands + revisit trigger | precision fix: Exa path is zero-config; load-bearing fact = pi-web-access NOT installed. Resurrects if it ever installs. |
+| `pi-web-search` | **ABSORBED 2026-08-17** | woke: pi-web-access v0.23.0 installed + E2E-probed (keyless Exa, nested pi); now ~/.pi/agent/skills/pi-web-search, DeepAPI section dropped (no key), keyless limits (3 QPS/150/day) + lane division of labor documented |
 
 ## Execution log (2026-08-16)
 
