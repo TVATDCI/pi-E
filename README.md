@@ -13,9 +13,9 @@ This is **not** a showcase. It's a single-operator production config: narrow and
 | **Pi version**         | `0.84.2` (npm: `@earendil-works/pi-coding-agent`)                               |
 | **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (quota-based, **no** balance fallback)       |
 | **Default model**      | `glm-5.3` @ `high` thinking, theme `encom`                                      |
-| **Extensions**         | 18 active top-level + 6 subpackages (`orchestration-engine/`, `memory/`, `budgets/`, `security/`, `lib/`, `tests/` — 0 disabled) — incl. chain widget, acceptance gates, clarify, background dispatch, compaction capture |
+| **Extensions**         | 19 active top-level + 6 subpackages (`orchestration-engine/`, `memory/`, `budgets/`, `security/`, `lib/`, `tests/` — 0 disabled) — incl. chain widget, acceptance gates, clarify, background dispatch, compaction capture, command guard |
 | **Agents**             | 15 (7 personas + 8 Matrix operatives; 0 model pins)                             |
-| **Governance**         | 13 ADRs in `decisions/`; 6 pi-native skills in `skills/`                        |
+| **Governance**        | 13 ADRs in `decisions/`; 10 pi-native skills in `skills/`                       |
 | **Secondary providers** | `opencode` + `opencode-go` (FREE/external tiers — `quick` & `git-commit-message` primaries, `deep` & `ultrabrain` primaries, many fallbacks) |
 
 ---
@@ -61,10 +61,11 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── mini-dc-rules.yaml        # GLOBAL safety floor (deny-additive; projects ADD, can't REMOVE)
 ├── tsconfig.json
 ├── bin/                      # vendored CLIs: fd, rg
+├── npm/                      # pi-managed extension packages (pi-web-access)
 ├── themes/encom.json         # the one theme
 ├── agents/                   # 15 agents: 7 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
-├── skills/                   # 6 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator)
+├── skills/                   # 10 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt)
 ├── scripts/                  # bootstrap.sh, run-tests.ts, rotate-memory-md.ts, install-pre-commit.sh
 ├── agent-chain.yaml          # global chain definitions (deny-additive)
 └── extensions/
@@ -93,6 +94,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── statusline-encom.ts    # encom statusline footer: segment registry, config/presets, customItems, /encom-* commands
     ├── mini-task-tracker.ts   # `task` tool + widget (bd replacement)
     ├── mini-damage-control.ts # safety hooks (fail-closed + deny-additive)
+    ├── command-guard.ts       # catastrophic-command seatbelt for bash (fail-open; patterns in ~/.agents/hooks, dotfiles-owned)
     ├── session-notes.ts       # add_note + /note widget
     ├── mini-purpose-gate.ts   # boot intent gate
     ├── prompt-coordinator.ts  # SOLE before_agent_start registrant — composes system-prompt sections in fixed order, dedups memory+bridge overlap
@@ -104,8 +106,8 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── herdr-agent-state.ts   # herdr multiplexer integration (vendor-managed; pane state via unix socket)
     ├── budgets/               # turn/tool/usage budget primitives + resolver (pure library, PORT-PLAN ①)
     ├── security/              # yaml-merge.ts — deny-additive YAML layer-merge as versioned security boundary (D5)
-    ├── lib/                   # shared: prompt-hash.ts, upstream-adapter.ts (cross-version seam shim, D6)
-    └── tests/                 # 16 test files (node --experimental-strip-types; all green on 0.84.2)
+    ├── lib/                   # shared: prompt-hash.ts, upstream-adapter.ts (cross-version seam shim, D6), command-guard-core.ts (pure guard core)
+    └── tests/                 # 17 test files (node --experimental-strip-types; all green on 0.84.2)
 ```
 
 ---
@@ -117,7 +119,8 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 | `orchestration-engine/index.ts`                                            | 500 | `dispatch` (functional-agent resolution) + `/team` + `/team-list` + `/routing-stats` (F6) + `/tiers` (F4) + `before_agent_start` Cost-Discipline inject |
 | `orchestration-engine/tier-map.ts`                                         | 322 | Category→model map (sole model authority), peak/promo/availability logic, resolver                                                                      |
 | `orchestration-engine/agent-map.ts`                                        | 22  | Category→functional-agent DEFAULT + `resolveFunctionalAgent()` (Tier 2)                                                                                 |
-| `orchestration-engine/spawn.ts`                                            | 361 | `resolveAndSpawn` + stable sessions + rotation + usage capture + Esc/signal-abort + `clarify-override` (model/thinking) + `!signal?.aborted` guard (no false quota-warning on /stop) |
+| `orchestration-engine/spawn.ts`                                            | 510 | `resolveAndSpawn` + stable sessions + rotation + usage capture + Esc/signal-abort + `clarify-override` (model/thinking) + cross-provider fallback walk on **empty output OR in-band error** (PORT-PLAN ③ live 429s, live-verified 2026-08-16) |
+| `command-guard.ts` + `lib/command-guard-core.ts`                            | 109 | Catastrophic-command seatbelt on the bash tool: whole-handler fail-open, `{block, terminate}` on match, POSIX-ERE→JS conversion (`[:space:]`→`\s`, multiline), patterns re-read per call from `~/.agents/hooks/dangerous-patterns.txt` (dotfiles-owned; 119/119 tests) |
 | `chain-runner.ts`                                                          | 272 | Shared `loadChains()` + `runChainByName()` (chain consumers) + overrides + acceptance wiring (inject/parse/strip/verify)                               |
 | `agent-chain.ts`                                                           | 463 | `run_chain` (sequential pipelines + `clarify`/`background` params) + `/chain` + `/chain-list` + `/chain-clarify` + `/stop` + **chain widget** (rich per-step line, adaptive tiers, spinner) + background dispatch (registry, cap, toasts) |
 | `chain-clarify.ts`                                                         | 394 | Clarify-before-launch overlay (`ctx.ui.custom`): preview/edit task + per-step model/thinking/prompt. Pickers are internal sub-modes; prompt edit via exit-reopen `ctx.ui.editor` |
@@ -249,7 +252,7 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
 | `artistry`           | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1                              |
 | `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | opencode-go/minimax-m2.7 → zai/glm-4.7           |
 
-Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary model returns an empty response (e.g., Z-AI Coding Plan quota exhausted). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
+Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary fails **soft** (empty response — Z-AI plan quota has no balance fallback) **or loud** (in-band agent error, e.g. opencode-go monthly-cap `429 GoUsageLimitError` — PORT-PLAN ③ live-error half, live-verified `opencode-go/glm-5.3 → zai/glm-5.3` 2026-08-16). A fallback hop that also errors in-band keeps walking; a timeout aborts the chain (Edit 7). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
 
 ---
 
@@ -275,13 +278,22 @@ Sequential agent pipelines from `agent-chain.yaml` (deny-additive: projects ADD 
 
 ---
 
-## Safety model (`mini-damage-control`)
+## Safety model (two layers)
+
+### `mini-damage-control` — policy gate (fail-closed)
 
 - **Fail-closed by default** — no rules loaded → bash DENIED (never open).
 - **Deny-additive global floor** — `mini-dc-rules.yaml` is a floor projects can _extend_ but never _weaken_.
 - **3 rule categories** implemented: `bashToolPatterns` (rm/git/sql/dd/mkfs/aws/gcp…) + `zeroAccessPaths` (secrets) + `readOnlyPaths` (lockfiles/build output). `git push`/`git commit` ASK; recursive `rm` hard-blocks.
 - **`/dc-mode abort|continue`** — inline toggle (disler splits this into two extensions; we fold it into one).
 - **Remaining gap (cherry-pick target):** no `noDeletePaths` category yet. Cloud-native patterns (aws/gcp/firebase/vercel) + `readOnlyPaths` are **shipped** — see `mini-dc-rules.yaml`.
+
+### `command-guard` — catastrophic seatbelt (fail-open)
+
+- **Different doctrine, deliberately:** mini-dc is a strict policy gate (fail-closed, ASKs on `git commit`); command-guard is a catastrophic-only **seatbelt against accidents** — `rm` at root/home tree, dd/mkfs, fork bombs, `curl|sh`, force-push, remote-delete, reflog/gc-prune destruction, `gh` destructive set, password-manager CLIs. **Not** a sandbox; explicit asymmetry vs opencode's sisyphus-gates.
+- **Fail-open on adapter self-error** — a broken/missing patterns file must never brick bash (whole handler inside try; pi blocks the tool on an uncaught handler throw, so this matters). Blocked calls return `{block, terminate}` — framework-level no-retry.
+- **Patterns:** `~/.agents/hooks/dangerous-patterns.txt` — 32 POSIX-ERE lines, **owned by `~/dotfiles/agents/`** (umbrella adoption 2026-08-16, symlinked — ghostty-config pattern), re-read per call so edits apply instantly. Linux port incl. `/home` tree + `/home/*` glob.
+- **Tests:** 119/119 (`extensions/tests/command-guard.test.ts`) incl. false-positive allow cases; E2E-proven via nested-pi probe. Force-push is **double-gated** (mini-dc BLOCK + guard).
 
 ---
 
@@ -309,6 +321,13 @@ Structured, persistent cross-session memory. The agent saves facts/constraints/d
 ## Environment integrations
 
 **System dependencies:** `w3m` (HTML→text for the `fetch` tool — without it, `fetch` silently returns empty), plus `rg` + `fd` (vendored in `bin/`). Install: `apt-get install w3m`.
+
+### Web access (two layers)
+
+1. **Built-in keyless** (`web-research.ts`) — Wikipedia/DDG-instant/npm/GitHub search + w3m fetch. Always on, no quota.
+2. **`pi-web-access`** (npm extension, installed 2026-08-17) — real web research: `web_search` (keyless Exa tier, **3 QPS / 150 calls/day**), `code_search`, `fetch_content` (PDFs → `~/Downloads`; GitHub URLs clone locally), `get_search_content`. **Always pass `workflow: "none"`** (skips the interactive curator). Usage discipline lives in the `pi-web-search` skill (effort tiers ≥2/≥4/≥8 queries; citation contract: provider+URL per load-bearing claim).
+
+**Lane division of labor** (sis-ratified): pi = breadth (lookups, news/blogs/forums, release notes, GitHub reads); opencode/sisyphus = depth (Context7, cross-repo code search, blocked/anti-bot sites, multi-source synthesis). Paid keys live in ONE stack's config.
 
 Two extensions wire pi into its host environment. Both are load-bearing for *this* operator's laptop setup and are the first things to understand before changing them.
 
@@ -365,7 +384,9 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 - F3 runtime retry with per-tier opencode fallback (2026-07-11). `resolveAndSpawn` retries once on empty primary output; surfaced in `/routing-stats` as `downshift-exhausted`.
 - Structured memory extension (2026-07-13). `memory_remember` tool + `before_agent_start` injection. 3-tier design (pure functions → JSONL store → Pi wiring) with secret scan, provenance write-guard, dedup, atomic writes. 147 assertions + live-verified.
 - **Persistent sub-agent sessions + usage + functional agents** (2026-07-15, “the bridge”). Tier 0: stable `{agent,project}` session files (`sub-<agent>--<gitRoot>.jsonl`) + rotation at 100KB (not truncation) + Esc/signal-abort + per-`{agent,project}` mutex (delete-only-if-tail). Tier 1: `message_end` usage capture (cost/tokens/turns) into `dispatch-log` + a `▌ usage` view in `/routing-stats`; latent error-path bug fixed (`ev.message.stopReason`, not `ev.stopReason`). Tier 2: `agent-map.ts` auto-resolves a Matrix operative per category when `agent=` is omitted (explicit agent always wins). 7 personas + 8 operatives; 0 model pins.
-- **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + batched toasts + cap 3); **fleet view** (`/chain-status`); **transcript tail** (`/chain-transcript`); **curated handoff** (`context:` param — briefed delegates); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per feature; the absorbed suites now live in `extensions/tests/` (16 files, all green on 0.84.2) alongside the colocated memory (147 assertions), routing-stats (13), and web-research (42) suites.
+- **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + batched toasts + cap 3); **fleet view** (`/chain-status`); **transcript tail** (`/chain-transcript`); **curated handoff** (`context:` param — briefed delegates); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per feature; the absorbed suites live in `extensions/tests/` (16 files at the time; 17 now, all green on 0.84.2) alongside the colocated memory (147 assertions), routing-stats (13), and web-research (42) suites.
+- **davidondrej/skills absorption** (2026-08-16/17, validate→absorb + oracle lane review + 2-round review-loop) — command-guard seatbelt (above); skills: git-worktree (parallel-agent discipline), decisions (manual-only retrospective probe), pi-web-search + research-prompt (woke when pi-web-access installed; effort tiers + sis-ratified citation contract); skill-creator upgraded (frontmatter-reality, colon gotcha, routes-not-how, strictness ladder, Pattern A/B, third-party-skill security checklist); herdr-collab v0.2.2 probe-verified sharp edges (skill now dotfiles-owned with the denylist under `~/dotfiles/agents/`).
+- **Live-error fallback** (PORT-PLAN ③, 2026-08-16) — the dispatch fallback chain now walks on LOUD in-band 429s, not just empty output; live-verified `opencode-go/glm-5.3 → zai-coding-cn/glm-5.3` mid-review-loop. Pure gate `spawnFailedForFallback` in `spawn-outcome.ts` (15/15 tests incl. the 429 regression).
 
 **Deferred by design (not gaps):** F1 LLM intent-classifier (🔒 CLOSED — explicit-category chosen; reopen only on `/routing-stats` evidence). F2 peak-hour auto-downshift — still open.
 
@@ -380,4 +401,4 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 
 ---
 
-_Living doc — update when topology changes. Last revised: 2026-08-16._
+_Living doc — update when topology changes. Last revised: 2026-08-17._
