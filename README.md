@@ -62,12 +62,20 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── tsconfig.json
 ├── bin/                      # vendored CLIs: fd, rg
 ├── npm/                      # pi-managed extension packages (pi-web-access)
+├── keybindings.json          # custom binds (ctrl+shift+f → ctrl+alt+f transcript search)
+├── teams.yaml                # rosters: matrix (8 operatives) / all (15) / review / build / research
+├── PORTABILITY.md            # per-machine recreate notes (what git ignores and why)
 ├── themes/encom.json         # the one theme
 ├── agents/                   # 15 agents: 7 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
 ├── skills/                   # 10 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt)
+├── prompts/                  # prompt templates (design, oracle, survey, verify)
+├── planning/                 # PLAN docs (improvement-plan, reverse-bridge-writer, w8b-store-jsonl)
+├── exports/                  # cross-session artifacts (pi-handoff, absorption plan + oracle review)
 ├── scripts/                  # bootstrap.sh, run-tests.ts, rotate-memory-md.ts, install-pre-commit.sh
 ├── agent-chain.yaml          # global chain definitions (deny-additive)
+├── assets/images/            # pi-logo art (ascii/svg variants)
+├── images/                   # pi-logo png/svg
 └── extensions/
     ├── orchestration-engine/ # the dispatch tool + tier-map + functional-agent map + observability + team/chain (the core)
     │   ├── index.ts                  # dispatch + /team + /team-list + /routing-stats + /tiers + Cost-Discipline hook
@@ -208,7 +216,7 @@ Specialist system prompts in `agents/*.md` — **0 of 15 pin a `model:` frontmat
 | `seraph`     | `git-commit-message`              | 32 lines | read, bash, grep                          | commit protection — seals the work                                          |
 | `researcher` | `research`                        | 40 lines | read, grep, find, ls, bash, search, fetch | web research — keyless composite (Wikipedia/DDG-IA/npm/GitHub + docs-fetch) |
 
-**Removed:** `builder` (role split across `trinity` + `architect`) and `explore` (evolved into `keymaker`). **Rosters** (`teams.yaml`): `matrix` (the 8 operatives), `all` (all 14), plus `build` / `research` / `review`. Generated variants live in `generated-reviewers` with `review_status: pending`.
+**Removed:** `builder` (role split across `trinity` + `architect`) and `explore` (evolved into `keymaker`). **Rosters** (`teams.yaml`): `matrix` (the 8 operatives), `all` (all 15), plus `build` / `research` / `review`. Generated variants live in `generated-reviewers` with `review_status: pending`.
 
 ---
 
