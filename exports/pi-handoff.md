@@ -1,46 +1,42 @@
-# Pi Handoff — herdr skills install → 0.8.0 update → first live pi⇄sis collab lane, protocol v0.2.1 ratified (2026-08-15)
+# Pi Handoff — pi 0.84.2 update + 4-layer keybinding map + README syncs (2026-08-16)
 
-**Written at:** 2026-08-15T03:20:00Z
-**Pi session:** 01a0029c-931b-7e1f-9979-3fcb399a3083
-**Original intent:** Operator installed the herdr agent skill via `npx skills` and asked to verify the install, then develop the workspace from the herdr docs and skill reference.
+**Written at:** 2026-08-16T14:01:00Z
+**Pi session:** 01a00a57-6c7b-7254-abb4-56cdc4fb5a9b
+**Original intent:** Check the "pi update 0.84.2" reminder against the current workflow before applying.
 
 ## Summary
-Verified the `npx skills` CLI installs into the shared `~/.agents/skills/` store (single copy, no per-agent duplicates despite the installer UI). Updated herdr 0.7.5→0.8.0 with live handoff, reinstalled the pi integration, and pinned the release-matched skill over the repo-HEAD copy. Built the `herdr-collab` cross-agent lane skill and validated it live: booted opencode/sisyphus in a sibling pane, ran two review rounds over the protocol draft, got sign-off, folded in the final nits as v0.2.1. Lane closed cleanly (pane + shared dir).
+Updated pi 0.84.1→0.84.2 after a compatibility pre-check (extension seams untouched; 16/16 test suites green post-update; `pi update --extensions` confirmed N/A — local extensions are source files, not packages). Resolved the one real conflict the update introduced: pi's new transcript search defaulted to ctrl+shift+f, which ghostty consumes; rebound to ctrl+alt+f, enabled pi fullscreen mode, live-verified search end-to-end. Mapped the full 4-layer key-claiming stack (ghostty→herdr→opencode/pi) with local evidence, correcting two misattributions along the way (opencode ctrl+x IS a true leader; ctrl+enter is ghostty's fullscreen, not herdr's). Validated and synced both READMEs (dotfiles: 4 drifts; ~/.pi/agent: 8 drifts incl. tier-table rebuild from live tier-map.ts data).
 
 ## Files touched
-- `~/.agents/skills/herdr/SKILL.md` — pinned to 0.8.0 binary-bundled copy via `herdr --skill` (repo-HEAD documented unimplemented semantics)
-- `~/.agents/skills/herdr-collab/SKILL.md` — NEW skill v0.2.1: pi⇄sis lane protocol (shared-store, symlinked into opencode)
-- `~/.agents/skills/herdr-collab/reviews/sis-review-v0.1.md`, `sis-review-v0.2.md` — archived review rounds
-- `~/.config/opencode/skills/herdr`, `skills/herdr-collab` — symlinks into the shared store (committed `30983f3`, pushed)
-- `~/.pi/agent/extensions/herdr-agent-state.ts` — written by `herdr integration install pi` (herdr-managed, v8; reports working/blocked/idle to the socket)
-- `~/.config/opencode/SYSTEM-NARRATIVE.md`, `COMPLETE-CODEBASE.md` — sis's own session-close docs (committed `1abb8d4`, pushed)
-- `~/Main-vault/log.md` — sis lane narrative (committed `ccd7066`, local only)
-- `/tmp/herdr-collab/` — lane channel dir, created and removed at close (contents archived first)
+- `~/.pi/agent/README.md` — 8 drift fixes (pi 0.84.2, glm-5.3@high, auth keys opencode-go not openrouter, tier table rebuilt from tier-map.ts data, structure tree +skills/scripts/compaction/prompt/lib/budgets/security/tests, test-count 16, stray `---READ` artifact removed, date) — commit `d7d551c`
+- `~/dotfiles/README.md` — 4 drift fixes (ADR count 7→6 no phantom gap-closure, herdr scope: only config.toml symlinked / layouts+recipes consumed in place, sisyphus-ADR location claim corrected, .vscode added) — commit `f3b8099`
+- `~/.pi/agent/keybindings.json` — NEW: `{"tui.altScreen.search": ["ctrl+alt+f"]}` — commit `b9ee716` (operator)
+- `~/.pi/agent/settings.json` (gitignored) — `tuiMode: "fullscreen"` added via /settings
+- memory store (store.jsonl) — 6 facts: verify_stack_answers_local_evidence, umbrella_stack_daily_driver (pi-daily-driver = PLANNED ONLY, not decided), fullscreen_stack_keybinding_map (corrected ctrl+enter attribution), key_handling_model_per_layer, herdr_prefix_stays_ctrl_b, pi_0842_update_completed
 
 ## Decisions made
-- Pin the binary-bundled skill, not repo-HEAD — doc must match the running binary; HEAD documents `agent_blocked` semantics 0.8.0's bundled copy doesn't have. Corollary hazard: `npx skills update` would clobber the pin back to HEAD.
-- Shared-file channel (`/tmp/herdr-collab/<topic>/`) is PRIMARY, pane reads are convenience — sis TUI runs alternate-screen, scrollback reads are lossy (sis finding, verified).
-- Review-class prompt timeouts ≥300000ms — sis delegates to slow tiers (Oracle/deep) and cannot answer before they finish; `working` ≠ stalled, never re-prompt while working.
-- Focus decisions stay with the operator — `agent read` doesn't mark tabs seen, so readers never need to steal focus.
-- Skills distribution model: one shared copy consumed via symlinks; "copy → N agents" in the installer UI is informational, nothing is written to per-agent dirs.
+- Apply pi 0.84.2 — pre-checked compatibility: upstream-adapter seams (input.source, dialog API) untouched; triggerTurn fix doesn't affect mini-task-tracker; agent frontmatter comma-strings still valid. nanoid DoS fix + nanoid-adjacent security was a plus.
+- Search rebind Option A (pi-side, ghostty untouched) — operator chose keeping terminal-wide ctrl+shift+f muscle memory; ctrl+alt+f verified unclaimed by ghostty AND herdr AND (per-pane) opencode.
+- Keyboard layout FROZEN — herdr prefix stays ctrl+b; operator explicitly declined all changes after evidence review; recorded "do not resurface prefix-change proposals uninvited".
+- No pi version pin in dotfiles README — validated as intentional (ADR-0006 self-versioned refs; doctor.sh reads `pi --version` dynamically). The update event needed no dotfiles edit.
+- Accountability: after I answered opencode's ctrl+x from memory (wrong), operator set a hard rule — all stack-layer answers must be verified against LOCAL evidence (config file / binary grep / docs) before asserting. Stored as constraint; changed behavior for the rest of the session.
 
 ## Dead ends
-- `herdr update --handoff` from inside a herdr pane — refused by design ("run outside herdr"); no socket-API escape hatch exists (api is snapshot/schema only). Stripping `HERDR_ENV` to fool the guard was rejected: deliberately bypassing a safety check that protects pane processes. Correct path: operator runs it outside, then reconnects the TUI (the client exits by design; panes survive).
-- "Installer copied the skill to 12 other agents" — FALSE assumption from the installer UI line; verified no per-agent copies or symlinks exist (checked ~/.codex, ~/.cursor, ~/.zed, ~/.warp, ~/.amp, ~/.claude, and opencode's skills dir mtime). One shared store is the real model.
-- Compound `rm -rf /tmp/herdr-collab && herdr pane close ...` — pi's own destructive-command gate aborted the ENTIRE compound including the pane close. Lesson: run destructive cleanup stepwise, non-destructive operations first, so a gate trip doesn't strand the lane close.
-- Operator's first commit script stopped after commit 1 of 3 (no error visible; reflog shows no second commit attempt). Resume-script pattern with idempotent `git diff --cached --quiet || commit` guards recovered it cleanly — reuse that pattern for multi-commit operator scripts.
+- herdr prefix ctrl+b→ctrl+X — REJECTED with evidence: `"leader": "ctrl+x"` is explicitly set in ~/.config/opencode/tui.json; herdr claiming ctrl+X would starve the entire <leader>* family (~16 chords: models m, agents a, sessions n/l, compact c, status s, theme t, sidebar b, timeline g, copy/undo/redo, conceal h, editor e, export x, quit q, quick-switch 1-9) inside herdr panes, plus pi's ctrl+x copy/clear binds. Structural rule discovered: ANY chord used as herdr prefix is dead to every app in every pane — pick the chord that costs least, and ctrl+X costs the most. Operator withdrew the whole idea.
+- F12 as alternative herdr prefix — technically clean (verified unclaimed across ghostty 72 binds, herdr defaults, opencode tui.json+bundle, pi keybindings.md) but operator declined ANY rebind ("stays all as it is").
+- `pi extensions list` from agent bash — HANGS (interactive TUI command blocks outside a TTY; cost a 6-minute stall this session). For package questions use `pi update --help` or docs/packages.md instead.
+- `pi update --extensions` — investigated, confirmed N/A: pi's "extensions" there = installed npm/git packages under ~/.pi/agent/npm/; our 18 extensions are local source files loaded at startup, never package-managed. The "Extensions are skipped" notice is expected, not a gap.
 
 ## Incomplete work
-- Workspace recipes proposed but not built: topology snapshot map, watchdog (pane wait-output gating), approval relay (agent wait --until blocked + notification show).
-- Toast delivery in herdr config.toml still off (dotfiles repo owns that file — needs a dotfiles commit).
-- herdr-collab v0.2.1 nits were folded in AFTER sis's sign-off (which approved v0.2) — a quick verify pass by sis at next session-begin would close the loop.
-- `~/.pi/agent/exports/` handoff commit pending operator authorization (see Next steps).
+- `extensions/orchestration-engine/tier-map.ts` line 186 comment still says "7 of 10 categories Z-AI-plan-primary" — contradicts its own data (6 of 10; deep moved to opencode-go/glm-5.3 on 2026-08-14). One-line comment fix flagged but deliberately kept out of the docs commit (code file). pi-side follow-up.
+- Live pi sessions still on 0.84.1 code until restart — by design non-disruptive; this close + operator restart resolves it.
 
 ## Proposed bd facts
-- scope=global | category=exact | key=skills_cli_shared_store | value="vercel-labs skills CLI (1.5.22) installs each skill ONCE into ~/.agents/skills/ (lockfile ~/.agents/.skill-lock.json); installer's 'copy -> N agents' line is informational — no per-agent copies or symlinks are created. pi auto-loads from the shared store; opencode needs a symlink into ~/.config/opencode/skills/ (pattern: ln -s ~/.agents/skills/<name> ~/.config/opencode/skills/<name>)."
-- scope=global | category=exact | key=herdr_update_runbook | value="herdr update --handoff must run OUTSIDE herdr (refuses in-pane); TUI client exits after handoff — reconnect with bare 'herdr', panes survive. After EVERY update: herdr integration install pi (rewrites ~/.pi/agent/extensions/herdr-agent-state.ts), then re-pin skill via herdr --skill > ~/.agents/skills/herdr/SKILL.md. HAZARD: npx skills update would clobber the pinned skill back to repo-HEAD."
+- scope=global | category=constraint | key=stack_key_claims | value="4-layer key map (verified 2026-08-16, local evidence): ghostty consumes ctrl+shift+f (custom) AND ctrl+enter (ghostty DEFAULT) = both toggle ghostty WINDOW fullscreen; ctrl+enter is NOT herdr's — herdr never receives it. herdr prefix ctrl+b shadows opencode ctrl+b session_background + pi cursor-left inside panes (arrow-key fallback works). opencode leader = ctrl+x (tui.json). pi transcript search = ctrl+alt+f, only inside pi fullscreen (tuiMode setting)."
+- scope=global | category=decision | key=keyboard_layout_final | value="Stack keyboard layout frozen 2026-08-16: herdr prefix stays ctrl+b. ctrl+X rejected (is opencode's leader — claiming it kills ~18 <leader> chords in panes); F12 clean but declined. Do not resurface prefix-change proposals uninvited."
+- scope=global | category=exact | key=pi_version | value="pi 0.84.2 (updated from 0.84.1 2026-08-16; 16/16 extension test suites green; search rebound to ctrl+alt+f; tuiMode fullscreen). opencode stays HELD at 1.17.12 pending PR anomalyco/opencode#40472."
 
 ## Next steps for opencode
-- At session-begin Step 4/5: surface this handoff, review + promote the two proposed bd facts via scripts/bd_remember.py.
-- Verify both skill symlinks resolve in opencode's skill listing (they were committed in 30983f3).
-- Optional 2-minute task: read ~/.agents/skills/herdr-collab/SKILL.md (now v0.2.1) and confirm the two sign-off nits (anti-reflex rule, --timeout disambiguation) landed as intended.
+- Review/promote the three proposed bd facts above (stack_key_claims is the load-bearing one — the ctrl+enter/ctrl+b shadow facts affect every opencode session inside herdr panes).
+- pi-side follow-up exists (tier-map.ts stale comment) — pi will handle; nothing blocking sisyphus.
+- No cross-agent work was mid-flight this session.
