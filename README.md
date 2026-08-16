@@ -4,19 +4,19 @@
 
 This is **not** a showcase. It's a single-operator production config: narrow and deep where it matters (routing economics, safety policy, specialist prompts, governance), intentionally thin everywhere else (1 theme, no cosmetic widgets).
 
----READ
+---
 
 ## At a glance
 
 |                        |                                                                                 |
 | ---------------------- | ------------------------------------------------------------------------------- |
-| **Pi version**         | `0.82.1` (npm: `@earendil-works/pi-coding-agent`)                               |
+| **Pi version**         | `0.84.2` (npm: `@earendil-works/pi-coding-agent`)                               |
 | **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (quota-based, **no** balance fallback)       |
-| **Default model**      | `glm-5.2` @ `medium` thinking, theme `encom`                                    |
-| **Extensions**         | 16 active (~8,300 LOC; 14 feature + 2 host hooks) + 2 disabled — incl. chain widget, acceptance gates, clarify, background dispatch |
+| **Default model**      | `glm-5.3` @ `high` thinking, theme `encom`                                      |
+| **Extensions**         | 18 active top-level + 6 subpackages (`orchestration-engine/`, `memory/`, `budgets/`, `security/`, `lib/`, `tests/` — 0 disabled) — incl. chain widget, acceptance gates, clarify, background dispatch, compaction capture |
 | **Agents**             | 15 (7 personas + 8 Matrix operatives; 0 model pins)                             |
-| **Governance**         | 13 ADRs in `decisions/`                                                         |
-| **Secondary provider** | `opencode` (FREE tier — `git-commit-message` category + gemini vision fallback) |
+| **Governance**         | 13 ADRs in `decisions/`; 6 pi-native skills in `skills/`                        |
+| **Secondary providers** | `opencode` + `opencode-go` (FREE/external tiers — `quick` & `git-commit-message` primaries, `deep` & `ultrabrain` primaries, many fallbacks) |
 
 ---
 
@@ -57,14 +57,16 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── AGENTS.md                 # lean always-on governance (every turn)
 ├── settings.json             # defaultProvider/Model/thinking, theme, skills path
 ├── models.json               # provider catalog overrides (currently empty — built-ins used)
-├── auth.json                 # provider keys: zai-coding-cn, opencode, openrouter
+├── auth.json                 # provider keys: zai-coding-cn, opencode, opencode-go
 ├── mini-dc-rules.yaml        # GLOBAL safety floor (deny-additive; projects ADD, can't REMOVE)
 ├── tsconfig.json
 ├── bin/                      # vendored CLIs: fd, rg
 ├── themes/encom.json         # the one theme
 ├── agents/                   # 15 agents: 7 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
-├── agent-chain.yaml        # global chain definitions (deny-additive)
+├── skills/                   # 6 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator)
+├── scripts/                  # bootstrap.sh, run-tests.ts, rotate-memory-md.ts, install-pre-commit.sh
+├── agent-chain.yaml          # global chain definitions (deny-additive)
 └── extensions/
     ├── orchestration-engine/ # the dispatch tool + tier-map + functional-agent map + observability + team/chain (the core)
     │   ├── index.ts                  # dispatch + /team + /team-list + /routing-stats + /tiers + Cost-Discipline hook
@@ -93,9 +95,17 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── mini-damage-control.ts # safety hooks (fail-closed + deny-additive)
     ├── session-notes.ts       # add_note + /note widget
     ├── mini-purpose-gate.ts   # boot intent gate
+    ├── prompt-coordinator.ts  # SOLE before_agent_start registrant — composes system-prompt sections in fixed order, dedups memory+bridge overlap
+    ├── prompt-observer.ts     # prompt-hash drift detector (agent_start; strips volatile blocks)
+    ├── compaction-capture.ts  # hooks session_compact → appends summary to memory.md before discard (narrative)
+    ├── compaction-extract.ts  # hooks session_compact → extracts structured facts → store.jsonl (inferred provenance)
+    ├── web-research.ts        # keyless search + fetch tools (Wikipedia/DDG-IA/npm/GitHub + w3m text)
     ├── bd-bridge.ts           # READ-ONLY sisyphus→pi memory bridge (before_agent_start; never writes bd)
     ├── herdr-agent-state.ts   # herdr multiplexer integration (vendor-managed; pane state via unix socket)
-    └── *.ts.disabled          # parked experiments
+    ├── budgets/               # turn/tool/usage budget primitives + resolver (pure library, PORT-PLAN ①)
+    ├── security/              # yaml-merge.ts — deny-additive YAML layer-merge as versioned security boundary (D5)
+    ├── lib/                   # shared: prompt-hash.ts, upstream-adapter.ts (cross-version seam shim, D6)
+    └── tests/                 # 16 test files (node --experimental-strip-types; all green on 0.84.2)
 ```
 
 ---
@@ -224,20 +234,20 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
     source ∈ {tier-map, persona-override, functional-agent, downshift-unavailable, downshift-exhausted}
 ```
 
-**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. glm-5 is deprecated/broken on Z-AI, so pi uses tested-available models: `unspecified-high` & `visual-engineering` → **glm-5-turbo**, `deep` & `artistry` → **glm-5.2**, `quick` → FREE `opencode/deepseek-v4-flash-free` (moved off Z-AI plan 2026-08-04 to conserve Coding-Plan quota)):
+**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. 6 of 10 categories Z-AI-plan-primary; `quick`/`git-commit-message` → FREE `opencode`, `deep`/`ultrabrain` → external `opencode-go` quota shield, verified live 2026-08-14 — burn opencode-go's external quota first, Z-AI plan is the safety net):
 
-| Category             | Model                           | Thinking | Quota                          | Functional agent | Fallback                        |
-| -------------------- | ------------------------------- | -------- | ------------------------------ | ---------------- | ------------------------------- |
-| `quick`              | opencode/deepseek-v4-flash-free | off      | FREE                           | keymaker         | opencode/ling-3.0-flash-free   |
-| `unspecified-low`    | zai-coding-cn/glm-4.7           | off      | 1×                             | trinity          | opencode/deepseek-v4-flash-free |
-| `unspecified-high`   | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | trinity          | opencode-go/kimi-k2.7-code      |
-| `deep`               | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | morpheus         | opencode-go/glm-5.2            |
-| `ultrabrain`         | opencode-go/kimi-k3             | high     | —                              | neo              | zai-coding-cn/glm-5.2           |
-| `writing`            | zai-coding-cn/glm-4.7           | medium   | 1×                             | mouse            | opencode/deepseek-v4-flash-free |
-| `research`           | zai-coding-cn/glm-4.7           | medium   | 1×                             | researcher       | opencode-go/minimax-m2.7        |
-| `visual-engineering` | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.2            |
-| `artistry`           | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1            |
-| `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | opencode-go/minimax-m2.7        |
+| Category             | Model                           | Thinking | Quota                          | Functional agent | Fallbacks                                        |
+| -------------------- | ------------------------------- | -------- | ------------------------------ | ---------------- | ------------------------------------------------ |
+| `quick`              | opencode/deepseek-v4-flash-free | off      | FREE                           | keymaker         | opencode/ling-3.0-flash-free                     |
+| `unspecified-low`    | zai-coding-cn/glm-4.7           | off      | 1×                             | trinity          | opencode/deepseek-v4-flash-free                  |
+| `unspecified-high`   | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | trinity          | opencode-go/kimi-k2.7-code → opencode-go/glm-5.2 |
+| `deep`               | opencode-go/glm-5.3             | high     | external (quota shield)        | morpheus         | zai/glm-5.3 → opencode-go/glm-5.2 → opencode-go/kimi-k2.7-code |
+| `ultrabrain`         | opencode-go/kimi-k3             | xhigh    | external                       | neo              | opencode-go/glm-5.3 → zai/glm-5.3                |
+| `writing`            | zai-coding-cn/glm-4.7           | medium   | 1×                             | mouse            | opencode/deepseek-v4-flash-free                  |
+| `research`           | zai-coding-cn/glm-4.7           | medium   | 1×                             | researcher       | opencode-go/minimax-m2.7                         |
+| `visual-engineering` | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.2                              |
+| `artistry`           | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1                              |
+| `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | opencode-go/minimax-m2.7 → zai/glm-4.7           |
 
 Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary model returns an empty response (e.g., Z-AI Coding Plan quota exhausted). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
 
@@ -355,7 +365,7 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 - F3 runtime retry with per-tier opencode fallback (2026-07-11). `resolveAndSpawn` retries once on empty primary output; surfaced in `/routing-stats` as `downshift-exhausted`.
 - Structured memory extension (2026-07-13). `memory_remember` tool + `before_agent_start` injection. 3-tier design (pure functions → JSONL store → Pi wiring) with secret scan, provenance write-guard, dedup, atomic writes. 147 assertions + live-verified.
 - **Persistent sub-agent sessions + usage + functional agents** (2026-07-15, “the bridge”). Tier 0: stable `{agent,project}` session files (`sub-<agent>--<gitRoot>.jsonl`) + rotation at 100KB (not truncation) + Esc/signal-abort + per-`{agent,project}` mutex (delete-only-if-tail). Tier 1: `message_end` usage capture (cost/tokens/turns) into `dispatch-log` + a `▌ usage` view in `/routing-stats`; latent error-path bug fixed (`ev.message.stopReason`, not `ev.stopReason`). Tier 2: `agent-map.ts` auto-resolves a Matrix operative per category when `agent=` is omitted (explicit agent always wins). 7 personas + 8 operatives; 0 model pins.
-- **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + batched toasts + cap 3); **fleet view** (`/chain-status`); **transcript tail** (`/chain-transcript`); **curated handoff** (`context:` param — briefed delegates); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per feature; 110 unit tests across 7 test files.
+- **pi-subagents UI/UX absorption** (2026-07-30) — ported the *patterns* (not the code) from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) v0.34.0: **live chain widget** (rich per-step line model·tools·tokens·cost + live chunk, adaptive tiers, braille spinner, Esc/orphan-fix); **acceptance gates** (provenance badges + sandboxed enum verify table, `shell:false`); **clarify-before-launch** (`/chain-clarify` + edit task/model/thinking/prompt); **background dispatch** Tier A (fire-and-forget + `/stop` + batched toasts + cap 3); **fleet view** (`/chain-status`); **transcript tail** (`/chain-transcript`); **curated handoff** (`context:` param — briefed delegates); prompt-hash drift detector hardened (strips volatile memory/bridge blocks). Oracle-reviewed per feature; the absorbed suites now live in `extensions/tests/` (16 files, all green on 0.84.2) alongside the colocated memory (147 assertions), routing-stats (13), and web-research (42) suites.
 
 **Deferred by design (not gaps):** F1 LLM intent-classifier (🔒 CLOSED — explicit-category chosen; reopen only on `/routing-stats` evidence). F2 peak-hour auto-downshift — still open.
 
@@ -370,4 +380,4 @@ From the disler comparison (`SYSTEM-COMPARISON-OURS-vs-DISLER.md` §8) — value
 
 ---
 
-_Living doc — update when topology changes. Last revised: 2026-08-04._
+_Living doc — update when topology changes. Last revised: 2026-08-16._
