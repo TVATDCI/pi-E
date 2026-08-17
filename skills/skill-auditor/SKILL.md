@@ -67,7 +67,10 @@ pi-safety flags, or health defects — never an edit. Read-only by design.
 ### Health audit
 "Are all skills well-formed?"
 - Per skill: exactly `name`+`description` frontmatter · `name` == dirname · real
-  file (not symlink) · description has `Triggers:` + `Do NOT use for:` · body lean.
+  file (not symlink) · description has `Triggers:` + `Do NOT use for:` · body lean
+  · KV-cache layout: hard constraints/identity above any long examples-reference
+  tail (no stable-after-volatile stranding; `---` separator when a volatile tail
+  exists — see skill-creator's Layout section).
 - This is the check that catches a regression — a re-introduced symlink, a
   mismatched name — before it breaks loading.
 

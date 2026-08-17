@@ -16,7 +16,7 @@ Put workflow specifics in skills, persona in templates, and any machinery in ext
 ## Memory & compaction
 
 **Two durable substrates — distinct roles, both file-based + auditable:**
-- `~/.pi/agent/memory.md` — **session-narrative log** (the arc: what happened, what's next). Freeform markdown, read on `continue` / `where was I`. Bounded by `scripts/rotate-memory-md.ts` (active-KB budget + month-granular archives). Auto-fed by the `compaction-capture` extension.
+- `~/.pi/agent/memory.md` — **session-narrative log** (the arc: what happened, what's next). Freeform markdown, read on `continue` / `where was I`. Bounded by `scripts/rotate-memory-md.ts` (active-KB budget + month-granular archives). Auto-fed by the `compaction-capture` extension. Its top **Active block** follows the hotcache contract: ① Header (project, phase, **next action**) · ② Decisions (numbered, with rationale) · ③ Open questions · ④ Archive pointer (→ exports/evidence paths). **Refresh, don't append**, when state changes materially — the narrative detail lives below it.
 - `~/.pi/agent/memory/store.jsonl` — **structured atomic facts** via the `memory_remember` tool (constraints/decisions/conventions/preferences/facts), classified, ranked, auto-injected each turn as a `<memory-context>` block; own `audit.log`. **This is the durable memory for facts the agent must recall.** (`memory_forget` corrects stale ones.)
 
 Not the session JSONL, not `/note`, not compaction summaries — those are ephemeral or lossy. (Trust files over generated summaries.)

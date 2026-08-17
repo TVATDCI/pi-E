@@ -75,6 +75,18 @@ are valid; pseudocode/templates when there's a preferred pattern; exact scripts
 and strict step lists when the workflow is fragile or consistency-critical
 (migrations, config patching).
 
+## Layout: stable-top, volatile-tail (KV-cache)
+
+Order the body for cache reuse: **stable shared content first, volatile
+reference last.** Identity, hard NEVER/MUST rules, and the core workflow go
+ABOVE a `---` separator; long examples, tables, and per-task reference go BELOW
+it. Constraints in roughly the first 20% of the body; separator near the 30–40%
+mark when the file has a long tail. Never strand stable rules *after* a large
+volatile block — every edit there re-caches everything after it. Basis: measured
+~1.47× per-file saving with this split; the ~10× figure only materializes with
+system-prompt-level prefix sharing. (Vault-grounded via `main-vault-query`
+pointer → `wiki/concepts/skill-layout-kv-cache.md`.)
+
 ## Workflow
 
 ### 1. Capture intent
@@ -109,6 +121,8 @@ a stranger: would you know when to fire it?
 - [ ] Trigger/execution tested separately (routing fail → description; execution fail → body)
 - [ ] Sanity-checked on the weakest model that will run it (strong models forgive vague skills)
 - [ ] Body lean, imperative, explains the why; matches the existing skills' voice
+- [ ] KV-cache layout: identity + constraints above any long examples/reference
+      tail; `---` separator present when a volatile tail exists
 
 ### 5. Iterate — qualitatively, with the operator
 Present the draft; the operator reviews. Refine the description against real

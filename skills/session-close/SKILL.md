@@ -85,7 +85,27 @@ the history). Create `exports/` if absent. Use this schema EXACTLY (spec lines 3
 - **Decisions made** — capture the *why*, not just the *what* (only the what survives
   compaction otherwise).
 
-### 3. Prepare the commit (operator runs it — do NOT push)
+### 3. Deposit session learning (CONTRIBUTE routing)
+
+Before the commit, ask: **"What did this session learn that pi's memory doesn't
+hold yet?"** Route each insight — 5-minute cap; anything longer is a design task,
+not a deposit:
+
+- **Atomic fact / exact value / hard constraint** → `memory_remember` (store.jsonl).
+- **Narrative lesson or dead-end story** → memory.md narrative (only what a future
+  *pi* session needs — sisyphus gets it via the handoff, don't double-deposit).
+- **Process/workflow fix** → edit the owning skill or AGENTS.md section — that's
+  how skills absorb their own lessons.
+- **Pattern that worked 2+ times** → skill candidate; surface to the operator
+  (skill-creator governs the build).
+- **Durable cross-agent knowledge** → the handoff's `## Proposed bd facts`
+  (already covered above) or, if vault-worthy, a C-path request via the herdr
+  lane (non-urgent, no SLA — never park urgent knowledge there).
+
+Quality bar: *would a future session benefit?* If only this session cared, skip.
+Nothing learned → no deposit, no guilt.
+
+### 4. Prepare the commit (operator runs it — do NOT push)
 `exports/` is tracked by pi's repo (spec rule 3 — git is the integrity signal).
 Prepare the command with the **`pi:` prefix** (adopted convention, new commits only):
 
