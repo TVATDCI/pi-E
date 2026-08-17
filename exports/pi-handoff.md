@@ -1,46 +1,47 @@
-# Pi Handoff — Main-vault sharing adopted; research stack + quotas + public-apis resource shipped (2026-08-17)
+# Pi Handoff — davidondrej absorption complete + upstream sync (risky-changes); session interleaved with Main-vault adoption session (2026-08-17)
 
-**Written at:** 2026-08-17T19:05:00Z
-**Pi session:** (current session, ~/.pi cwd)
-**Original intent:** "This session is about to introduce you to my Main-vault — explore deep, then advise what to absorb into our global system."
+**Written at:** 2026-08-17T19:55:00Z
+**Pi session:** 01a00ae6 (absorption session; this file is its session-final refresh — supersedes the 25a57f4 handoff, same session, +reopened window)
+**Original intent:** explore davidondrej/skills via find-skills → validate→absorb what fits pi.
 
 ## Summary
-Session grew from a Main-vault exploration into the full adoption of a ratified cross-agent sharing policy (A+C: pi read-only vault QUERY + operator-arbitrated write lane), proven twice via C-path runs; then extended pi's research stack (pi-mcp-adapter + zai webSearchPrime MCP + pi-quotas with a local provider-alias patch), fixed the bd-bridge cron rot, ran an adversarial review-loop on the adoption implementation, and placed the public-apis clone as a living resource at ~/developer/public-apis with a vault discovery page.
+Full absorption cycle for davidondrej/skills: 48-skill exploration → verdict → oracle second opinion via herdr-collab lane (GO-WITH-CHANGES) → D1–D5 execution → 2-round review-loop → committed. pi gained a tested command-guard extension, 4 skills (git-worktree, decisions, pi-web-search, research-prompt), skill-creator upgrade, herdr-collab v0.2.2, pi-web-access, and a live-verified 429-fallback fix; ~/dotfiles adopted the shared denylist + herdr-collab (agents/ tree). Reopened window: upstream-sync diff (his history rewrite noted; save-idea rejected; risky-changes absorbed as skill 12 with DeepAPI steps replaced by pi-native research) + README truth-sync after the interleave. Sibling session 01a00cf6 (w4:p7) worked this repo in parallel: Main-vault A+C adoption, research stack (pi-mcp-adapter, zai webSearchPrime MCP, pi-quotas), bridge cron fix, public-apis placement — its handoff detail: git ee8181c + exports/mainvault-adoption-2026-08-17/. Final truth: 14 agents (archivist dropped — vault-lane name collision; ghost incident resolved, prevention rule in store), 12 skills, README synced (24af4f0, 940df4f).
 
 ## Files touched
-- ~/.pi/agent/AGENTS.md — Main-vault clause (+ review-loop hardening: hotcache exclusion, injection guard)
-- ~/.pi/agent/skills/main-vault-query/SKILL.md — NEW, the 9 Oracle conditions
-- ~/.pi/agent/skills/{skill-creator,skill-auditor,session-close}/SKILL.md — KV-cache layout, pi-safety exemptions, CONTRIBUTE routing
-- ~/.pi/agent/agents/archivist.md — DELETED (operator; in-graph vault-write bypass)
-- ~/.pi/agent/teams.yaml — archivist entries removed
-- ~/.pi/agent/bridge/export-bd-global.sh — BEADS_DIR+PATH self-sufficiency (cron-silent-failure root cause)
-- ~/.pi/agent/exports/ — mainvault-adoption-2026-08-17/ (8), apis-decision-2026-08-17/ (5), public-apis-opportunities-2026-08-17.md
-- ~/.config/mcp/mcp.json — zai-web-search server (key from auth.json, perms 600)
-- ~/Main-vault — QUERY lane-partner note (AGENTS.md), public-apis-repository.md + index line (via C-path runs 1-2, operator committed)
-- crontab — hourly bridge export (17 * * * *)
+- This session (01a00ae6): pi repo — guard trio + spawn fallback (d355973), skills + skill-creator merge (250d48c), pi-web-access + web skills (91e8dea), README sync (97d8488), hygiene incl. Zone.Identifier purge + npm/.gitignore (246b9bf), handoff (25a57f4), risky-changes absorption (d8ade1d), README truth-sync (24af4f0). dotfiles — agents/ adoption (3c7c3a7). ~/.agents — symlinks.
+- Sibling session (01a00cf6): 313e248, 1fc25bf, f72e25d, 2ce2889, ee8181c, 7b3c281 (archivist drop), 940df4f (skill-creator count + this briefing artifact).
 
 ## Decisions made
-- A+C Main-vault policy ratified with 9 Oracle conditions — library, not brain; pay-per-use T3
-- pi-quotas opencode-go row NOT configured (cookie friction > value; dashboard suffices) — operator call
-- pi-mcp-adapter over opencode-side zai wiring — optionality + bucket already paid
-- public-apis: A+C placement (~/developer clone + vault page), ff-only on-demand pulls, NO cron; 5 conditions from sis+Oracle unanimous
-- Runtime-state files (quotas.json, mcp-cache/onboarding) gitignored — self-seeded, machine-local
+- D1 GO command guard; D3 shared dotfiles-owned patterns; asymmetry vs sisyphus-gates deliberate. D2 git-worktree, D4 decisions (manual-only), D5 edges → herdr-collab.
+- effective-agent-skills MERGED into skill-creator (dedupe-then-compress), not installed alongside.
+- pi-web-access installed after sis lane review; keyless first (150/day); division of labor pi=breadth / opencode=depth; citation contract provider+URL.
+- Upstream sync: save-idea rejected (personal ideas-repo infra); risky-changes absorbed ADAPTED (DeepAPI endpoint → research-prompt + web_search/researcher tier); his sanitization-only changes to our absorbed artifacts ignored; his deletions (prod-push, read-prod-database) confirm our rejects.
+- Two-session etiquette: commit-scoped work only; state-briefing file for cross-session truth (worked — zero conflicts despite parallel commits).
 
 ## Dead ends
-- "Z.ai row will just work" in pi-quotas — FALSE: literal provider-name lookup vs custom id zai-coding-cn; patched locally (re-apply after updates; upstream-alias issue candidate)
-- Blind `git add bridge/...` — bridge/ deliberately ignored; per-file carve-out applied instead (script tracked, data ignored)
-- Single compound command for the clone move — command-guard blocked on rm -rf tail; split into mv + rmdir (empty shells) worked clean
+- Nested-pi "Operation aborted" = operator's own mini-dc gate aborting the probe run (not a guard fault). Discriminator-probe rule: uninstalled password-manager CLI, NEVER `gh auth token`.
+- spawn.ts mid-edit corruption (helper fused into loadPersona) — caught by immediate post-edit checks, repaired, round-2 verified. Verify edits immediately when anchors are shared.
+- One upstream herdr edge STALE on 0.8.0 (--lines below viewport ≠ empty) — probes before enshrining third-party claims.
+- 429-fallback root cause: in-band error text makes output non-empty; old gate never fired. Live-verified fix opencode-go→zai glm-5.3.
+- Lane --wait timeout ≠ stalled (oracle mid-review): agent get + read BEFORE any input.
+- Ghost archivist.md: byte-identical to upstream roster default; manual restore during upstream-update window; rule now in store — davidondrej/skills syncs must exclude agents/.
 
 ## Incomplete work
-- API-opportunities structuring — operator will list structure before building (ideas preserved in exports + vault page pointer)
-- Permission-prompt watch-item (brain-ecf, sis-side): no prompt fired on either C-path run; mandate-in-lane remains the true authorization surface
-- pi-quotas upstream issue for provider-alias config — drafted mentally, unfiled
+- Operator-side: davidondrej clone reset (`git -C ~/developer/davidondrej-skills/skills reset --hard origin/main`; upstream rewrote history); stale /tmp/tmp.*/clone trees cleanup.
+- pi-custom-model still parked (trigger: scoped-models session; re-probe bundled-list path).
+- herdr-collab description fix (how-summary + boundary) — one dotfiles commit, pending operator timing.
+- /tmp/herdr-collab/{absorb-davidondrej,pi-daily-driver}/ lane dirs (sis-response.md worth archiving first).
 
 ## Proposed bd facts
-- scope=global | category=decision | key=public_apis_placement_ac | value="public-apis clone at ~/developer/public-apis (living, ff-only on-demand pulls, no cron, untrusted-content doctrine, outside dotfiles ownership) + vault wiki/sources/public-apis-repository.md discovery page (C-path run 2, receipt-verified, operator committed a19d935). Ratified A+C after sis+Oracle unanimous convergence 2026-08-17."
-- scope=global | category=next | key=api_opportunities_structuring | value="Operator structuring pi's 8-item API-opportunities list (MCP tool factory leads; 723 no-key APIs; pointer at ~/.pi/agent/exports/public-apis-opportunities-2026-08-17.md + vault page) before any build."
+(Carried forward from 25a57f4 — unconsumed; still current:)
+- scope=global | category=constraint | key=lane_citation_contract | value="Lane research claims carry provider+URL per load-bearing finding so the peer spot-verifies instead of re-searching (ratified pi+sis 2026-08-16); confirmed/inference/unresolved separated, no fake consensus."
+- scope=global | category=constraint | key=web_division_of_labor | value="pi handles breadth web research (keyless Exa 150/day, news/blogs/forums/release notes/GitHub reads); opencode/sisyphus handles depth (Context7, cross-repo code search, blocked/anti-bot sites, multi-source synthesis). Paid keys live in ONE stack's config."
+- scope=global | category=dependency | key=shared_command_denylist | value="~/.agents/hooks/dangerous-patterns.txt is a shared catastrophic-command denylist (32 POSIX-ERE, Linux), owned by ~/dotfiles/agents (symlinked), re-read per call by pi's command-guard. Deliberate asymmetry vs sisyphus-gates stands; an opencode-side consumer is possible later."
+- scope=global | category=exact | key=pi_web_access_install | value="pi runs pi-web-access v0.23.0 (keyless Exa: 3 QPS / 150 calls/day; web_search always workflow:none). Installed 2026-08-16 after sis review; add EXA_API_KEY only if the 150/day ceiling pins."
+(Sibling session's facts — public_apis_placement_ac, api_opportunities_structuring — remain in git ee8181c for promotion.)
 
 ## Next steps for opencode
-- Verify pi's push lands (4 commits pending operator push: 313e248..f72e25d + this session-close)
-- brain-ecf permission-prompt investigation unaffected — still open
-- Optional: complete-codebase timeline for research-stack additions (pi-mcp-adapter, zai MCP, pi-quotas) at sis's next session-close
+- session-begin Step 5: promote from BOTH this file and ee8181c (both unconsumed).
+- herdr-collab v0.2.2 + denylist are dotfiles-owned now; your signed reviews moved with the skill into ~/dotfiles/agents/skills/herdr-collab/reviews/.
+- pi-as-daily-driver development continues inside herdr (operator-driven, in progress).
+- If a davidondrej sync ever lands on your side too: exclude agents/ (ghost rule).
