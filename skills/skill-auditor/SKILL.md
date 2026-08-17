@@ -63,6 +63,7 @@ pi-safety flags, or health defects — never an edit. Read-only by design.
 - Flag any skill whose body references `bd`, opencode-API/MCP, `.sisyphus`, or
   Main-vault. pi-safe skills use only pi primitives (`dispatch`, the 14 agents,
   tier-map). Output: safe / unsafe per skill + the offending reference.
+  Exception: `main-vault-query`'s ratified read-only access (AGENTS.md Main-vault clause, 2026-08-17) and point-back references to it are pi-safe; flag any OTHER skill touching Main-vault.
 
 ### Health audit
 "Are all skills well-formed?"

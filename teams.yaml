@@ -13,8 +13,6 @@ teams:
         file: agents/oracle.md
       - id: librarian
         file: agents/librarian.md
-      - id: archivist
-        file: agents/archivist.md
       - id: keymaker
         file: agents/keymaker.md
       - id: trinity
@@ -75,9 +73,6 @@ teams:
         category: unspecified-high
       - id: architect
         file: agents/architect.md
-        category: unspecified-high
-      - id: archivist
-        file: agents/archivist.md
         category: unspecified-high
 
   research:

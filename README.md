@@ -15,7 +15,7 @@ This is **not** a showcase. It's a single-operator production config: narrow and
 | **Default model**      | `glm-5.3` @ `high` thinking, theme `encom`                                      |
 | **Extensions**         | 19 active top-level + 6 subpackages (`orchestration-engine/`, `memory/`, `budgets/`, `security/`, `lib/`, `tests/` — 0 disabled) — incl. chain widget, acceptance gates, clarify, background dispatch, compaction capture, command guard |
 | **Agents**             | 15 (7 personas + 8 Matrix operatives; 0 model pins)                             |
-| **Governance**        | 13 ADRs in `decisions/`; 10 pi-native skills in `skills/`                       |
+| **Governance**        | 13 ADRs in `decisions/`; 11 pi-native skills in `skills/`                       |
 | **Secondary providers** | `opencode` + `opencode-go` (FREE/external tiers — `quick` & `git-commit-message` primaries, `deep` & `ultrabrain` primaries, many fallbacks) |
 
 ---
@@ -68,7 +68,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── themes/encom.json         # the one theme
 ├── agents/                   # 15 agents: 7 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
-├── skills/                   # 10 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt)
+├── skills/                   # 11 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt, main-vault-query)
 ├── prompts/                  # prompt templates (design, oracle, survey, verify)
 ├── planning/                 # PLAN docs (improvement-plan, reverse-bridge-writer, w8b-store-jsonl)
 ├── exports/                  # cross-session artifacts (pi-handoff, absorption plan + oracle review)

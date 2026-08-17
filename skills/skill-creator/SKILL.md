@@ -29,8 +29,8 @@ Before drafting, pick the right vehicle — most "skill ideas" are better as an
 agent or a direct task:
 
 - **One-off task** → just do it (parent + `trinity`). Don't make a skill.
-- **A persona / always-on capability** → a pi **agent** (`~/.pi/agent/agents/*.md`). pi has 15.
-- **A repeatable, multi-step workflow the operator will invoke again** → a **skill**. pi has 8.
+- **A persona / always-on capability** → a pi **agent** (`~/.pi/agent/agents/*.md`). pi has 14.
+- **A repeatable, multi-step workflow the operator will invoke again** → a **skill**. pi has 11.
 
 Skills are for *procedures*; agents are for *personas*. "Behave like X" → agent.
 "Do these steps when Y" → skill.
@@ -68,7 +68,7 @@ Mirror the existing skills exactly:
    genuinely outgrows one, loaded on demand).
 4. **pi-native primitives only.** Reference `dispatch`, the 15 agents, tier-map as
    the sole model authority — never opencode's task/skill-tool/MCP.
-5. **pi-safe.** No `bd`, no opencode-API, no `.sisyphus`/Main-vault deps.
+5. **pi-safe.** No `bd`, no opencode-API, no `.sisyphus` deps, no Main-vault writes or dependencies — sanctioned read-only vault access via `main-vault-query` (AGENTS.md Main-vault clause) is the one exemption.
 
 Match instruction rigidity to fragility: loose heuristics when many approaches
 are valid; pseudocode/templates when there's a preferred pattern; exact scripts
@@ -95,7 +95,7 @@ Expected output? Mine the current conversation first — a skill often crystalli
 from a workflow the operator just walked through.
 
 ### 2. Overlap check (pi-native)
-Skim directly — pi's roster is small (15 agents + 8 skills; cheap to read in
+Skim directly — pi's roster is small (14 agents + 11 skills; cheap to read in
 context). Does a pi **agent** already cover this? Does an existing **skill**?
 Peaceful overlap is fine if the skill adds workflow value a persona doesn't — but
 document *why*. The skill-vs-agent judgment needs conversation context a dispatched
@@ -117,7 +117,7 @@ a stranger: would you know when to fire it?
 - [ ] `name` equals the directory name
 - [ ] Description has Triggers + Do-NOT-use-for + is pushy
 - [ ] Real file (not a symlink) at `~/.pi/agent/skills/<name>/SKILL.md`
-- [ ] pi-safe (no bd/opencode-API/sisyphus deps)
+- [ ] pi-safe (no bd/opencode-API/sisyphus deps; no Main-vault beyond the sanctioned `main-vault-query` read-only exemption)
 - [ ] Trigger/execution tested separately (routing fail → description; execution fail → body)
 - [ ] Sanity-checked on the weakest model that will run it (strong models forgive vague skills)
 - [ ] Body lean, imperative, explains the why; matches the existing skills' voice
