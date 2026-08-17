@@ -63,12 +63,12 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── bin/                      # vendored CLIs: fd, rg
 ├── npm/                      # pi-managed extension packages (pi-web-access)
 ├── keybindings.json          # custom binds (ctrl+shift+f → ctrl+alt+f transcript search)
-├── teams.yaml                # rosters: matrix (8 operatives) / all (15) / review / build / research
+├── teams.yaml                # rosters: matrix (8 operatives) / all (14) / review / build / research
 ├── PORTABILITY.md            # per-machine recreate notes (what git ignores and why)
 ├── themes/encom.json         # the one theme
-├── agents/                   # 15 agents: 7 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
+├── agents/                   # 14 agents: 6 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
-├── skills/                   # 11 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt, main-vault-query)
+├── skills/                   # 12 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt, main-vault-query, risky-changes)
 ├── prompts/                  # prompt templates (design, oracle, survey, verify)
 ├── planning/                 # PLAN docs (improvement-plan, reverse-bridge-writer, w8b-store-jsonl)
 ├── exports/                  # cross-session artifacts (pi-handoff, absorption plan + oracle review)
@@ -187,11 +187,11 @@ Encom-themed single-line footer that **replaces Pi's built-in footer** via the c
 
 ---
 
-## Agents (15)
+## Agents (14)
 
 Specialist system prompts in `agents/*.md` — **0 of 15 pin a `model:` frontmatter**; `tier-map.ts` is the sole model authority. Two classes:
 
-**Personas (7)** — invoked explicitly via `agent=`:
+**Personas (6)** — invoked explicitly via `agent=`:
 
 | Persona             | Depth    | Tools          | Role                                                                                                                                |
 | ------------------- | -------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -200,7 +200,6 @@ Specialist system prompts in `agents/*.md` — **0 of 15 pin a `model:` frontmat
 | `reviewer-security` | 94 lines | read-only      | generated variant of `reviewer` — deep security review (threat modeling, vuln-class checklist, auth/session flow, dependency audit) |
 | `oracle`            | 30 lines | read-only      | architecture/debug reasoning consultant (persona-only; `ultrabrain` now maps to `neo`)                                              |
 | `librarian`         | 36 lines | read-only      | docs / external-reference specialist                                                                                                |
-| `archivist`         | 20 lines | **gated-bash** | file-operations executor                                                                                                            |
 | `system-thinker`     | ~198 lines | read + write/edit | pre-flight system reasoning — models a system (incl. pi itself) before builders arrive; manual-only, never auto-dispatched         |
 
 **Matrix operatives (8)** — auto-resolved from the dispatch category when `agent=` (and `team=`) are omitted — see `agent-map.ts`:
