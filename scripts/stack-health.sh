@@ -4,7 +4,7 @@
 # ghost-class untracked files, stale /tmp lane dirs. Read-only — reports, never fixes.
 # Run: on demand, or at session-begin for a quick pre-flight.
 
-set -u
+set -u  # intentional: no -e/-pipefail; a health check must report ALL checks, not abort on first failure
 RED='\033[0;31m'; YEL='\033[1;33m'; GRN='\033[0;32m'; RST='\033[0m'
 fail=0
 
@@ -35,16 +35,17 @@ else
   echo -e "${GRN}OK${RST}   pi repo pushed"
 fi
 
-# 3. Ghost sweep — untracked files that are NOT known runtime-state (ghost-class detector)
-declare -A allowed=( [exports/]=1 [sessions/]=0 )
+# 3. Ghost sweep — untracked files that are NOT known runtime-state (ghost-class detector).
+# exports/* and sessions/* are tracked-dir additions (commit-pending work, not ghosts).
 ghosts=$(git status --porcelain | grep '^??' | awk '{print $2}')
 ghost_count=0
 for g in $ghosts; do
   case "$g" in
-    *.log|*.tmp|mcp-cache.json|mcp-onboarding.json|extensions/quotas.json) ;; # known runtime state
+    exports/*|sessions/*|*.log|*.tmp|mcp-cache.json|mcp-onboarding.json|extensions/quotas.json) ;; # known/tracked-dir/runtime-state
     *) echo -e "${RED}FAIL${RST} ghost untracked: $g (unexpected file — investigate before deleting)"; ghost_count=$((ghost_count+1));;
   esac
 done
+[ "$ghost_count" -gt 0 ] && fail=1
 [ "$ghost_count" -eq 0 ] && echo -e "${GRN}OK${RST}   ghost sweep clean"
 
 # 4. Stale /tmp lane dirs (lane-close discipline)

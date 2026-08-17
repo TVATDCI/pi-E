@@ -72,7 +72,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── prompts/                  # prompt templates (design, oracle, survey, verify)
 ├── planning/                 # PLAN docs (improvement-plan, reverse-bridge-writer, w8b-store-jsonl)
 ├── exports/                  # cross-session artifacts (pi-handoff, absorption plan + oracle review)
-├── scripts/                  # bootstrap.sh, run-tests.ts, rotate-memory-md.ts, install-pre-commit.sh
+├── scripts/                  # bootstrap.sh, run-tests.ts, rotate-memory-md.ts, install-pre-commit.sh, stack-health.sh
 ├── agent-chain.yaml          # global chain definitions (deny-additive)
 ├── assets/images/            # pi-logo art (ascii/svg variants)
 ├── images/                   # pi-logo png/svg
