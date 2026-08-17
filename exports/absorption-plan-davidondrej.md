@@ -98,6 +98,7 @@ Conditional: yolo-launch safety line if C2 lands.
 | `git-worktree` | **D2 = absorb** | DONE — `~/.pi/agent/skills/git-worktree/SKILL.md` (pi-native adaptation; Cursor ~15% stripped; herdr-worktree boundary in description) |
 | `decisions` | **D4 = take** | DONE — `~/.pi/agent/skills/decisions/SKILL.md` (manual-only via `disable-model-invocation`, verified honored) |
 | `research-prompt` | **ABSORBED 2026-08-17** | woke early: pi-web-access installed (sis lane review, operator GO) → now ~/.pi/agent/skills/research-prompt with provider+URL citation contract |
+| `risky-changes` | **ABSORBED 2026-08-17 (upstream sync 6f96a51)** | NEW upstream skill, pattern sound (assumptions→research→live measurement→sign-off→post-ship verify); DeepAPI endpoint steps REPLACED with pi-native research (research-prompt + web_search/researcher tier) |
 | `create-readonly-db-role` | named reject | portable pattern, no current Postgres in stack |
 | `teach` | named reject | multi-file violates lean one-file convention; opencode-side teach exists → divergence risk |
 | `pi-custom-model` | defer + revisit trigger | next scoped-models/tier-map session; re-probe bundled-list path (version-drift prone) |
