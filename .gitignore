@@ -53,3 +53,8 @@ extensions/*.disabled
 !/bridge/
 /bridge/*
 !/bridge/export-bd-global.sh
+
+# ── EXTENSION RUNTIME STATE — self-seeded, machine-local ──────
+extensions/quotas.json
+mcp-cache.json
+mcp-onboarding.json
