@@ -30,7 +30,7 @@ agent or a direct task:
 
 - **One-off task** → just do it (parent + `trinity`). Don't make a skill.
 - **A persona / always-on capability** → a pi **agent** (`~/.pi/agent/agents/*.md`). pi has 14.
-- **A repeatable, multi-step workflow the operator will invoke again** → a **skill**. pi has 11.
+- **A repeatable, multi-step workflow the operator will invoke again** → a **skill**. pi has 12.
 
 Skills are for *procedures*; agents are for *personas*. "Behave like X" → agent.
 "Do these steps when Y" → skill.
