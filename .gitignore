@@ -48,3 +48,8 @@ extensions/*.disabled
 .idea/
 *.log
 *.tsbuildinfo
+
+# exception: the export script is infrastructure (cron-run, bugfixed 2026-08-17); only the data files are machine-specific
+!/bridge/
+/bridge/*
+!/bridge/export-bd-global.sh
