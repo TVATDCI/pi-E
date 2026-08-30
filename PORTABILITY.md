@@ -47,6 +47,7 @@ First live model call (or `pi --list-models`) verifies `auth.json` — the boots
 
 - **node ≥ 22.6** — `--experimental-strip-types` for all TypeScript (scripts + tests)
 - **pi** — `npm install -g @earendil-works/pi-coding-agent` (this repo is its config dir)
+- **Extension deps** — `bash scripts/bootstrap.sh` installs pinned `yaml/minimatch/typebox` from root `package.json` (Oracle condition 2026-08-30; pi bundles them only in some versions)
 - **git** — repo + the pre-commit test gate
 - **w3m** — only for the web-research extension (warn-only in bootstrap)
 

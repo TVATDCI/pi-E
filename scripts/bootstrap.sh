@@ -6,9 +6,12 @@
 # What it does:
 #   1. READ-ONLY environment checks (node >= 22.6, pi on PATH, git, w3m warn-only,
 #      repo-shape sanity) — each ✓ or ⚠ with a remediation hint.
-#   2. ONE optional write action: installing the pre-commit test gate (prompts y/n;
+#   2. Installs pinned extension dependencies from package.json (Oracle condition
+#      2026-08-30: yaml/minimatch/typebox — pi bundles them only in some versions;
+#      pinned + lockfile'd, verified on Arch/Omarchy).
+#   3. ONE optional write action: installing the pre-commit test gate (prompts y/n;
 #      delegates to scripts/install-pre-commit.sh).
-#   3. Prints the state-file checklist (what to copy from the old machine) and the
+#   4. Prints the state-file checklist (what to copy from the old machine) and the
 #      restore-verification command.
 #
 # Never echoes file contents (secrets stay unread), never writes outside the offer.
@@ -74,6 +77,17 @@ check_state settings.json        optional  "defaults (provider/model/theme); cop
 check_state memory/store.jsonl   required  "structured memory (agent self-model); copy from old machine"
 check_state memory.md            optional  "narrative memory log; copy if you want the arc"
 echo
+
+echo "-- extension dependencies (pinned, per package.json) --"
+if [ -f package.json ]; then
+    if npm install --no-audit --no-fund >/dev/null 2>&1; then
+        ok "pinned deps installed (yaml/minimatch/typebox + lockfile record)"
+    else
+        warned "npm install failed — extensions may report missing packages; retry manually"
+    fi
+else
+    warned "no package.json at repo root — skipping pinned deps"
+fi
 
 echo "-- pre-commit test gate --"
 if [ -f .git/hooks/pre-commit ] && grep -q "pi-agent test gate" .git/hooks/pre-commit 2>/dev/null; then
