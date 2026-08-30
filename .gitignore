@@ -61,3 +61,4 @@ mcp-onboarding.json
 
 # ── SESSION EXPORTS — machine-local audit trail (may contain conversation content)
 /exports/
+store.jsonl
