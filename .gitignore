@@ -58,3 +58,6 @@ extensions/*.disabled
 extensions/quotas.json
 mcp-cache.json
 mcp-onboarding.json
+
+# ── SESSION EXPORTS — machine-local audit trail (may contain conversation content)
+/exports/
