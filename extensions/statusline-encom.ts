@@ -239,10 +239,22 @@ const renderSolidLine = (cells: SolidCell[]): string => {
   const useArrow = nerdOn();
   let out = "";
   cells.forEach((s, i) => {
+    const next = cells[i + 1];
+    const isLast = next === undefined;
+    // Fade-on-glass (V5.1): the trailing TERM_BG block (clock) renders as bare
+    // text over the translucent terminal bg — no opaque fill — and the arrow
+    // pointing into it floats without a bg, so the strip dissolves into glass.
+    if (isLast && s.bg === TERM_BG) {
+      out += RESET + " " + ansiFg(s.fg) + s.content + " ";
+      return;
+    }
     out += ansiBg(s.bg) + " " + ansiFg(s.fg) + s.content + " ";
     if (useArrow) {
-      const next = cells[i + 1];
-      out += ansiFg(s.bg) + ansiBg(next ? next.bg : TERM_BG) + ARROW;
+      if (!next || next.bg === TERM_BG) {
+        out += ansiFg(s.bg) + ARROW + RESET; // floating fade-on-glass
+      } else {
+        out += ansiFg(s.bg) + ansiBg(next.bg) + ARROW;
+      }
     } else {
       out += RESET + " ";
     }
