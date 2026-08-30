@@ -93,7 +93,7 @@ echo "-- pre-commit test gate --"
 if [ -f .git/hooks/pre-commit ] && grep -q "pi-agent test gate" .git/hooks/pre-commit 2>/dev/null; then
   ok "already installed"
 else
-  printf "  install pre-commit hook (runs the 30-file test suite on every commit)? [y/N] "
+  printf "  install pre-commit hook (runs the 31-file test suite on every commit)? [y/N] "
   # EOF-safe: works piped (printf | bootstrap), interactive, AND tty-less contexts;
   # `|| answer=n` survives EOF/failed read instead of dying under set -e (V2 lesson).
   read -r answer || answer="n"

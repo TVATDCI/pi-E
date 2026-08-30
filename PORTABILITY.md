@@ -22,7 +22,7 @@ First live model call (or `pi --list-models`) verifies `auth.json` — the boots
 | Path | What |
 |---|---|
 | `extensions/` | 80+ modules: coordinator, memory substrate, orchestration-engine, gates, bridges |
-| `extensions/tests/` + `extensions/memory/test-*.ts` | 30-file test suite (runner: `scripts/run-tests.ts`) |
+| `extensions/tests/` + `extensions/memory/test-*.ts` | 31-file test suite (runner: `scripts/run-tests.ts`) |
 | `agents/` | 15 agent definitions |
 | `skills/` | 6 skills |
 | `prompts/` | 4 prompt templates |
@@ -55,7 +55,7 @@ Non-default config location: pi honors `PI_CODING_AGENT_DIR` (verified in pi dis
 
 ## Pre-commit test gate
 
-`scripts/install-pre-commit.sh` (offered by bootstrap, idempotent, marked block): every `git commit` runs the 30-file suite (~6s). Escape hatch: `SKIP_TESTS=1 git commit ...`. Uninstall: `rm .git/hooks/pre-commit`.
+`scripts/install-pre-commit.sh` (offered by bootstrap, idempotent, marked block): every `git commit` runs the 31-file suite (~6s). Escape hatch: `SKIP_TESTS=1 git commit ...`. Uninstall: `rm .git/hooks/pre-commit`.
 
 Note: the runner discovers **git-tracked** test files only (`git ls-files`) — an untracked file matching the test globs never executes. When you add/remove a test file, bump `--expect` (default 30, in `scripts/run-tests.ts` `DEFAULT_EXPECT`).
 
