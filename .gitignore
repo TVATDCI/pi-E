@@ -62,3 +62,8 @@ mcp-onboarding.json
 # ── SESSION EXPORTS — machine-local audit trail (may contain conversation content)
 /exports/
 store.jsonl
+
+# ── OMARCHY-MACHINE FILES — system symlinks + vendor themes (TNT A2 gate 2026-08-30)
+skills/diagnose-crash
+skills/omarchy
+themes/omarchy-system.json

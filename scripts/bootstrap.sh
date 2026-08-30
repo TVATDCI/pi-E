@@ -110,5 +110,5 @@ if [ "$fail" -gt 0 ]; then
   echo "   fix ✗ items above, then re-run."
   exit 1
 fi
-echo "   restore verification: node --experimental-strip-types scripts/run-tests.ts --expect 30"
-echo "   (30/30 green = repo restored; first live model call verifies auth.json)"
+echo "   restore verification: node --experimental-strip-types scripts/run-tests.ts --expect 31"
+echo "   (31/31 green = repo restored; first live model call verifies auth.json)"

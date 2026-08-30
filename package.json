@@ -3,8 +3,9 @@
   "private": true,
   "description": "pi agent config repo (pi-E) — pinned extension deps",
   "dependencies": {
-    "yaml": "2.9.0",
+    "@earendil-works/pi-tui": "0.84.4",
     "minimatch": "10.2.6",
-    "typebox": "1.3.22"
+    "typebox": "1.3.22",
+    "yaml": "2.9.0"
   }
 }

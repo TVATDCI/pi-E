@@ -12,7 +12,7 @@ git clone <repo-url> ~/.pi/agent        # (or copy the directory — same thing)
 # copy state files from the old machine (list below)
 cd ~/.pi/agent
 bash scripts/bootstrap.sh               # checks env + repo shape + state; offers test-gate install
-node --experimental-strip-types scripts/run-tests.ts --expect 30   # 30/30 = restored
+node --experimental-strip-types scripts/run-tests.ts --expect 31   # 31/31 = restored
 ```
 
 First live model call (or `pi --list-models`) verifies `auth.json` — the bootstrap deliberately checks existence only, never parses secrets.

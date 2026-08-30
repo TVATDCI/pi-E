@@ -21,7 +21,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import * as os from "node:os";
 
-const REPO = join(os.homedir(), ".pi", "agent");
+const REPO = join(import.meta.dirname, ".."); // resolve relative to this script — supports scratch-clone verification (TNT F-finding 1)
 const EXT_DIR = join(REPO, "extensions");
 const DEFAULT_EXPECT = 30;
 const DEFAULT_TIMEOUT_MS = 60_000;
