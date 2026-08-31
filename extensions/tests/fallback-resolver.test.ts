@@ -102,7 +102,7 @@ eq(
 );
 check("resolveModel(deep): fallbackFlags is an array (not undefined/string)", Array.isArray(deepResolved.fallbackFlags));
 
-const quickResolved = resolveModel("quick", mockRegistry([["opencode", "deepseek-v4-flash-free"]]));
+const quickResolved = resolveModel("quick", mockRegistry([["opencode-go", "deepseek-v4-flash"]]));
 eq(
   "resolveModel(quick): single-element fallbackFlags",
   quickResolved.fallbackFlags,
@@ -123,16 +123,16 @@ eq(
 );
 
 // Unknown category → DEFAULT_CATEGORY (unspecified-low), whose fallback is opencode/deepseek-v4-flash-free.
-const unknownResolved = resolveModel("nonsense-category", mockRegistry([["zai-coding-cn", "glm-4.7"]]));
+const unknownResolved = resolveModel("nonsense-category", mockRegistry([["zai-coding-cn", "glm-5.3-flash"]]));
 eq(
   "resolveModel(unknown): falls to DEFAULT_CATEGORY primary",
   [unknownResolved.category, unknownResolved.modelFlag],
-  [DEFAULT_CATEGORY, "zai-coding-cn/glm-4.7"],
+  [DEFAULT_CATEGORY, "zai-coding-cn/glm-5.3-flash"],
 );
 eq(
   "resolveModel(unknown): DEFAULT_CATEGORY fallbackFlags",
   unknownResolved.fallbackFlags,
-  ["opencode/deepseek-v4-flash-free"],
+  ["opencode-go/deepseek-v4-flash"],
 );
 
 // Registry missing find() → throws (contract guard).
@@ -168,13 +168,13 @@ for (const cat of JUDGING) {
   for (const fm of arr) {
     const flag = `${fm.provider}/${fm.id}`;
     // strong = id starts with glm-5 (any variant) or kimi
-    if (!/^glm-5\b/.test(fm.id) && !/^kimi-/.test(fm.id)) {
+    if (!/^glm-5\b/.test(fm.id) && !/^kimi-/.test(fm.id) && !/^grok-4\.6$/.test(fm.id) && !/^deepseek-v4-pro$/.test(fm.id)) {
       allJudgingStrong = false;
       console.log(`    ✗ ${cat} fallback ${flag} is NOT strong-tier`);
     }
   }
 }
-check("INVARIANT: all judging-category fallbacks are glm-5.x/kimi", allJudgingStrong);
+check("INVARIANT: all judging-category fallbacks are strong-tier (glm-5.x/kimi/grok-4.6/deepseek-v4-pro — doctrine: no cheap models at judging nodes)", allJudgingStrong);
 check("INVARIANT: all judging categories have ≥1 per-tier fallback", allJudgingNonEmpty);
 
 // Global FALLBACK itself must be strong (it's the tail for judging categories too).

@@ -153,3 +153,25 @@ const proc = spawn("pi", ["--mode","json","-p","--no-extensions",
 - **Z AI:** `/devpack/overview` (plan tiers, multiplier), `/devpack/faq.md:11,21,66-69,236` (multiplier, no-fallback, model claims), `/devpack/latest-model` (glm-4.5-air on plan)
 - **OmO:** `oh-my-openagent.json` (config), `docs/guide/overview.md` (architecture, agent roles, category system)
 - **Empirical:** `/tmp/zai-probe.mjs` → PROBE-RESULTS.md
+
+## 2026-08-31 — GLM-5.3-Flash rebase (operator-driven, session 01a049c5)
+
+Z.AI released glm-5.3-flash (docs.z.ai/guides/vlm/glm-5.3-flash): 320B/18B hybrid
+sparse+linear attention, stronger than GLM-5.2 (DeepSWE 63.4 vs 46.2), approaches
+Opus 4.8 at max effort, NATIVE multimodal (visual coding loop), 1M ctx, thinking
+always-on, and — decisive for us — 3x the Coding Plan quota vs glm-5.3, with the
+new points system charging 50% off-peak.
+
+Operator's tier changes (verified + rationale fragments repaired by ddd-pi):
+- quick: opencode/deepseek-v4-flash-free → opencode-go/deepseek-v4-flash
+- unspecified-low: glm-4.7 → glm-5.3-flash | writing: glm-4.7 → glm-5.3-flash
+- research: glm-4.7 → glm-5.3-flash (fb deepseek-v4-pro)
+- visual-engineering: glm-5-turbo → glm-5.3-flash (multimodal = category-native)
+- artistry: zai/glm-5.2 → opencode-go/glm-5.2 (fb zai/glm-5.3-flash)
+- git-commit-message: opencode/deepseek-v4-flash-free → opencode-go/deepseek-v4-flash
+- ultrabrain fallbacks: +grok-4.6, +deepseek-v4-pro rungs
+- promoModels set: {glm-5.2, glm-5-turbo} → {glm-5.3, glm-5-turbo}
+deep/unspecified-high intentionally unchanged (flash does not replace the top tier).
+
+Historical entries above this line are records, not current state — this entry
+supersedes model assignments where they conflict.
