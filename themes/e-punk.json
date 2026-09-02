@@ -1,24 +1,24 @@
 {
   "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
-  "name": "encom",
+  "name": "e-punk",
   "vars": {
-    "accent": "#00E5FF",
-    "selectedBackground": "#0E3A46",
-    "color1": "#FF3355",
-    "color2": "#00D68F",
-    "color3": "#FFB000",
-    "color4": "#4DC9FF",
-    "color5": "#00FF9D",
-    "color6": "#19D3C5",
-    "color9": "#FF6EC7",
-    "panel": "#0E1B22",
-    "panelPending": "#0C1720",
-    "panelSuccess": "#0D2420",
-    "panelError": "#2A1220",
-    "border": "#1F4A56",
-    "borderMuted": "#14333D",
-    "mutedText": "#8FB8C6",
-    "dimText": "#6E93A3"
+    "accent": "#FF2E88",
+    "selectedBackground": "#3A1D5E",
+    "color1": "#FF003C",
+    "color2": "#9DFF00",
+    "color3": "#FCEE0A",
+    "color4": "#00C8FF",
+    "color5": "#C6FF4D",
+    "color6": "#00F0FF",
+    "color9": "#FF7AC6",
+    "panel": "#171330",
+    "panelPending": "#141026",
+    "panelSuccess": "#13251B",
+    "panelError": "#2A1420",
+    "border": "#3A3152",
+    "borderMuted": "#2A2440",
+    "mutedText": "#8A80A8",
+    "dimText": "#7D75A3"
   },
   "colors": {
     "accent": "accent",
@@ -80,8 +80,8 @@
     "bashMode": "color3"
   },
   "export": {
-    "pageBg": "#04121F",
-    "cardBg": "#0E1B22",
-    "infoBg": "#12242E"
+    "pageBg": "#0D0B1A",
+    "cardBg": "#171330",
+    "infoBg": "#1D1830"
   }
 }
