@@ -44,7 +44,8 @@
  *   (per-5h: kimi-k3 110, glm-5.3 220, glm-5.1 880) — burn opencode-go FIRST; zai-coding-plan
  *   is the safety net, not the primary. This drove the 08-14 moves:
  *     - deep: glm-5.2 → opencode-go/glm-5.3 primary, fallback [zai/glm-5.3, opencode-go/glm-5.2,
- *       opencode-go/kimi-k2.7-code] — opencode-go first, zai breaks the shield only on exhaustion.
+ *       opencode-go/glm-5.1 (rung 3 updated from kimi-k2.7-code 2026-09-02)] — opencode-go first, zai
+ *       breaks the shield only on exhaustion.
  *     - ultrabrain: stays kimi-k3 primary; fallbacks re-anchored to 5.3 (opencode-go then zai).
  *     - artistry: stays glm-5.2 (operator choice — artistry is not a coding-bench beneficiary),
  *       fallback opencode-go/glm-5.1 (880/5h) unchanged.
@@ -54,6 +55,23 @@
  *   2026-08-14 (429 GoUsageLimitError, resets ~2 days) — until reset, opencode-go primaries
  *   (deep/ultrabrain) will fail-through to zai via the empty-output fallback chain by design.
  *   glm-5.3 promo-multiplier status still unverified (promoModels covers only 5.2/5-turbo).
+ *
+ * ─── GLM-5.3-FLASH RELEASE 2026-08-31 (operator refresh; doc-verified 2026-09-03
+ *     vs https://docs.z.ai/guides/vlm/glm-5.3-flash) ───────────────────────
+ *   glm-5.3-flash: first NATIVE MULTIMODAL model of the GLM-5 series — vision lives inside the
+ *   coding loop (observes interfaces, rendered results, interaction feedback). ON the GLM Coding
+ *   Plan ("now fully available") with 3× the quota of glm-5.3. Outperforms glm-5.2 across coding/
+ *   agentic benchmarks (DeepSWE v1.1 63.4 vs 46.2; Z.ai Code Bench v1.0: beats 5.2 at every effort
+ *   level, ~Claude Opus 4.8 at max effort). 1M-token context. 320B total / 18B activated params.
+ *   ⚠ thinking.type supports ONLY "enabled" — thinking CANNOT be disabled for 5.3-flash (docs
+ *     recommend reasoning_effort max). Categories stamping thinkingLevel "off" on 5.3-flash
+ *     (unspecified-low; quick's fallback rung) rely on the provider ignoring the downlevel.
+ *   Drove the 08-31 moves: NEW primary on unspecified-low / writing / visual-engineering / research
+ *   (zai) + artistry (opencode-go); quick + git-commit-message gained zai/5.3-flash fallback rungs.
+ *   Plan callable set now: {glm-5.2, glm-5.2-highspeed, glm-5-turbo, glm-4.7, glm-5.3, glm-5.3-flash}.
+ *   ⚠ NEW POINTS-BASED quota system (new GLM Coding Plan): off-peak (incl. all-day weekends) = 50%
+ *     of standard points. The QUOTA MULTIPLIERS block + PROMO_SUNSET logic below predate it —
+ *     re-verify promo/peak logic against the live plan before relying on isPromoActive/isPeakHours.
  *
  * ─── QUOTA MULTIPLIERS (Z AI DevPack FAQ:21, /devpack/overview) ─────────────
  *   PROMO (now → 2026-09-30): glm-5.2 & glm-5-turbo = 1× off-peak  (free upgrade)
@@ -183,7 +201,9 @@ export function isPeakHours(now = new Date()): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The map (Layer 2 data) — 7 of 10 categories Z-AI-plan-primary; quick (opencode/deepseek-v4-flash-free), ultrabrain (opencode-go/kimi-k3), git-commit-message (opencode/deepseek-v4-flash-free) are opencode-primary (FREE/external, preserve plan quota).
+// The map (Layer 2 data) — 5 of 10 categories Z-AI-plan-primary (unspecified-low/high, writing,
+// visual-engineering, research — glm-5.3-flash & glm-5-turbo); quick, deep, ultrabrain, artistry,
+// git-commit-message are opencode-go-primary (external, quota-shield).
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Quota cost legend: 1× = standard, 2× = post-promo off-peak (5.2/5-turbo),
@@ -225,7 +245,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     thinkingLevel: "off",
     turnBudget: { maxTurns: 12 },
     rationale:
-      "External tier (opencode-go/deepseek-v4-flash); short fast tasks. Moved off Z-AI plan 2026-08-04 because glm-4.5-air was DROPPED from the Coding Plan (plan narrowed to 4 models), and trivial work isn't worth the remaining on-plan quota anyway → opencode-go. Per-tier fallback opencode/ling-3.0-flash-free (FREE).",
+      "External tier (opencode-go/deepseek-v4-flash); short fast tasks. Moved off Z-AI plan 2026-08-04 because glm-4.5-air was DROPPED from the Coding Plan (plan narrowed to 4 models), and trivial work isn't worth the remaining on-plan quota anyway → opencode-go. Per-tier fallbacks zai/glm-4.7 then zai/glm-5.3-flash (on-plan, 3×-quota flash) then opencode/ling-3.0-flash-fin-free (FREE external).",
   },
   "unspecified-low": {
     provider: "zai-coding-cn",
@@ -233,7 +253,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackModels: [{ provider: "opencode-go", id: "deepseek-v4-flash" }],
     thinkingLevel: "off",
     rationale:
-      "1× plan tier; routine low-effort work. FAQ:29 'sufficient for daily dev'. Fallback to opencode/deepseek-v4-flash-free to preserve quota.",
+      "Plan tier (glm-5.3-flash, 3× quota vs 5.3); routine low-effort work — flash beats glm-5.2 at flash cost. Fallback opencode-go/deepseek-v4-flash (external; preserves plan points).",
   },
   "unspecified-high": {
     provider: "zai-coding-cn",
@@ -272,7 +292,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     ],
     thinkingLevel: "xhigh",
     rationale:
-      "Hardest logic. Primary opencode-go/kimi-k3 (reasoning model, 110/5h); fallbacks re-anchored to 5.3 on 2026-08-14: opencode-go/glm-5.3 (220/5h, shield-preserving) then zai/glm-5.3 (shield-break on exhaustion). thinkingLevel xhigh (union max; earlier 'max' was invalid — spawn.ts passes the level verbatim to --thinking).",
+      "Hardest logic. Primary opencode-go/kimi-k3 (reasoning model, 110/5h); fallbacks opencode-go/grok-4.6 then opencode-go/deepseek-v4-pro (shield-preserving), then zai/glm-5.3 (shield-break on exhaustion). thinkingLevel xhigh (union max; earlier 'max' was invalid — spawn.ts passes the level verbatim to --thinking).",
   },
   writing: {
     provider: "zai-coding-cn",
@@ -294,7 +314,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     ],
     thinkingLevel: "high",
     rationale:
-      "UI/frontend/styling code; glm-5.3-flash @high — NATIVE MULTIMODAL visual coding loop (docs.z.ai/guides/vlm/glm-5.3-flash): observes rendered interfaces — exactly this category's failure mode. Replaced glm-5-turbo 2026-08-31 (flash beats 5.2, 3x quota vs 5.3, 1M ctx). Per-tier fallback opencode-go/glm-5.2.",
+      "UI/frontend/styling code; glm-5.3-flash @high — NATIVE MULTIMODAL visual coding loop (docs.z.ai/guides/vlm/glm-5.3-flash): observes rendered interfaces — exactly this category's failure mode. Replaced glm-5-turbo 2026-08-31 (flash beats 5.2, 3x quota vs 5.3, 1M ctx). Per-tier fallbacks opencode-go/glm-5.3-flash then opencode/glm-5.2.",
   },
   artistry: {
     provider: "opencode-go",
@@ -302,7 +322,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackModels: [{ provider: "zai-coding-cn", id: "glm-5.3-flash" }],
     thinkingLevel: "high",
     rationale:
-      "Creative/design; glm-5.2 (top artistry pick on Opencode-Go; moved primary from zai 2026-08-31). Per-tier fallback zai-coding-cn/glm-5.3-flash — native multimodal + 3x quota makes it a strong artistry fallback.",
+      "Creative/design; opencode-go/glm-5.3-flash (native multimodal — visual judgment for aesthetics; moved primary from zai 2026-08-31). Per-tier fallback zai-coding-cn/glm-5.3-flash — native multimodal + 3x quota makes it a strong artistry fallback.",
   },
   research: {
     provider: "zai-coding-cn",
