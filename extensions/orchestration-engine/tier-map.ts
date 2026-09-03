@@ -115,14 +115,17 @@ export type TaskCategory =
   | "research" // web/docs/package research (keyless composite — Wikipedia+DDG-IA+npm+GitHub+docs-fetch)
   | "git-commit-message"; // git ops (opencode/deepseek-v4-flash-free — FREE external, preserves plan quota; one of three non-Z-AI categories alongside quick + ultrabrain)
 
-/** Pi thinking levels. null-able per model via thinkingLevelMap. */
+/** Pi thinking levels. null-able per model via thinkingLevelMap. "max" per pi-ai
+ *  types.d.ts (accepted by --thinking; z.ai glm-5.3: reasoning_effort max = default +
+ *  recommended for coding — probe-verified 2026-09-03). */
 export type ThinkingLevel =
   | "off"
   | "minimal"
   | "low"
   | "medium"
   | "high"
-  | "xhigh";
+  | "xhigh"
+  | "max";
 
 export interface FallbackModel {
   provider: string;
@@ -283,9 +286,9 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
       { provider: "opencode-go", id: "glm-5.2" },
       { provider: "opencode-go", id: "glm-5.1" },
     ],
-    thinkingLevel: "high",
+    thinkingLevel: "max",
     rationale:
-      "Deep codebase investigation/execution; opencode-go/glm-5.3 primary (QUOTA SHIELD: burn opencode-go's 220/5h 5.3 quota first; zai-coding-plan is the safety net — fallback zai/glm-5.3 breaks the shield only on opencode-go exhaustion, then opencode-go/glm-5.2. glm-5.3 = 5.2 base + post-training coding/agent gains (+50% Code Bench, 1M ctx). Promotional multiplier status for 5.3 unverified.",
+      "Deep codebase investigation/execution; opencode-go/glm-5.3 primary (QUOTA SHIELD: burn opencode-go's 220/5h 5.3 quota first; zai-coding-plan is the safety net — fallback zai/glm-5.3 breaks the shield only on opencode-go exhaustion, then opencode-go/glm-5.2. glm-5.3 = 5.2 base + post-training coding/agent gains (+50% Code Bench, 1M ctx). thinkingLevel max since 2026-09-03: z.ai recommends reasoning_effort max for coding (default is max; at max 5.3 is MORE token-efficient than 5.2 — 75K vs 96K output tokens on Code Bench; probe-verified pi --thinking max accepted).",
   },
   ultrabrain: {
     provider: "opencode-go",

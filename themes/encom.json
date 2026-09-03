@@ -76,6 +76,7 @@
     "thinkingMedium": "color5",
     "thinkingHigh": "color3",
     "thinkingXhigh": "color1",
+    "thinkingMax": "color9",
 
     "bashMode": "color3"
   },

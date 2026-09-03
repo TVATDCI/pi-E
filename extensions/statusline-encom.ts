@@ -263,7 +263,9 @@ const renderSolidLine = (cells: SolidCell[]): string => {
 };
 
 // pi thinking level (pi-ai types.d.ts:21-22) → encom theme token.
-// encom.json ships one color per level (off→faint … xhigh→brightPurple).
+// encom.json ships one color per level (off→borderMuted … high→amber, xhigh→red, max→pink).
+// max added 2026-09-03: z.ai glm-5.3 recommends reasoning_effort max for coding; pi accepts
+// --thinking max. Without this entry max fell through to thinkingOff (near-invisible).
 const THINKING_TOKEN: Record<string, ThemeColor> = {
   off: "thinkingOff",
   minimal: "thinkingMinimal",
@@ -271,6 +273,7 @@ const THINKING_TOKEN: Record<string, ThemeColor> = {
   medium: "thinkingMedium",
   high: "thinkingHigh",
   xhigh: "thinkingXhigh",
+  max: "thinkingMax",
 };
 
 const fmtClock = (): string => {
