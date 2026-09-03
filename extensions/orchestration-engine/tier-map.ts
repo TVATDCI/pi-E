@@ -217,7 +217,11 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   quick: {
     provider: "opencode-go",
     id: "deepseek-v4-flash",
-    fallbackModels: [{ provider: "opencode", id: "ling-3.0-flash-free" }],
+    fallbackModels: [
+      { provider: "zai-coding-cn", id: "glm-4.7" },
+      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "ling-3.0-flash-fin-free" },
+    ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 12 },
     rationale:
@@ -235,8 +239,10 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     provider: "zai-coding-cn",
     id: "glm-5-turbo",
     fallbackModels: [
-      { provider: "opencode-go", id: "kimi-k2.7-code" },
+      { provider: "zai-coding-cn", id: "glm-5.2" },
       { provider: "opencode-go", id: "glm-5.2" },
+      { provider: "opencode-go", id: "kimi-k2.7-code" },
+      { provider: "opencode", id: "glm-5.2" },
     ],
     thinkingLevel: "high",
     rationale:
@@ -250,11 +256,11 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackModels: [
       { provider: "zai-coding-cn", id: "glm-5.3" },
       { provider: "opencode-go", id: "glm-5.2" },
-      { provider: "opencode-go", id: "kimi-k2.7-code" },
+      { provider: "opencode-go", id: "glm-5.1" },
     ],
     thinkingLevel: "high",
     rationale:
-      "Deep codebase investigation/execution; opencode-go/glm-5.3 primary (QUOTA SHIELD: burn opencode-go's 220/5h 5.3 quota first; zai-coding-plan is the safety net — fallback zai/glm-5.3 breaks the shield only on opencode-go exhaustion, then opencode-go/glm-5.2, then kimi-k2.7-code). glm-5.3 = 5.2 base + post-training coding/agent gains (+50% Code Bench, 1M ctx). Promotional multiplier status for 5.3 unverified.",
+      "Deep codebase investigation/execution; opencode-go/glm-5.3 primary (QUOTA SHIELD: burn opencode-go's 220/5h 5.3 quota first; zai-coding-plan is the safety net — fallback zai/glm-5.3 breaks the shield only on opencode-go exhaustion, then opencode-go/glm-5.2. glm-5.3 = 5.2 base + post-training coding/agent gains (+50% Code Bench, 1M ctx). Promotional multiplier status for 5.3 unverified.",
   },
   ultrabrain: {
     provider: "opencode-go",
@@ -282,14 +288,17 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   "visual-engineering": {
     provider: "zai-coding-cn",
     id: "glm-5.3-flash",
-    fallbackModels: [{ provider: "opencode-go", id: "glm-5.2" }],
+    fallbackModels: [
+      { provider: "opencode-go", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "glm-5.2" },
+    ],
     thinkingLevel: "high",
     rationale:
       "UI/frontend/styling code; glm-5.3-flash @high — NATIVE MULTIMODAL visual coding loop (docs.z.ai/guides/vlm/glm-5.3-flash): observes rendered interfaces — exactly this category's failure mode. Replaced glm-5-turbo 2026-08-31 (flash beats 5.2, 3x quota vs 5.3, 1M ctx). Per-tier fallback opencode-go/glm-5.2.",
   },
   artistry: {
     provider: "opencode-go",
-    id: "glm-5.2",
+    id: "glm-5.3-flash",
     fallbackModels: [{ provider: "zai-coding-cn", id: "glm-5.3-flash" }],
     thinkingLevel: "high",
     rationale:
@@ -298,7 +307,10 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   research: {
     provider: "zai-coding-cn",
     id: "glm-5.3-flash",
-    fallbackModels: [{ provider: "opencode-go", id: "deepseek-v4-pro" }],
+    fallbackModels: [
+      { provider: "opencode-go", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "gpt-5.6-luna" },
+    ],
     thinkingLevel: "medium",
     turnBudget: { maxTurns: 20 },
     rationale:
@@ -308,8 +320,9 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     provider: "opencode-go",
     id: "deepseek-v4-flash",
     fallbackModels: [
-      { provider: "opencode-go", id: "minimax-m2.7" },
+      { provider: "zai-coding-cn", id: "glm-4.7" },
       { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "deepseek-v4-flash" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 6 },
