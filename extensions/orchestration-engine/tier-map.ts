@@ -72,6 +72,12 @@
  *   ⚠ NEW POINTS-BASED quota system (new GLM Coding Plan): off-peak (incl. all-day weekends) = 50%
  *     of standard points. The QUOTA MULTIPLIERS block + PROMO_SUNSET logic below predate it —
  *     re-verify promo/peak logic against the live plan before relying on isPromoActive/isPeakHours.
+ *   PROBE-VERIFIED 2026-09-03 (pi -p live, TNT, output-based): zai 5/5 · opencode 4/4 (incl.
+ *     gpt-5.6-luna ALIVE, ling-3.0-flash-fin-free) · opencode-go 7/9 — deepseek-v4-flash & -pro =
+ *     403 RegionError "only available hosted in China and requires explicit opt in"
+ *     (workspace wrk_01KH5T3KGQCDBNRVNWS4Y2YRC0/go) → dropped as quick/git-commit primaries and
+ *     swapped to opencode/deepseek-v4-flash as fallback rungs. thinking off/minimal both ACCEPTED
+ *     by 5.3-flash ("off" = tolerated no-op stamp; model thinks regardless — flash-tier cost).
  *
  * ─── QUOTA MULTIPLIERS (Z AI DevPack FAQ:21, /devpack/overview) ─────────────
  *   PROMO (now → 2026-09-30): glm-5.2 & glm-5-turbo = 1× off-peak  (free upgrade)
@@ -201,9 +207,9 @@ export function isPeakHours(now = new Date()): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The map (Layer 2 data) — 5 of 10 categories Z-AI-plan-primary (unspecified-low/high, writing,
-// visual-engineering, research — glm-5.3-flash & glm-5-turbo); quick, deep, ultrabrain, artistry,
-// git-commit-message are opencode-go-primary (external, quota-shield).
+// The map (Layer 2 data) — 7 of 10 categories Z-AI-plan-primary (quick, unspecified-low/high,
+// writing, visual-engineering, research, git-commit-message — glm-5.3-flash / glm-5-turbo / glm-4.7);
+// deep, ultrabrain, artistry are opencode-go-primary (external quota shield).
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Quota cost legend: 1× = standard, 2× = post-promo off-peak (5.2/5-turbo),
@@ -235,25 +241,24 @@ export function isPeakHours(now = new Date()): boolean {
 //   work, route DOWN to writing/unspecified-low (glm-4.7), not UP to deep.
 export const TIERS: Record<TaskCategory, TierEntry> = {
   quick: {
-    provider: "opencode-go",
-    id: "deepseek-v4-flash",
+    provider: "zai-coding-cn",
+    id: "glm-5.3-flash",
     fallbackModels: [
       { provider: "zai-coding-cn", id: "glm-4.7" },
-      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
       { provider: "opencode", id: "ling-3.0-flash-fin-free" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 12 },
     rationale:
-      "External tier (opencode-go/deepseek-v4-flash); short fast tasks. Moved off Z-AI plan 2026-08-04 because glm-4.5-air was DROPPED from the Coding Plan (plan narrowed to 4 models), and trivial work isn't worth the remaining on-plan quota anyway → opencode-go. Per-tier fallbacks zai/glm-4.7 then zai/glm-5.3-flash (on-plan, 3×-quota flash) then opencode/ling-3.0-flash-fin-free (FREE external).",
+      "Short fast tasks; zai/glm-5.3-flash primary (3×-quota flash, beats glm-5.2 — cheap enough for trivial work; moved from opencode-go/deepseek-v4-flash 2026-09-03: that model is China-hosted region-blocked without workspace opt-in). Fallbacks zai/glm-4.7 (on-plan) then opencode/ling-3.0-flash-fin-free (FREE external). thinkingLevel off is a tolerated downlevel — 5.3-flash cannot disable thinking (probe-verified 2026-09-03: off/minimal both accepted).",
   },
   "unspecified-low": {
     provider: "zai-coding-cn",
     id: "glm-5.3-flash",
-    fallbackModels: [{ provider: "opencode-go", id: "deepseek-v4-flash" }],
+    fallbackModels: [{ provider: "opencode", id: "deepseek-v4-flash" }],
     thinkingLevel: "off",
     rationale:
-      "Plan tier (glm-5.3-flash, 3× quota vs 5.3); routine low-effort work — flash beats glm-5.2 at flash cost. Fallback opencode-go/deepseek-v4-flash (external; preserves plan points).",
+      "Plan tier (glm-5.3-flash, 3× quota vs 5.3); routine low-effort work — flash beats glm-5.2 at flash cost. Fallback opencode/deepseek-v4-flash (funded external; preserves plan points; swapped from opencode-go rung 2026-09-03 — region-blocked).",
   },
   "unspecified-high": {
     provider: "zai-coding-cn",
@@ -299,11 +304,11 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     id: "glm-5.3-flash",
     fallbackModels: [
       { provider: "opencode-go", id: "glm-5.1" },
-      { provider: "opencode-go", id: "deepseek-v4-flash" },
+      { provider: "opencode", id: "deepseek-v4-flash" },
     ],
     thinkingLevel: "medium",
     rationale:
-      "Prose/docs; glm-5.3-flash @medium (replaced glm-4.7 2026-08-31, LR-0019 lineage; flash beats 5.2 at flash cost, 3x quota). Fallbacks opencode-go/glm-5.1 then opencode-go/deepseek-v4-flash to preserve quota.",
+      "Prose/docs; glm-5.3-flash @medium (replaced glm-4.7 2026-08-31, LR-0019 lineage; flash beats 5.2 at flash cost, 3x quota). Fallbacks opencode-go/glm-5.1 then opencode/deepseek-v4-flash (swapped from opencode-go rung 2026-09-03 — region-blocked) to preserve quota.",
   },
   "visual-engineering": {
     provider: "zai-coding-cn",
@@ -337,17 +342,17 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
       "Web/docs/package research (athena-equivalent). glm-5.3-flash (new in series 5) — NOT quick/keymaker (opencode/deepseek-v4-flash). Keyless composite search (Wikipedia+DDG-IA+npm+GitHub+docs-fetch via the web-research extension); general free-text web is a known gap. Always 1× plan tier.",
   },
   "git-commit-message": {
-    provider: "opencode-go",
-    id: "deepseek-v4-flash",
+    provider: "zai-coding-cn",
+    id: "glm-4.7",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-4.7" },
       { provider: "zai-coding-cn", id: "glm-5.3-flash" },
       { provider: "opencode", id: "deepseek-v4-flash" },
+      { provider: "opencode", id: "ling-3.0-flash-fin-free" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 6 },
     rationale:
-      "External tier; preserves plan quota entirely for trivial git work. OmO keeps this category opencode-go by design (one of three categories not on the Z AI plan, alongside quick + ultrabrain) — matches OmO after operator reverted an interim glm-5.3-flash assignment.",
+      "Trivial git work; zai/glm-4.7 primary (always-cheapest plan stamp; moved from opencode-go/deepseek-v4-flash 2026-09-03 — China-hosted region-blocked). Fallbacks zai/glm-5.3-flash then opencode/deepseek-v4-flash (funded external) then opencode/ling-3.0-flash-fin-free (FREE). Cross-stack note: OmO's git-commit-message category uses zai/glm-5.3-flash primary — acceptable stack-level divergence.",
   },
 };
 

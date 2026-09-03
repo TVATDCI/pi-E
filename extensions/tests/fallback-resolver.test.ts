@@ -102,11 +102,11 @@ eq(
 );
 check("resolveModel(deep): fallbackFlags is an array (not undefined/string)", Array.isArray(deepResolved.fallbackFlags));
 
-const quickResolved = resolveModel("quick", mockRegistry([["opencode-go", "deepseek-v4-flash"]]));
+const quickResolved = resolveModel("quick", mockRegistry([["zai-coding-cn", "glm-5.3-flash"]]));
 eq(
-  "resolveModel(quick): 3-elem fallbackFlags (zai on-plan first, FREE external last)",
+  "resolveModel(quick): 2-elem fallbackFlags (zai 4.7 on-plan, FREE external last)",
   quickResolved.fallbackFlags,
-  ["zai-coding-cn/glm-4.7", "zai-coding-cn/glm-5.3-flash", "opencode/ling-3.0-flash-fin-free"],
+  ["zai-coding-cn/glm-4.7", "opencode/ling-3.0-flash-fin-free"],
 );
 
 // Primary not in registry, global present → source "fallback", fallbackFlags STILL the per-tier array.
@@ -122,7 +122,7 @@ eq(
   ["zai-coding-cn/glm-5.3", "opencode-go/glm-5.2", "opencode-go/glm-5.1"],
 );
 
-// Unknown category → DEFAULT_CATEGORY (unspecified-low), whose fallback is opencode/deepseek-v4-flash-free.
+// Unknown category → DEFAULT_CATEGORY (unspecified-low), whose fallback is opencode/deepseek-v4-flash (funded external).
 const unknownResolved = resolveModel("nonsense-category", mockRegistry([["zai-coding-cn", "glm-5.3-flash"]]));
 eq(
   "resolveModel(unknown): falls to DEFAULT_CATEGORY primary",
@@ -132,7 +132,7 @@ eq(
 eq(
   "resolveModel(unknown): DEFAULT_CATEGORY fallbackFlags",
   unknownResolved.fallbackFlags,
-  ["opencode-go/deepseek-v4-flash"],
+  ["opencode/deepseek-v4-flash"],
 );
 
 // Registry missing find() → throws (contract guard).
