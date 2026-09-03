@@ -33,8 +33,8 @@ single way pi's session work reaches sisyphus.
 ## The ritual (do all steps)
 
 ### 1. Compose the handoff from session context
-Write `~/.pi/agent/exports/pi-handoff.md` (overwrite the previous; one file — git is
-the history). Create `exports/` if absent. Use this schema EXACTLY (spec lines 39–72):
+Write `~/.pi/agent/exports/pi-handoff.md` (overwrite the previous; one file — exports/ is
+untracked by design, see step 4). Create `exports/` if absent. Use this schema EXACTLY (spec lines 39–72):
 
 ```markdown
 # Pi Handoff — <one-line session summary> (<YYYY-MM-DD>)
@@ -105,37 +105,30 @@ not a deposit:
 Quality bar: *would a future session benefit?* If only this session cared, skip.
 Nothing learned → no deposit, no guilt.
 
-### 4. Prepare the commit (operator runs it — do NOT push)
-`exports/` is tracked by pi's repo (spec rule 3 — git is the integrity signal).
-Prepare the command with the **`pi:` prefix** (adopted convention, new commits only):
+### 4. Handoff durability (file on disk — NOT a commit)
 
-```bash
-cd ~/.pi/agent && git add exports/pi-handoff.md && git commit -m "pi: session-close — <one-line summary>"
-```
-
-Hand the operator the exact command. **Never push** (`only_operator_pushes`); never
-auto-commit. **Two commit types, kept separate (operator principle):** (1) *implementation commits*
-(`feat`/`fix`/`docs`/`refactor`/`test`) — tested-pass checkpoints that secure the
-codebase as work progresses, committed **before** close; (2) the *session-close commit*
-(`pi: session-close`) — the handoff, terminal session metadata. The handoff is **never
-folded into an implementation commit, and implementation work is never folded into the
-close commit.** If stray work is uncommitted at close, commit it as its own
-implementation commit **first**, then the `pi:` handoff commit.
+`exports/` is **deliberately untracked** in pi-E (commit `f0a0a9b` "untrack
+machine-local audit trail"; exports may contain conversation content — same posture
+as `store.jsonl`/`memory.md`: private operator context stays out of the shared repo).
+So: write the handoff file, and **do not commit it**. Durability = the file on disk +
+sisyphus reading it at its next `session-begin`. Never `git add -f` exports/ — that
+reverses a reasoned decision. If any *tracked* file changed during close (a skill
+absorbing a lesson, etc.), that gets its own implementation commit, separate from
+the handoff — the handoff itself never enters git.
 
 ## Hard rules
 - **pi NEVER writes bd.** Proposed facts live only in the markdown.
-- **One handoff per session**, overwritten. Commit `exports/` — git history is the record.
+- **One handoff per session**, overwritten. `exports/` stays untracked (step 4) — the
+  file on disk + sisyphus's next read is the record; no commit.
 - **Parent-only.** Sub-agents run `--no-extensions`; only the parent session closes.
 - **Best-effort, never block.** If authoring fails, say so — don't silently skip.
 - **Provenance string.** When a fact traces to a commit, cite it (`pi: fix(memory): …`)
   so sisyphus can attribute it on promotion.
 
 ## Done-when (the round-trip)
-The write is complete when `exports/pi-handoff.md` has all sections + `Written at:`.
-**The session is not closed until the working tree is clean** — the `pi:` handoff
-commit must run (operator authorizes it via the ASK gate). If the operator continues
-with other work before that commit runs, **re-offer the handoff commit; do not let it
-strand** (a written-but-uncommitted handoff is an incomplete close). The **bridge** is
-closed only when sisyphus's next `session-begin` surfaces a `[FROM pi]` block (Step 4)
-and the proposed facts are promotable (Step 5). State all three honestly: "handoff
-written; handoff commit <run|pending>; round-trip pending sisyphus's next session-begin."
+The write is complete when `exports/pi-handoff.md` has all sections + `Written at:`
+(file is local-only; no commit — see step 4). Any *tracked* changes from the close
+ritual (skill edits) are committed as their own implementation commits. The **bridge**
+is closed only when sisyphus's next `session-begin` surfaces a `[FROM pi]` block (Step 4)
+and the proposed facts are promotable (Step 5). State honestly: "handoff written
+(on disk, untracked by design); round-trip pending sisyphus's next session-begin."
