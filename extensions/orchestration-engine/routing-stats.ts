@@ -42,10 +42,14 @@ function fmtMs(v: number | null): string {
   return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`;
 }
 
-/** Quota multiplier for the per-model view. FREE for opencode; 1×/2×/3× for the promo-flagship glm-5.2/5-turbo; 1× otherwise. */
+/** Quota marker for the per-model view. zai: 1×/2×/3× promo math; opencode/opencode-go:
+ *  external — "FREE" only for *-free ids, "ext" for funded (opencode-go is monthly-capped). */
 export function quotaMarker(modelFlag: string | undefined, peak: boolean, promo: boolean): string {
   if (!modelFlag) return "?";
-  if (modelFlag.startsWith("opencode/")) return "FREE";
+  if (modelFlag.startsWith("opencode/")) {
+    return /-free$/.test(modelFlag.split("/")[1] ?? "") ? "FREE" : "ext";
+  }
+  if (modelFlag.startsWith("opencode-go/")) return "ext";
   const id = modelFlag.split("/")[1] ?? "";
   if (id === "glm-5.2" || id === "glm-5-turbo") return peak ? "3×" : promo ? "1×" : "2×";
   return "1×";
