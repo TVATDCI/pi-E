@@ -2,7 +2,7 @@
 // two self-contained script-convention test families (test-*.ts + *.test.ts).
 //
 // Design (verified against the repo, 2026-08-14):
-//   - 30 test files today (13 × test-*.ts + 17 × *.test.ts) across extensions/ subtrees.
+//   - test files across extensions/ subtrees (count drifts; run to see the live number).
 //   - Every family member is a self-contained script: check() counters, process.exit(1)
 //     on failure, implicit 0 on pass. NOT node:test — `node --test` discovery cannot wrap
 //     them. We spawn each with cwd = its own directory (their headers say "Run from here").
