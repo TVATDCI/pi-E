@@ -41,7 +41,7 @@ ghosts=$(git status --porcelain | grep '^??' | awk '{print $2}')
 ghost_count=0
 for g in $ghosts; do
   case "$g" in
-    exports/*|sessions/*|*.log|*.tmp|mcp-cache.json|mcp-onboarding.json|extensions/quotas.json) ;; # known/tracked-dir/runtime-state
+    exports/*|sessions/*|*.log|*.tmp|mcp-cache.json|mcp-npx-cache.json|mcp-onboarding.json|extensions/quotas.json) ;; # known/tracked-dir/runtime-state
     *) echo -e "${RED}FAIL${RST} ghost untracked: $g (unexpected file — investigate before deleting)"; ghost_count=$((ghost_count+1));;
   esac
 done
@@ -60,6 +60,17 @@ done
 # 5. Modified-not-staged pileup (uncommitted work drifting)
 dirty=$(git status --porcelain | grep -c '^ M')
 [ "$dirty" -gt 0 ] && echo -e "${YEL}WARN${RST} ${dirty} modified-uncommitted file(s) in pi repo"
+
+# 6. Broken symlinks in skill dirs (vendor-drift rot: /usr/share/omarchy package
+#    updates can move targets silently — T3 probe 2026-09-07 made this permanent)
+broken=$(find "$HOME/.pi/agent/skills" "$HOME/.agents/skills" -xtype l 2>/dev/null | wc -l)
+if [ "$broken" -gt 0 ]; then
+  echo -e "${RED}FAIL${RST} ${broken} broken skill symlink(s):"
+  find "$HOME/.pi/agent/skills" "$HOME/.agents/skills" -xtype l 2>/dev/null | sed 's/^/      /'
+  fail=1
+else
+  echo -e "${GRN}OK${RST}   skill symlinks resolve (vendor targets alive)"
+fi
 
 echo "== done =="
 exit $fail
