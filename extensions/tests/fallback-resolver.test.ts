@@ -89,24 +89,24 @@ function mockRegistry(present: Array<[string, string]>): ModelRegistryLike {
   };
 }
 
-const deepResolved = resolveModel("deep", mockRegistry([["opencode-go", "glm-5.3"]]));
+const deepResolved = resolveModel("deep", mockRegistry([["zai-coding-cn", "glm-5.3"]]));
 eq(
   "resolveModel(deep): source tier-map, modelFlag = primary",
   [deepResolved.source, deepResolved.modelFlag],
-  ["tier-map", "opencode-go/glm-5.3"],
+  ["tier-map", "zai-coding-cn/glm-5.3"],
 );
 eq(
-  "resolveModel(deep): fallbackFlags = per-tier 3-elem array (NO global tail — spawn.ts appends it)",
+  "resolveModel(deep): fallbackFlags = per-tier 4-elem array (NO global tail — spawn.ts appends it)",
   deepResolved.fallbackFlags,
-  ["zai-coding-cn/glm-5.3", "opencode-go/glm-5.2", "opencode-go/glm-5.1"],
+  ["opencode-go/kimi-k2.7-code", "opencode-go/grok-4.6", "opencode-go/glm-5.3", "opencode-go/glm-5.2"],
 );
 check("resolveModel(deep): fallbackFlags is an array (not undefined/string)", Array.isArray(deepResolved.fallbackFlags));
 
 const quickResolved = resolveModel("quick", mockRegistry([["zai-coding-cn", "glm-5.3-flash"]]));
 eq(
-  "resolveModel(quick): 2-elem fallbackFlags (zai 4.7 on-plan, FREE external last)",
+  "resolveModel(quick): 3-elem fallbackFlags (external luna → external flash → FREE ling last)",
   quickResolved.fallbackFlags,
-  ["zai-coding-cn/glm-4.7", "opencode/ling-3.0-flash-fin-free"],
+  ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash", "opencode/ling-3.0-flash-fin-free"],
 );
 
 // Primary not in registry, global present → source "fallback", fallbackFlags STILL the per-tier array.
@@ -119,20 +119,20 @@ eq(
 eq(
   "resolveModel(deep) primary-missing: fallbackFlags still the per-tier array",
   deepFallback.fallbackFlags,
-  ["zai-coding-cn/glm-5.3", "opencode-go/glm-5.2", "opencode-go/glm-5.1"],
+  ["opencode-go/kimi-k2.7-code", "opencode-go/grok-4.6", "opencode-go/glm-5.3", "opencode-go/glm-5.2"],
 );
 
-// Unknown category → DEFAULT_CATEGORY (unspecified-low), whose fallback is opencode/deepseek-v4-flash (funded external).
-const unknownResolved = resolveModel("nonsense-category", mockRegistry([["zai-coding-cn", "glm-5.3-flash"]]));
+// Unknown category → DEFAULT_CATEGORY (unspecified-low), primary opencode-go/gpt-5.6-luna (external).
+const unknownResolved = resolveModel("nonsense-category", mockRegistry([["opencode-go", "gpt-5.6-luna"]]));
 eq(
   "resolveModel(unknown): falls to DEFAULT_CATEGORY primary",
   [unknownResolved.category, unknownResolved.modelFlag],
-  [DEFAULT_CATEGORY, "zai-coding-cn/glm-5.3-flash"],
+  [DEFAULT_CATEGORY, "opencode-go/gpt-5.6-luna"],
 );
 eq(
   "resolveModel(unknown): DEFAULT_CATEGORY fallbackFlags",
   unknownResolved.fallbackFlags,
-  ["opencode/deepseek-v4-flash"],
+  ["zai-coding-cn/glm-5.3-flash", "opencode/glm-5.3-flash"],
 );
 
 // Registry missing find() → throws (contract guard).
@@ -156,7 +156,8 @@ check("resolveModel: throws when neither primary nor global resolves", threwNeit
 
 // ── Strong-model-at-judging invariant (data guard) ───────────────────────────
 // The 3 judging categories' fallback arrays (deep/ultrabrain/unspecified-high) MUST land only on
-// glm-5.x / kimi — never FREE/cheap tiers. Plus every category must have ≥1 fallback (global tail is
+// strong-tier flagships — glm-5.x / kimi / grok-4.6 / qwen3.8-max / gpt-5.6-luna — never FREE/cheap
+// tiers. Plus every category must have ≥1 fallback (global tail is
 // spawn.ts's concern, but the per-tier array should be non-empty for resilience).
 const JUDGING = ["deep", "ultrabrain", "unspecified-high"] as const;
 const STRONG_MODEL_RE_UNUSED_PLACEHOLDER = null; // removed: dead constant (review round 1)
@@ -167,8 +168,8 @@ for (const cat of JUDGING) {
   if (arr.length === 0) allJudgingNonEmpty = false;
   for (const fm of arr) {
     const flag = `${fm.provider}/${fm.id}`;
-    // strong = id starts with glm-5 (any variant) or kimi
-    if (!/^glm-5\b/.test(fm.id) && !/^kimi-/.test(fm.id) && !/^grok-4\.6$/.test(fm.id) && !/^deepseek-v4-pro$/.test(fm.id)) {
+    // strong = glm-5.x, kimi-*, grok-4.6, qwen3.8-max, gpt-5.6-luna (matches tier-map header invariant)
+    if (!/^glm-5\b/.test(fm.id) && !/^kimi-/.test(fm.id) && !/^grok-4\.6$/.test(fm.id) && !/^qwen3\.8-max$/.test(fm.id) && !/^gpt-5\.6-luna$/.test(fm.id)) {
       allJudgingStrong = false;
       console.log(`    ✗ ${cat} fallback ${flag} is NOT strong-tier`);
     }
