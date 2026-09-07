@@ -17,7 +17,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync, existsSync, statSync } from "node:fs";
-import { scanSecrets } from "../memory/scanner.ts";
+import { scanSecrets } from "./memory/scanner.ts";
 import { join } from "node:path";
 import * as os from "node:os";
 
@@ -114,6 +114,18 @@ export function checkStale(_exportTimestamp: string): string | null {
         } catch { /* ignore */ }
     }
     return null;
+}
+
+/** Bridge health tri-state — PURE, unit-testable. "missing" = export file absent/empty
+ *  (bd facts NOT injected this turn — the dead-pipe case must be LOUD, not silent:
+ *  pi's own post-migration diagnostic found the export dead with telemetry claiming fresh).
+ *  "stale" = file present but bd modified after export (dedup defers to memory). "fresh" = ok. */
+export function bridgeStatus(
+    exportTimestamp: string | null,
+    stale: string | null,
+): "missing" | "stale" | "fresh" {
+    if (!exportTimestamp) return "missing";
+    return stale ? "stale" : "fresh";
 }
 
 /**
