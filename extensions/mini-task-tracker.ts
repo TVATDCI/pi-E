@@ -1,4 +1,6 @@
-// Lesson 0005 build-along: mini-task-tracker — the bd replacement (Layer 1 keystone).
+// Lesson 0005 build-along: mini-task-tracker — session-scratch task list + mutation gate
+// (keystone of pi session discipline). NOT a tracker of record: bd is the umbrella tracker;
+// this extension never persists, syncs, or writes bd (Oracle P4 verdict 2026-09-07).
 // Grounded in disler/pi-vs-claude-code tilldone.ts + Pi extensions.md.
 // Corrected: typebox import (not @sinclair/typebox), Type.Union (not StringEnum),
 // session_start only (session_switch/session_fork don't exist).
