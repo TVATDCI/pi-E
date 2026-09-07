@@ -57,6 +57,7 @@ extensions/*.disabled
 # ── EXTENSION RUNTIME STATE — self-seeded, machine-local ──────
 extensions/quotas.json
 mcp-cache.json
+mcp-npx-cache.json
 mcp-onboarding.json
 
 # ── SESSION EXPORTS — machine-local audit trail (may contain conversation content)
