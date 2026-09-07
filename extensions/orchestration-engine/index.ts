@@ -281,9 +281,9 @@ export default function (pi: ExtensionAPI) {
       "When agent is omitted AND no team is specified, the category's default operative is used: " +
       "quick→keymaker, unspecified→trinity, deep→morpheus, ultrabrain→neo, writing→mouse, visual-engineering/artistry→architect, research→researcher, git-commit-message→seraph. " +
       "Explicit agent= overrides the default (e.g. agent='momus' for a PRD gate, agent='oracle' for architecture reasoning). " +
-      "Categories (tier-map.ts is authoritative): quick (deepseek-v4-flash-free/FREE), unspecified-low (glm-4.7), unspecified-high (glm-5-turbo), " +
-      "deep (opencode-go/glm-5.3), ultrabrain (opencode-go/kimi-k3), writing (glm-4.7), visual-engineering (glm-5-turbo), artistry (glm-5.2), research (glm-4.7), git-commit-message (deepseek-v4-flash-free/FREE). " +
-      "Routing: for vague/ambiguous work (UX, product, planning, 'scoping IS the task') prefer writing/unspecified-low (glm-4.7, reads intent) — reserve deep/ultrabrain for well-scoped hard tasks; they loop on open-ended goals (tier-map.ts MODEL TIERING). " +
+      "Categories (tier-map.ts is authoritative): quick (zai/glm-5.3-flash), unspecified-low (opencode-go/gpt-5.6-luna), unspecified-high (zai/glm-5.3), " +
+      "deep (zai/glm-5.3), ultrabrain (zai/glm-5.3), writing (zai/glm-5.3-flash), visual-engineering (zai/glm-5.3-flash), artistry (opencode-go/minimax-m3), research (zai/glm-5.3-flash), git-commit-message (zai/glm-5.3-flash). " +
+      "Routing: for vague/ambiguous work (UX, product, planning, 'scoping IS the task') prefer writing/unspecified-low (reads intent) — reserve deep/ultrabrain for well-scoped hard tasks; they loop on open-ended goals (tier-map.ts ROUTING GUARDRAIL). " +
       "0 of 15 agents pin a model — category is the sole model authority. " +
       "One focused objective per dispatch.",
     parameters: Type.Object({
