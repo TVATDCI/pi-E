@@ -1,0 +1,6 @@
+[Unit]
+Description=bd -> pi bridge export (export-bd-global.sh)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.pi/agent/bridge/export-bd-global.sh

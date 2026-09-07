@@ -1,0 +1,5 @@
+[Unit]
+Description=Lane inbox check (peer desk messages)
+[Service]
+Type=oneshot
+ExecStart=%h/lane-check.sh
