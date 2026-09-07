@@ -63,8 +63,9 @@ Curate `/scoped-models` as a small tiered set for `Ctrl+P` cycling: a **cheap/fa
 - **No cheap model at a judging node.** Review, verify, and oracle dispatches
   (`unspecified-high`→reviewer, `deep`→reviewer-security/morpheus,
   `ultrabrain`→oracle/neo) must use a strong-tier category. All three judging
-  categories' primaries AND fallback chains land only on glm-5.x or kimi
-  (tier-map.ts:169-195, 253) — never on FREE/cheap tiers
+  categories' primaries AND fallback chains land only on strong-tier flagships
+  (glm-5.x / kimi / grok-4.6 / qwen3.8-max / gpt-5.6-luna — see the
+  STRONG-MODEL-AT-JUDGING block in tier-map.ts) — never on FREE/cheap tiers
   (deepseek-v4-flash-free / ling-*-flash-free / minimax-m2.7). One bad
   cheap-model review among parallel reviewers cascades through the whole graph
   and can't be traced.
