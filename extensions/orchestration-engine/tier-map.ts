@@ -5,19 +5,20 @@
  * Category names/semantics ported verbatim from oh-my-openagent.json — they are the
  * dispatch vocabulary (prompts, skills, operator muscle memory key on them). Do NOT rename.
  *
- * ─── Z AI Coding Plan (zai-coding-cn) — as probed 2026-09-03 ────────────────
- * Callable: glm-5.3 · glm-5.3-flash · glm-5.2 · glm-5.2-highspeed · glm-5-turbo · glm-4.7.
- * glm-5.3-flash: native multimodal, 3× the quota of glm-5.3, 1M ctx; thinking CANNOT be
- *   disabled — "off"/"minimal" stamps are tolerated no-ops (model reasons regardless).
+ * ─── Z AI GLM Coding Plan (zai-coding-cn) — Pro tier, credit system (docs.z.ai 2026-09-07) ──
+ * Models: ALL plans run GLM-5.3 + GLM-5.3-Flash only. Requests for glm-5.2/5.1 auto-route to
+ *   5.3; glm-4.7 auto-routes to 5.3-Flash — legacy ids below are ALIASES, not distinct pools.
+ * glm-5.3-flash: native multimodal, thinking CANNOT be disabled — "off"/"minimal" stamps are
+ *   tolerated no-ops (model reasons regardless).
  * glm-*-highspeed variants: unused by operator choice (never planned; no probe needed).
- * ⚠ SELECTOR ≠ SUBSCRIPTION: pi's model picker lists the full platform catalog; plan scope
- *   is enforced at CALL TIME (off-plan → 1113/1311/empty). Never add unverified models here.
- * ⚠ NO balance fallback: exhausted quota = hard fail (calls cannot draw from account balance).
- * Quota is points-based; off-peak (incl. all-day weekends) ≈ 50% of standard points. Promo
- *   until 2026-09-30: glm-5.2/5-turbo at 1× (after: 2× off-peak / 3× peak 06–10 UTC = outside
- *   Berlin work hours, so the peak multiplier is effectively moot).
- * ⚠ FOOTGUN: pi's built-in zai provider default is glm-5.1 — OFF plan. Avoid bare-provider
- *   fallback paths; scoped-models + this map are safe.
+ * Quota = CREDITS (Pro: 12,000/5h · 60,000/week). usage = (in×mult + cached×mult + out×mult)/10⁴;
+ *   5.3 = 6.9/1.7/24 · flash = 2.3/0.56/8. MCP tool calls = 1.2 credits each (Web Search /
+ *   Web Reader / Zread — wired at ~/.config/mcp/mcp.json, consumed by pi only). Off-peak = 50%.
+ * ⚠ NO balance fallback: exhausted credits = hard fail until the 5h window resets.
+ * ⚠ SELECTOR ≠ SUBSCRIPTION: pi's picker lists the full platform catalog; plan scope is
+ *   enforced at CALL TIME. Never add unverified models here.
+ * ⚠ FOOTGUN: pi's built-in zai provider default is glm-5.1 — an alias now; still avoid
+ *   bare-provider fallbacks; scoped-models + this map are safe.
  * ⚠ opencode-go/deepseek-v4-flash & -pro: 403 region-blocked (China-hosted, workspace opt-in
  *   required) — never route there.
  *
