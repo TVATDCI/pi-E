@@ -115,7 +115,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── budgets/               # turn/tool/usage budget primitives + resolver (pure library, PORT-PLAN ①)
     ├── security/              # yaml-merge.ts — deny-additive YAML layer-merge as versioned security boundary (D5)
     ├── lib/                   # shared: prompt-hash.ts, upstream-adapter.ts (cross-version seam shim, D6), command-guard-core.ts (pure guard core)
-    └── tests/                 # 17 test files (node --experimental-strip-types; all green on 0.84.2)
+    └── tests/                 # 31 test files (node --experimental-strip-types; all green on 0.84.4)
 ```
 
 ---
@@ -189,7 +189,7 @@ Encom-themed single-line footer that **replaces Pi's built-in footer** via the c
 
 ## Agents (14)
 
-Specialist system prompts in `agents/*.md` — **0 of 15 pin a `model:` frontmatter**; `tier-map.ts` is the sole model authority. Two classes:
+Specialist system prompts in `agents/*.md` — **0 of 14 pin a `model:` frontmatter**; `tier-map.ts` is the sole model authority. Two classes:
 
 **Personas (6)** — invoked explicitly via `agent=`:
 
