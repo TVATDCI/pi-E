@@ -284,7 +284,7 @@ export default function (pi: ExtensionAPI) {
       "Categories (tier-map.ts is authoritative): quick (zai/glm-5.3-flash), unspecified-low (opencode-go/gpt-5.6-luna), unspecified-high (zai/glm-5.3), " +
       "deep (zai/glm-5.3), ultrabrain (zai/glm-5.3), writing (zai/glm-5.3-flash), visual-engineering (zai/glm-5.3-flash), artistry (opencode-go/minimax-m3), research (zai/glm-5.3-flash), git-commit-message (zai/glm-5.3-flash). " +
       "Routing: for vague/ambiguous work (UX, product, planning, 'scoping IS the task') prefer writing/unspecified-low (reads intent) — reserve deep/ultrabrain for well-scoped hard tasks; they loop on open-ended goals (tier-map.ts ROUTING GUARDRAIL). " +
-      "0 of 15 agents pin a model — category is the sole model authority. " +
+      "0 of 14 agents pin a model — category is the sole model authority. " +
       "One focused objective per dispatch.",
     parameters: Type.Object({
       task: Type.String({ description: "The complete, self-contained sub-task" }),
