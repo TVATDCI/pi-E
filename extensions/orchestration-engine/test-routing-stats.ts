@@ -36,6 +36,8 @@ check("no false flag on clean quick", !s.flags.some((f) => f.includes("quick fai
 
 // --- quota marker matrix ---
 check("quota: opencode = FREE", quotaMarker("opencode/deepseek-v4-flash-free", false, true) === "FREE");
+check("quota: funded opencode = ext", quotaMarker("opencode/gpt-5.6-luna", false, true) === "ext");
+check("quota: opencode-go = ext", quotaMarker("opencode-go/glm-5.2", false, false) === "ext");
 check("quota: glm-5.2 promo off-peak = 1×", quotaMarker("zai-coding-cn/glm-5.2", false, true) === "1×");
 check("quota: glm-5.2 post-promo = 2×", quotaMarker("zai-coding-cn/glm-5.2", false, false) === "2×");
 check("quota: glm-5.2 peak = 3×", quotaMarker("zai-coding-cn/glm-5.2", true, true) === "3×");
