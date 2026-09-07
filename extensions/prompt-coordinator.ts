@@ -38,7 +38,7 @@ import { rankForInjection } from "./memory/ranker.ts";
 import { applyBudget, estimateTokens } from "./memory/budget.ts";
 import { formatMemoryBlock } from "./memory/formatter.ts";
 import type { MemoryRecord } from "./memory/schema.ts";
-import { readBridgeExport, formatBridgeLines, checkStale, type BridgeEntry } from "./bd-bridge.ts";
+import { readBridgeExport, formatBridgeLines, checkStale, bridgeStatus, type BridgeEntry } from "./bd-bridge.ts";
 import { readPurpose } from "./mini-purpose-gate.ts";
 import { COST_DISCIPLINE_TEXT } from "./orchestration-engine/index.ts";
 import { SESSION_NOTES_TEXT } from "./session-notes.ts";
@@ -95,7 +95,9 @@ export async function composeFacts(): Promise<string> {
   const { entries: bdEntries, exportTimestamp, telemetry: bdTel } = readBridgeExport();
 
   // Staleness (operator SHOULD-CONSIDER): a stale bd export defers overlapping keys to memory.
+  // Tri-state health: missing (dead pipe — LOUD) / stale (bd newer than export) / fresh.
   const stale = exportTimestamp ? checkStale(exportTimestamp) : null;
+  const status = bridgeStatus(exportTimestamp, stale);
 
   // --- Dedup overlapping keys across stores (compare on the recovered pi key) ---
   const memByKey = new Map<string, MemoryRecord[]>();
@@ -148,6 +150,13 @@ export async function composeFacts(): Promise<string> {
       ? `[FROM bridge, exported ${exportTimestamp} — ⚠️ STALE: bd modified after export]`
       : `[FROM bridge, exported ${exportTimestamp}]`;
     blocks.push(`<bridge-context>\n${header}\n${formatBridgeLines(bdKept)}\n</bridge-context>`);
+  } else if (status === "missing") {
+    // Dead-pipe alarm (in-turn, where it's read — 2026-09-07 diagnostic: the export was silently
+    // missing since migration and telemetry lied "fresh"). Empty placeholder keeps the block
+    // tag stable for prompt-hash stripping.
+    blocks.push(
+      `<bridge-context>\n[⚠️ bridge export MISSING — bd facts not injected. Run bridge/export-bd-global.sh or check its systemd timer.]\n</bridge-context>`,
+    );
   }
 
   // --- Telemetry ---
@@ -158,7 +167,7 @@ export async function composeFacts(): Promise<string> {
         `mem=${memRecords.length}(kept=${memBudgeted.kept.length},cut=${memBudgeted.cut.length}) ` +
         `bd=${bdEntries.length}(parsed=${bdTel.parsed},dropped=${bdTel.dropped},secret=${bdTel.secret},kept=${bdKept.length}) ` +
         `overlaps=${overlapKeys.length}(dropped_mem=${droppedMemKeys.size},dropped_bd=${droppedBdKeys.size}) ` +
-        `stale=${stale ?? "fresh"}\n`,
+        `stale=${status}\n`,
     );
   } catch {
     /* telemetry is non-critical */
