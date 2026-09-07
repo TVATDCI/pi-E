@@ -1,96 +1,39 @@
 /**
- * Layer 2 — category → {provider, id, thinkingLevel} tier map for the
- * Orchestration Engine. v2: plan-aware, Berlin-aware, promo-aware, vision-honest.
+ * Layer 2 — category → {provider, id, thinkingLevel} tier map for the Orchestration Engine.
+ * Model assignments: operator 2026-09-07; probe evidence in PROBE-RESULTS.md.
  *
- * ─── PORTED, NOT INVENTED ───────────────────────────────────────────────────
- * Category names + semantics ported from oh-my-openagent.json. In OmO,
- * "sisyphus-junior" is literally the "Category executor" — these category
- * names ARE the dispatch vocabulary of the existing hedge. Renaming would force
- * retraining prompts, skills, and operator muscle memory. Names preserved;
- * models remapped from the Claude/GPT/opencode mix to Z AI Coding Plan primary.
- * (This reverses an earlier "Pi-native names" lean — see HANDOFF.md §Reversals.)
+ * Category names/semantics ported verbatim from oh-my-openagent.json — they are the
+ * dispatch vocabulary (prompts, skills, operator muscle memory key on them). Do NOT rename.
  *
- * ─── VERIFIED PLAN FACTS (probe 2026-07-04, see PROBE-RESULTS.md) ───────────
- *   Plan-eligible (HTTP 200): glm-5.2, glm-5-turbo, glm-4.7, glm-5.1, glm-4.5-air
- *   NOT on plan:  glm-5v-turbo        (code 1311 — EXPLAINED 2026-07-06: standard-API-only at /api/paas/v4/, NOT the Coding Plan /api/coding/paas/v4/. Operator routed multimodal-looker to opencode/gemini-3.1-pro instead; no OmO primary uses glm-5v-turbo now. See PROBE-RESULTS.md.)
- *                 glm-4.7-flashx      (code 1113 — no resource package)
- *                 glm-4-32b-0414-128k (code 1113 — no resource package)
+ * ─── Z AI Coding Plan (zai-coding-cn) — as probed 2026-09-03 ────────────────
+ * Callable: glm-5.3 · glm-5.3-flash · glm-5.2 · glm-5.2-highspeed · glm-5-turbo · glm-4.7.
+ * glm-5.3-flash: native multimodal, 3× the quota of glm-5.3, 1M ctx; thinking CANNOT be
+ *   disabled — "off"/"minimal" stamps are tolerated no-ops (model reasons regardless).
+ * glm-*-highspeed variants: unused by operator choice (never planned; no probe needed).
+ * ⚠ SELECTOR ≠ SUBSCRIPTION: pi's model picker lists the full platform catalog; plan scope
+ *   is enforced at CALL TIME (off-plan → 1113/1311/empty). Never add unverified models here.
+ * ⚠ NO balance fallback: exhausted quota = hard fail (calls cannot draw from account balance).
+ * Quota is points-based; off-peak (incl. all-day weekends) ≈ 50% of standard points. Promo
+ *   until 2026-09-30: glm-5.2/5-turbo at 1× (after: 2× off-peak / 3× peak 06–10 UTC = outside
+ *   Berlin work hours, so the peak multiplier is effectively moot).
+ * ⚠ FOOTGUN: pi's built-in zai provider default is glm-5.1 — OFF plan. Avoid bare-provider
+ *   fallback paths; scoped-models + this map are safe.
+ * ⚠ opencode-go/deepseek-v4-flash & -pro: 403 region-blocked (China-hosted, workspace opt-in
+ *   required) — never route there.
  *
- * ─── PLAN NARROWED 2026-08-04 (operator-confirmed; SUPERSEDES the 07-04 eligible set above) ─
- *   Coding Plan subscription now permits ONLY 4 callable models:
- *     glm-5.2 · glm-5.2-highspeed · glm-5-turbo · glm-4.7
- *   DROPPED from plan (off-plan now, will 1113/1311 on call): glm-5.1, glm-4.5-air,
- *     glm-5v-turbo, glm-4.7-flashx, glm-4-32b-0414-128k, glm-5 (bare).
- *   THIS DROVE the 2026-08-04 tier-map moves:
- *     - deep / artistry: glm-5.1 → glm-5.2  (glm-5.1 no longer callable; glm-5.2 is the
- *       remaining flagship reasoning model on plan)
- *     - quick: zai-coding-cn/glm-4.5-air → opencode/deepseek-v4-flash-free (glm-4.5-air
- *       dropped; trivial work isn't worth the remaining on-plan quota either → FREE external)
- *     - 7 of 10 categories now plan-primary (was 8); all plan primaries ∈ {glm-5.2, glm-5-turbo, glm-4.7}.
- *   UNUSED allowed model: glm-5.2-highspeed (faster 5.2 variant — candidate for latency-sensitive tiers).
- *   MODEL CHURN IS HIGH (industry flips every few days) — re-verify this set before trusting it.
- *   ⚠ SELECTOR ≠ SUBSCRIPTION: Z AI /models lists the FULL platform catalog (glm-5, glm-5.1, ...),
- *   so pi's model picker shows off-plan models; subscription scope is enforced at CALL TIME only
- *   (off-plan → 1113/1311/empty). pi has no built-in way to grey-out an off-plan model.
- *   ⚠ FOOTGUN: pi's built-in provider default for zai-coding-cn is hardcoded `glm-5.1`
- *   (defaultModelPerProvider in dist/core/model-resolver.js) — now OFF plan. Avoid bare-provider
- *   fallback paths; the scoped-models + tier-map path is safe (all primaries ∈ the allowed-4).
- *   The 07-04 eligible-set record above is preserved as point-in-time probe evidence.
+ * ─── STRONG-MODEL-AT-JUDGING INVARIANT ──────────────────────────────────────
+ * unspecified-high / deep / ultrabrain: primaries, per-tier fallbacks AND the global FALLBACK
+ * tail land ONLY on strong-tier flagships (glm-5.x · kimi · grok-4.6 · qwen3.8-max ·
+ * gpt-5.6-luna) — never FREE/cheap (deepseek-v4-flash-free, ling-*-flash-free, minimax-m2.7).
+ * One cheap-model review in a fan-out cascades untraceably. AGENTS.md "Model selection"
+ * mirrors this — update both files when touching judging chains.
  *
- * ─── GLM-5.3 RELEASE 2026-08-14 (operator-confirmed; additive to the 08-04 narrowing) ───
- *   glm-5.3 released on Z.AI Coding Plan AND opencode-go (same base as 5.2, post-training
- *   gains: +50% Z.ai Code Bench, 1M context, 128K max output). zai plan now includes 5.3.
- *   QUOTA SHIELD STRATEGY (operator-stated): opencode-go is CHEAP and carries the flagships
- *   (per-5h: kimi-k3 110, glm-5.3 220, glm-5.1 880) — burn opencode-go FIRST; zai-coding-plan
- *   is the safety net, not the primary. This drove the 08-14 moves:
- *     - deep: glm-5.2 → opencode-go/glm-5.3 primary, fallback [zai/glm-5.3, opencode-go/glm-5.2,
- *       opencode-go/glm-5.1 (rung 3 updated from kimi-k2.7-code 2026-09-02)] — opencode-go first, zai
- *       breaks the shield only on exhaustion.
- *     - ultrabrain: stays kimi-k3 primary; fallbacks re-anchored to 5.3 (opencode-go then zai).
- *     - artistry: stays glm-5.2 (operator choice — artistry is not a coding-bench beneficiary),
- *       fallback opencode-go/glm-5.1 (880/5h) unchanged.
- *   6 of 10 categories now zai-plan-primary (was 7); deep joins quick/ultrabrain/git-commit-message
- *   on opencode-primary. VERIFIED LIVE 2026-08-14: zai/glm-5.3 callable (plan includes 5.3);
- *   opencode-go/kimi-k2.7-code present in registry. ⚠ opencode-go MONTHLY cap exhausted as of
- *   2026-08-14 (429 GoUsageLimitError, resets ~2 days) — until reset, opencode-go primaries
- *   (deep/ultrabrain) will fail-through to zai via the empty-output fallback chain by design.
- *   glm-5.3 promo-multiplier status still unverified (promoModels covers only 5.2/5-turbo).
+ * ─── ROUTING GUARDRAIL ──────────────────────────────────────────────────────
+ * "Deep models loop on vague goals." Reserve deep/ultrabrain/unspecified-high for tasks that
+ * arrive scoped, with explicit goals + completion criteria; route vague/intent-shaped work
+ * (UX, product, planning) DOWN to writing/unspecified-low, not UP to deep.
  *
- * ─── GLM-5.3-FLASH RELEASE 2026-08-31 (operator refresh; doc-verified 2026-09-03
- *     vs https://docs.z.ai/guides/vlm/glm-5.3-flash) ───────────────────────
- *   glm-5.3-flash: first NATIVE MULTIMODAL model of the GLM-5 series — vision lives inside the
- *   coding loop (observes interfaces, rendered results, interaction feedback). ON the GLM Coding
- *   Plan ("now fully available") with 3× the quota of glm-5.3. Outperforms glm-5.2 across coding/
- *   agentic benchmarks (DeepSWE v1.1 63.4 vs 46.2; Z.ai Code Bench v1.0: beats 5.2 at every effort
- *   level, ~Claude Opus 4.8 at max effort). 1M-token context. 320B total / 18B activated params.
- *   ⚠ thinking.type supports ONLY "enabled" — thinking CANNOT be disabled for 5.3-flash (docs
- *     recommend reasoning_effort max). Categories stamping thinkingLevel "off" on 5.3-flash
- *     (unspecified-low; quick's fallback rung) rely on the provider ignoring the downlevel.
- *   Drove the 08-31 moves: NEW primary on unspecified-low / writing / visual-engineering / research
- *   (zai) + artistry (opencode-go); quick + git-commit-message gained zai/5.3-flash fallback rungs.
- *   Plan callable set now: {glm-5.2, glm-5.2-highspeed, glm-5-turbo, glm-4.7, glm-5.3, glm-5.3-flash}.
- *   ⚠ NEW POINTS-BASED quota system (new GLM Coding Plan): off-peak (incl. all-day weekends) = 50%
- *     of standard points. The QUOTA MULTIPLIERS block + PROMO_SUNSET logic below predate it —
- *     re-verify promo/peak logic against the live plan before relying on isPromoActive/isPeakHours.
- *   PROBE-VERIFIED 2026-09-03 (pi -p live, TNT, output-based): zai 5/5 · opencode 4/4 (incl.
- *     gpt-5.6-luna ALIVE, ling-3.0-flash-fin-free) · opencode-go 7/9 — deepseek-v4-flash & -pro =
- *     403 RegionError "only available hosted in China and requires explicit opt in"
- *     (workspace wrk_01KH5T3KGQCDBNRVNWS4Y2YRC0/go) → dropped as quick/git-commit primaries and
- *     swapped to opencode/deepseek-v4-flash as fallback rungs. thinking off/minimal both ACCEPTED
- *     by 5.3-flash ("off" = tolerated no-op stamp; model thinks regardless — flash-tier cost).
- *
- * ─── QUOTA MULTIPLIERS (Z AI DevPack FAQ:21, /devpack/overview) ─────────────
- *   PROMO (now → 2026-09-30): glm-5.2 & glm-5-turbo = 1× off-peak  (free upgrade)
- *   POST-PROMO (2026-10-01+): glm-5.2 & glm-5-turbo = 2× off-peak, 3× peak
- *   Always 1×: glm-4.7, glm-4.5-air, glm-5.1
- *   Peak window: 14:00–18:00 UTC+8 = 06:00–10:00 UTC = 08:00–12:00 Berlin (summer).
- *   Berlin operator does NOT work 08:00–12:00 → peak multiplier is effectively moot.
- *   So through Sep 30, glm-5.2 == glm-4.7 quota cost off-peak. Exploit aggressively.
- *
- * ─── NO BALANCE FALLBACK (FAQ:66-69) ────────────────────────────────────────
- *   Z AI Coding Plan calls CANNOT draw from account balance. Exhausted quota =
- *   hard fail. Non-plan models (flashx, 4-32b) would hard-fail too. This is why
- *   they were removed from models.json and must NOT appear in this map.
+ * MODEL CHURN IS HIGH — re-verify the callable sets before trusting this map.
  */
 
 import type { ToolBudgetConfig, TurnBudgetConfig } from "../budgets/types.ts";
@@ -104,16 +47,16 @@ import type { ToolBudgetConfig, TurnBudgetConfig } from "../budgets/types.ts";
  * Do NOT rename without updating the persona prompts/skills that key on these.
  */
 export type TaskCategory =
-  | "quick" // short fast tasks (was: gpt-5.4-mini / deepseek-free)
-  | "unspecified-low" // low-effort fallback (was: gpt-5.4-mini)
-  | "unspecified-high" // high-effort fallback (was: claude-opus)
-  | "deep" // autonomous research/execution (was: gpt-5.5)
-  | "ultrabrain" // hardest logic (was: gpt-5.5 xhigh)
-  | "writing" // prose/docs (was: claude/glm-5.1)
-  | "visual-engineering" // UI/frontend/styling code (LR-0019: OmO moved to glm-5.turbo text model; was gemini because glm-5v-turbo not on plan — but category is mostly code, not images)
-  | "artistry" // creative/design (LR-0019: OmO standardized on glm-5.1; was gemini-domain. Pi re-elevated to glm-5.2 on 2026-08-04)
-  | "research" // web/docs/package research (keyless composite — Wikipedia+DDG-IA+npm+GitHub+docs-fetch)
-  | "git-commit-message"; // git ops (opencode/deepseek-v4-flash-free — FREE external, preserves plan quota; one of three non-Z-AI categories alongside quick + ultrabrain)
+  | "quick" // short fast tasks
+  | "unspecified-low" // low-effort fallback (also DEFAULT_CATEGORY)
+  | "unspecified-high" // high-effort fallback
+  | "deep" // autonomous research/execution
+  | "ultrabrain" // hardest logic
+  | "writing" // prose/docs
+  | "visual-engineering" // UI/frontend/styling code (vision-capable preferred)
+  | "artistry" // creative/design (multimodal judgment)
+  | "research" // web/docs/package research (keyless composite search; general free-text web = known gap)
+  | "git-commit-message"; // trivial git ops
 
 /** Pi thinking levels. null-able per model via thinkingLevelMap. "max" per pi-ai
  *  types.d.ts (accepted by --thinking; z.ai glm-5.3: reasoning_effort max = default +
@@ -210,127 +153,111 @@ export function isPeakHours(now = new Date()): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The map (Layer 2 data) — 7 of 10 categories Z-AI-plan-primary (quick, unspecified-low/high,
-// writing, visual-engineering, research, git-commit-message — glm-5.3-flash / glm-5-turbo / glm-4.7);
-// deep, ultrabrain, artistry are opencode-go-primary (external quota shield).
+// The map — 8 of 10 categories zai-plan-primary (glm-5.3 / glm-5.3-flash);
+// unspecified-low (gpt-5.6-luna) and artistry (minimax-m3) are opencode-go-primary.
+// Fallback chains are ordered + cross-provider; spawn.ts appends the global FALLBACK tail via
+// orderedFallbacks() and walks it on unavailable-primary and empty-output (quota exhaustion).
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// Quota cost legend: 1× = standard, 2× = post-promo off-peak (5.2/5-turbo),
-//                    3× = peak (5.2/5-turbo), FREE = external (opencode), N/A = not on plan
-// ─── STRONG-MODEL-AT-JUDGING INVARIANT (graph-eng §7/§17c) ───────────────────
-// The review/verify/oracle categories — unspecified-high, deep, ultrabrain —
-// MUST stay strong-tier, and their per-tier fallback + the global FALLBACK
-// (L253) MUST land only on glm-5.x / kimi. Never downgrade these to a FREE or
-// cheap tier (deepseek-v4-flash-free / ling-*-flash-free / minimax-m2.7):
-// one cheap-model review inside a fan-out cascades untraceably. See AGENTS.md
-// "Model selection". If you weaken this, update both files.
-//
-// ─── MODEL TIERING (PORT-PLAN-v0.40.md ③) ──────────────────────────────────
-// Adapted from the pi-subagents README 4-tier mental model, mapped to our narrowed Z-AI Coding
-// Plan (4 callable models: glm-5.2 · glm-5.2-highspeed · glm-5-turbo · glm-4.7):
-//   Tier 1 fast workhorse       → quick / git-commit-message          (FREE external; preserves quota)
-//   Tier 2 standard well-scoped → unspecified-low / writing / research (glm-4.7 @ off/medium)
-//   Tier 3 deep but bounded     → deep / ultrabrain / unspecified-high / visual-engineering
-//                                 (glm-5.2 / kimi-k3 / glm-5-turbo @ high) — top reasoning, ONLY for
-//                                 well-scoped hard tasks with explicit goals + completion criteria.
-//   Tier 4 taste and intent     → ⚠ NO plan-eligible model exists beyond glm-4.7, and no
-//                                 anthropic/openai intent model is on our auth. So glm-4.7 @ medium
-//                                 (writing / unspecified-low) is our DE-FACTO intent tier — route
-//                                 ambiguous work (UX, product, planning, "scoping IS the task") there.
-//
-// GUARDRAIL (operative — also surfaced in the dispatch tool description, index.ts):
-//   "Deep models loop on vague goals." Don't point deep/ultrabrain at open-ended work — they burn
-//   turns without converging. Reserve tier-3 for tasks that arrive scoped. For vague/intent-shaped
-//   work, route DOWN to writing/unspecified-low (glm-4.7), not UP to deep.
 export const TIERS: Record<TaskCategory, TierEntry> = {
   quick: {
     provider: "zai-coding-cn",
     id: "glm-5.3-flash",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-4.7" },
+      { provider: "opencode-go", id: "gpt-5.6-luna" },
+      { provider: "opencode", id: "glm-5.3-flash" },
       { provider: "opencode", id: "ling-3.0-flash-fin-free" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 12 },
     rationale:
-      "Short fast tasks; zai/glm-5.3-flash primary (3×-quota flash, beats glm-5.2 — cheap enough for trivial work; moved from opencode-go/deepseek-v4-flash 2026-09-03: that model is China-hosted region-blocked without workspace opt-in). Fallbacks zai/glm-4.7 (on-plan) then opencode/ling-3.0-flash-fin-free (FREE external). thinkingLevel off is a tolerated downlevel — 5.3-flash cannot disable thinking (probe-verified 2026-09-03: off/minimal both accepted).",
+      "Short fast tasks; zai/glm-5.3-flash (3×-quota flash; thinking-off stamp tolerated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode/ling-3.0-flash-fin-free (FREE).",
   },
   "unspecified-low": {
-    provider: "zai-coding-cn",
-    id: "glm-5.3-flash",
-    fallbackModels: [{ provider: "opencode", id: "deepseek-v4-flash" }],
+    provider: "opencode-go",
+    id: "gpt-5.6-luna",
+    fallbackModels: [
+      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "glm-5.3-flash" },
+    ],
     thinkingLevel: "off",
     rationale:
-      "Plan tier (glm-5.3-flash, 3× quota vs 5.3); routine low-effort work — flash beats glm-5.2 at flash cost. Fallback opencode/deepseek-v4-flash (funded external; preserves plan points; swapped from opencode-go rung 2026-09-03 — region-blocked).",
+      "Routine low-effort fallback (also DEFAULT_CATEGORY); opencode-go/gpt-5.6-luna external, preserves plan points. Fallbacks: zai/glm-5.3-flash → opencode/glm-5.3-flash.",
   },
   "unspecified-high": {
     provider: "zai-coding-cn",
-    id: "glm-5-turbo",
+    id: "glm-5.3",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-5.2" },
-      { provider: "opencode-go", id: "glm-5.2" },
+      { provider: "zai-coding-cn", id: "glm-5-turbo" },
+      { provider: "opencode-go", id: "gpt-5.6-luna" },
       { provider: "opencode-go", id: "kimi-k2.7-code" },
       { provider: "opencode", id: "glm-5.2" },
     ],
     thinkingLevel: "high",
     rationale:
-      "Flagship; high-effort fallback. PROMO 1× off-peak → 2× after " +
-      PROMO_SUNSET_ISO +
-      ".",
+      "High-effort fallback; zai/glm-5.3 @high. Fallbacks: zai/glm-5-turbo → opencode-go/gpt-5.6-luna → opencode-go/kimi-k2.7-code → opencode/glm-5.2.",
   },
   deep: {
-    provider: "opencode-go",
+    provider: "zai-coding-cn",
     id: "glm-5.3",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-5.3" },
+      { provider: "opencode-go", id: "kimi-k2.7-code" },
+      { provider: "opencode-go", id: "grok-4.6" },
+      { provider: "opencode-go", id: "glm-5.3" },
       { provider: "opencode-go", id: "glm-5.2" },
-      { provider: "opencode-go", id: "glm-5.1" },
     ],
     thinkingLevel: "max",
     rationale:
-      "Deep codebase investigation/execution; opencode-go/glm-5.3 primary (QUOTA SHIELD: burn opencode-go's 220/5h 5.3 quota first; zai-coding-plan is the safety net — fallback zai/glm-5.3 breaks the shield only on opencode-go exhaustion, then opencode-go/glm-5.2. glm-5.3 = 5.2 base + post-training coding/agent gains (+50% Code Bench, 1M ctx). thinkingLevel max since 2026-09-03: z.ai recommends reasoning_effort max for coding (default is max; at max 5.3 is MORE token-efficient than 5.2 — 75K vs 96K output tokens on Code Bench; probe-verified pi --thinking max accepted).",
+      "Deep codebase investigation/execution; zai/glm-5.3 @max (z.ai-recommended for coding; more token-efficient than 5.2 at max). Fallbacks: opencode-go kimi-k2.7-code → grok-4.6 → glm-5.3 → glm-5.2.",
   },
   ultrabrain: {
-    provider: "opencode-go",
-    id: "kimi-k3",
+    provider: "zai-coding-cn",
+    id: "glm-5.3",
     fallbackModels: [
       { provider: "opencode-go", id: "grok-4.6" },
-      { provider: "opencode-go", id: "deepseek-v4-pro" },
-      { provider: "zai-coding-cn", id: "glm-5.3" },
+      { provider: "opencode-go", id: "kimi-k3" },
+      { provider: "opencode-go", id: "qwen3.8-max" },
+      { provider: "opencode", id: "kimi-k2.7-code" },
     ],
     thinkingLevel: "xhigh",
     rationale:
-      "Hardest logic. Primary opencode-go/kimi-k3 (reasoning model, 110/5h); fallbacks opencode-go/grok-4.6 then opencode-go/deepseek-v4-pro (shield-preserving), then zai/glm-5.3 (shield-break on exhaustion). thinkingLevel xhigh (union max; earlier 'max' was invalid — spawn.ts passes the level verbatim to --thinking).",
+      "Hardest logic; zai/glm-5.3 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go grok-4.6 → kimi-k3 → qwen3.8-max → opencode/kimi-k2.7-code (last rung replaced 2026-09-07: opencode-go/deepseek-v4-pro is 403 region-blocked).",
   },
   writing: {
     provider: "zai-coding-cn",
     id: "glm-5.3-flash",
     fallbackModels: [
-      { provider: "opencode-go", id: "glm-5.1" },
+      { provider: "opencode-go", id: "gpt-5.6-luna" },
+      { provider: "opencode", id: "gpt-5.6-luna" },
       { provider: "opencode", id: "deepseek-v4-flash" },
     ],
     thinkingLevel: "medium",
     rationale:
-      "Prose/docs; glm-5.3-flash @medium (replaced glm-4.7 2026-08-31, LR-0019 lineage; flash beats 5.2 at flash cost, 3x quota). Fallbacks opencode-go/glm-5.1 then opencode/deepseek-v4-flash (swapped from opencode-go rung 2026-09-03 — region-blocked) to preserve quota.",
+      "Prose/docs; zai/glm-5.3-flash @medium (flash beats 5.2 at flash cost, 3× quota). Fallbacks: opencode-go/gpt-5.6-luna → opencode/gpt-5.6-luna → opencode/deepseek-v4-flash.",
   },
   "visual-engineering": {
     provider: "zai-coding-cn",
     id: "glm-5.3-flash",
     fallbackModels: [
-      { provider: "opencode-go", id: "glm-5.3-flash" },
-      { provider: "opencode", id: "glm-5.2" },
+      { provider: "opencode-go", id: "minimax-m3" },
+      { provider: "opencode-go", id: "qwen3.6-plus" },
+      { provider: "opencode", id: "glm-5.1" },
     ],
     thinkingLevel: "high",
     rationale:
-      "UI/frontend/styling code; glm-5.3-flash @high — NATIVE MULTIMODAL visual coding loop (docs.z.ai/guides/vlm/glm-5.3-flash): observes rendered interfaces — exactly this category's failure mode. Replaced glm-5-turbo 2026-08-31 (flash beats 5.2, 3x quota vs 5.3, 1M ctx). Per-tier fallbacks opencode-go/glm-5.3-flash then opencode/glm-5.2.",
+      "UI/frontend/styling; zai/glm-5.3-flash @high — native multimodal, observes rendered UI (this category's core failure mode). Fallbacks: opencode-go/minimax-m3 → opencode-go/qwen3.6-plus (both vision-capable) → opencode/glm-5.1.",
   },
   artistry: {
     provider: "opencode-go",
-    id: "glm-5.3-flash",
-    fallbackModels: [{ provider: "zai-coding-cn", id: "glm-5.3-flash" }],
+    id: "minimax-m3",
+    fallbackModels: [
+      { provider: "opencode-go", id: "qwen3.8-max" },
+      { provider: "opencode-go", id: "grok-4.6" },
+      { provider: "zai-coding-cn", id: "glm-5.3" },
+      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+    ],
     thinkingLevel: "high",
     rationale:
-      "Creative/design; opencode-go/glm-5.3-flash (native multimodal — visual judgment for aesthetics; moved primary from zai 2026-08-31). Per-tier fallback zai-coding-cn/glm-5.3-flash — native multimodal + 3x quota makes it a strong artistry fallback.",
+      "Creative/design; opencode-go/minimax-m3 (multimodal judgment). Fallbacks: opencode-go/qwen3.8-max → opencode-go/grok-4.6 → zai/glm-5.3 → zai/glm-5.3-flash (multimodal).",
   },
   research: {
     provider: "zai-coding-cn",
@@ -342,20 +269,20 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     thinkingLevel: "medium",
     turnBudget: { maxTurns: 20 },
     rationale:
-      "Web/docs/package research (athena-equivalent). glm-5.3-flash (new in series 5) — NOT quick/keymaker (opencode/deepseek-v4-flash). Keyless composite search (Wikipedia+DDG-IA+npm+GitHub+docs-fetch via the web-research extension); general free-text web is a known gap. Always 1× plan tier.",
+      "Web/docs/package research; zai/glm-5.3-flash @medium via the keyless composite search (Wikipedia+DDG+npm+GitHub; general free-text web = known gap). Fallbacks: opencode-go/glm-5.3-flash → opencode/gpt-5.6-luna.",
   },
   "git-commit-message": {
     provider: "zai-coding-cn",
-    id: "glm-4.7",
+    id: "glm-5.3-flash",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
-      { provider: "opencode", id: "deepseek-v4-flash" },
+      { provider: "opencode-go", id: "gpt-5.6-luna" },
+      { provider: "opencode", id: "glm-5.3-flash" },
       { provider: "opencode", id: "ling-3.0-flash-fin-free" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 6 },
     rationale:
-      "Trivial git work; zai/glm-4.7 primary (always-cheapest plan stamp; moved from opencode-go/deepseek-v4-flash 2026-09-03 — China-hosted region-blocked). Fallbacks zai/glm-5.3-flash then opencode/deepseek-v4-flash (funded external) then opencode/ling-3.0-flash-fin-free (FREE). Cross-stack note: OmO's git-commit-message category uses zai/glm-5.3-flash primary — acceptable stack-level divergence.",
+      "Trivial git ops; zai/glm-5.3-flash @off (cheapest flash stamp; thinking-off tolerated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode/ling-3.0-flash-fin-free (FREE).",
   },
 };
 
@@ -505,7 +432,7 @@ export function orderedFallbacks(
 export interface TierStatus extends TierEntry {
   category: TaskCategory;
   available: boolean;
-  promoAffected: boolean; // true if the model is 5.3/5-turbo (subject to multiplier)
+  promoAffected: boolean; // promo-susceptible flagships (5.3/5-turbo; 5.3 multiplier status unverified)
 }
 
 export function listTiers(registry: ModelRegistryLike): TierStatus[] {
