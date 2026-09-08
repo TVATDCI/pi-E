@@ -60,3 +60,19 @@ off this desk (no resource key, ever); this path covers the real diagram needs.
   (`--no-sandbox`) — edit if the chromium path moves.
 - For iterative editing, keep the source file as the artifact (git-friendly);
   re-render on change.
+
+## Autonomic visual feedback loop (verify without a human)
+
+Prime pi is text-only but can still VERIFY its own renders — close the loop
+with `image-inspector` (glm-5.3-flash eyes, one plan prompt per glance):
+
+```
+write dot/mermaid -> render -> inspect_image.py "quality-check:
+list nodes+edge labels exactly, flag misspellings, verdict PASS/FAIL"
+-> if FAIL: fix the SOURCE (not the PNG) -> re-render -> re-inspect
+```
+
+Proven 2026-09-08: planted defects ("Operaotr", "promt") were caught with
+corrections on iteration 1; repair + re-render returned PASS on iteration 2.
+Budget: ≤2–3 inspect calls per diagram — each is a flash prompt; after that,
+surface the source + PNG to the operator instead of looping.
