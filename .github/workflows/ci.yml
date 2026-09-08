@@ -32,12 +32,17 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: setup-node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: install pinned extension deps
+        run: npm ci
 
       # ── Tier 1: the suite (~40s local) ─────────────────────────
 
@@ -108,10 +113,10 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: setup-node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
 
