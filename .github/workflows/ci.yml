@@ -1,0 +1,129 @@
+# ci.yml — pi-E system CI (mirrors oc-sisyphus ci.yml shape, adapted surfaces)
+#
+# Two jobs:
+#   test   — runs on every push / PR / manual dispatch. Fast feedback.
+#   canary — nightly only (3am UTC) + manual dispatch: upstream pi drift.
+#
+# pi-E already gates every local commit with the full 32-file suite
+# (pre-commit hook); this is the REMOTE gate — both desks push to main,
+# so CI catches breakage from either side centrally.
+#
+# Run locally: the Tier 2 steps are plain bash — copy-paste to verify.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (Tier 1 + Tier 2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ── Tier 1: the suite (~40s local) ─────────────────────────
+
+      - name: Tier 1.1 — extension test suite (32 files)
+        run: node --experimental-strip-types scripts/run-tests.ts
+
+      # ── Tier 2: config health ───────────────────────────────────
+
+      - name: Tier 2.1 — JSON syntax (tracked config files)
+        run: |
+          status=0
+          for f in settings.json keybindings.json models.json package.json \
+                   mcp-cache.json models-store.json; do
+            if [ -f "$f" ]; then
+              node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" \
+                && echo "OK: $f" || { echo "FAIL: $f"; status=1; }
+            fi
+          done
+          exit $status
+
+      - name: Tier 2.2 — skills frontmatter sanity (name + description ≤1024)
+        run: |
+          status=0
+          for sk in skills/*/SKILL.md; do
+            node -e "
+              const fs = require('fs');
+              const t = fs.readFileSync('$sk','utf8');
+              const m = t.match(/^---\n([\s\S]*?)\n---/);
+              if (!m) { console.log('FAIL: $sk has no frontmatter'); process.exit(1); }
+              const fm = m[1];
+              if (!/^name:/m.test(fm)) { console.log('FAIL: $sk missing name:'); process.exit(1); }
+              if (!/^description:/m.test(fm)) { console.log('FAIL: $sk missing description:'); process.exit(1); }
+              const d = fm.match(/^description:[\s\S]*?(?=^\w+:|\$)/m)?.[0] || '';
+              if (d.length > 1100) { console.log('FAIL: $sk description > 1024 chars'); process.exit(1); }
+            " || status=1
+          done
+          [ $status -eq 0 ] && echo "OK: all skills have valid frontmatter"
+
+      - name: Tier 2.3 — README skill-count consistency (drift guard)
+        run: |
+          ACTUAL=$(ls -d skills/*/ | wc -l)
+          CLAIMED=$(grep -oE '[0-9]+ pi-native skills in' README.md | grep -oE '[0-9]+' | head -1)
+          LISTED=$(grep -oE '# [0-9]+ pi-native skills' README.md | grep -oE '[0-9]+' | head -1)
+          echo "actual dirs: $ACTUAL | table row: $CLAIMED | tree listing: $LISTED"
+          [ "$ACTUAL" = "$CLAIMED" ] && [ "$ACTUAL" = "$LISTED" ] \
+            || { echo "FAIL: README skill counts drifted (actual $ACTUAL)"; exit 1; }
+
+      - name: Tier 2.4 — markdown relative-link check (root docs)
+        run: |
+          status=0
+          for md in README.md AGENTS.md; do
+            [ -f "$md" ] || continue
+            while IFS= read -r link; do
+              case "$link" in http*|\#*) continue ;; esac
+              target="$(dirname "$md")/${link%#*}"
+              if [ ! -e "$target" ] && [ ! -e "${target%/}.md" ]; then
+                echo "BROKEN LINK in $md: $link"; status=1
+              fi
+            done < <(grep -oE '\]\([^)]+\.md[^)]*\)' "$md" | sed 's/^](\(.*\))$/\1/' || true)
+          done
+          [ $status -eq 0 ] && echo "OK: all markdown links resolve"
+
+  canary:
+    name: canary (upstream pi drift)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: canary — pi runtime version vs README claim
+        run: |
+          CLAIMED=$(grep -oE 'Pi version[^|]*\| `0\.[0-9]+\.[0-9]+`' README.md | grep -oE '0\.[0-9]+\.[0-9]+' | head -1)
+          LATEST=$(npm view @earendil-works/pi-coding-agent@latest version 2>/dev/null || echo "FETCH_FAILED")
+          echo "README documents: $CLAIMED | npm latest: $LATEST"
+          if [ "$LATEST" = "FETCH_FAILED" ]; then
+            echo "::warning::could not fetch latest pi version (offline?)"
+          elif [ "$LATEST" != "$CLAIMED" ]; then
+            echo "::warning::pi $LATEST is available; README documents $CLAIMED — after mise install, sweep README (version row + test-count note + skill counts)."
+          else
+            echo "OK: README matches npm latest"
+          fi
