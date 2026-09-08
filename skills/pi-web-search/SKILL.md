@@ -68,3 +68,19 @@ plan MCP carries this now. opencode/sis = depth (library docs via Context7,
 cross-repo code search, blocked/anti-bot sites, multi-source synthesis). Web
 reads have no side effects; the shared resources are plan credits and quota —
 zai credits are consumed ONLY by pi (sis uses its own tools).
+
+## MCP meter watch (V2 dedicated pool — operator discipline, no automation)
+
+On Legacy V2 the MCP quota is a DEDICATED monthly pool (dashboard meter,
+resets monthly — 2026-10-07 as of 2026-09-08); size unknown (3 calls ≈ 1%).
+The z.ai dashboard is login-only — no local API to poll, so the watch is a
+human glance, not a script. Rule for pi sessions:
+
+- After a heavy-research session (≥10 MCP calls), remind the operator to
+  glance at the MCP meter.
+- If the meter passes ~50% before month-end: read the absolute number once,
+  then downshift — route general-web searches to `web_search` (Exa keyless)
+  FIRST until reset; keep zai MCP for Web Reader / Zread (URL-specific reads
+  have no keyless equivalent of equal quality).
+- At V2→credits conversion (quarterly cycle end): MCP billing becomes
+  1.2-credits-per-call from the shared pool — revisit this rule entirely then.
