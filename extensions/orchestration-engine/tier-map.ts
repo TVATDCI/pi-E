@@ -12,8 +12,10 @@
  *   tolerated no-ops (model reasons regardless).
  * glm-*-highspeed variants: unused by operator choice (never planned; no probe needed).
  * Quota = CREDITS (Pro: 12,000/5h · 60,000/week). usage = (in×mult + cached×mult + out×mult)/10⁴;
- *   5.3 = 6.9/1.7/24 · flash = 2.3/0.56/8. MCP tool calls = 1.2 credits each (Web Search /
- *   Web Reader / Zread — wired at ~/.config/mcp/mcp.json, consumed by pi only). Off-peak = 50%.
+ *   5.3 = 6.9/1.7/24 · flash = 2.3/0.56/8. Off-peak = 50%. MCP servers (Web Search / Web Reader /
+ *   Zread — wired at ~/.config/mcp/mcp.json, pi-only) run on a DEDICATED monthly quota (~1,000
+ *   calls/month on Pro, shared across the three, resets monthly) — NOT the coding-credit pool;
+ *   the devpack/overview ×1.2 text is STALE (operator-dashboard-verified 2026-09-07).
  * ⚠ NO balance fallback: exhausted credits = hard fail until the 5h window resets.
  * ⚠ SELECTOR ≠ SUBSCRIPTION: pi's picker lists the full platform catalog; plan scope is
  *   enforced at CALL TIME. Never add unverified models here.
