@@ -64,7 +64,7 @@ mcp-onboarding.json
 /exports/
 store.jsonl
 
-# ── OMARCHY-MACHINE FILES — system symlinks + vendor themes (TNT A2 gate 2026-08-30)
-skills/diagnose-crash
-skills/omarchy
+# ── OMARCHY-MACHINE FILES — vendor themes (TNT A2 gate 2026-08-30)
+# (skills/diagnose-crash + skills/omarchy were symlinked distro skills here;
+#  2026-09-08 materialized as tracked real files — see that commit)
 themes/omarchy-system.json
