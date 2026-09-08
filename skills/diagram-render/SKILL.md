@@ -67,12 +67,22 @@ Prime pi is text-only but can still VERIFY its own renders — close the loop
 with `image-inspector` (glm-5.3-flash eyes, one plan prompt per glance):
 
 ```
-write dot/mermaid -> render -> inspect_image.py "quality-check:
-list nodes+edge labels exactly, flag misspellings, verdict PASS/FAIL"
--> if FAIL: fix the SOURCE (not the PNG) -> re-render -> re-inspect
+write dot/mermaid -> render to /tmp/diagram-preview.png
+-> inspect_image.py "/tmp/diagram-preview.png" "Quality-check this diagram:
+   (a) list node names and edge labels EXACTLY, flag misspellings;
+   (b) flag layout flaws: overlapping labels, truncated text, broken
+       arrows, awkward wraps. End with verdict PASS or FAIL."
+-> if FAIL: fix the SOURCE (never the PNG) -> re-render -> re-inspect
+-> PASS: present the final SVG/PNG path to the operator
 ```
 
 Proven 2026-09-08: planted defects ("Operaotr", "promt") were caught with
 corrections on iteration 1; repair + re-render returned PASS on iteration 2.
-Budget: ≤2–3 inspect calls per diagram — each is a flash prompt; after that,
-surface the source + PNG to the operator instead of looping.
+
+**Remediation cheatsheet (fix layout flaws in the SOURCE):** overlaps /
+crowding -> `nodesep=0.8 ranksep=0.8` (dot) or more `----` link length
+(mermaid); long labels -> `"<br/>"` wrapping; arrow chaos -> `splines=ortho`;
+truncated text -> larger `-Gdpi`/explicit `width`.
+
+Budget: prefer 2 verification passes, hard cap 3 — each is a flash prompt;
+after that surface the source + PNG to the operator instead of looping.
