@@ -2,8 +2,9 @@
 name: pi-web-search
 description: |
   How pi accesses the web — the zai GLM Coding Plan MCP servers (Web Search /
-  Web Reader / Zread, 1.2 credits per call, included in the Pro plan) plus the
-  pi-web-access package and the keyless built-in search. Use whenever a task
+  Web Reader / Zread — dedicated monthly quota ~1,000 calls/month on Pro, shared
+  across the three, included in the plan) plus the pi-web-access package and the
+  keyless built-in search. Use whenever a task
   needs current info (blogs, news, forums, prices), docs, or content from a
   specific URL. Triggers: "web search", "search the web", "look this up",
   "fetch this URL", "deep research", "extensive web research". Do NOT use for:
@@ -17,16 +18,18 @@ description: |
 ## Decision tree (which tool for which need)
 
 1. **General free-text web** (blogs, news, forums, prices, current events) →
-   zai **Web Search MCP** (`web-search-prime` server, tool `web_search_prime`).
-   Included in the GLM Coding Plan — 1.2 credits/call, no provider keys. This
-   is the PRIMARY general-web path; it consumes plan quota that is otherwise
-   wasted (operator design intent, 2026-09-07).
+   zai **Web Search MCP** (`web-search-prime` server, tool
+   `web-search-prime_web_search_prime`, param `search_query`). Included in the
+   GLM Coding Plan on its dedicated monthly quota (~1,000 calls/month, shared
+   with Web Reader + Zread) — no provider keys. This is the PRIMARY general-web
+   path; it consumes plan quota that is otherwise wasted (operator design
+   intent, 2026-09-07).
 2. **Reading a specific URL fully** (docs pages, articles) → zai **Web Reader
-   MCP** (`web-reader`, tool `webReader`) — 1.2 credits/call. Fallback:
+   MCP** (`web-reader`, tool `webReader`) — same shared monthly quota. Fallback:
    `fetch_content`.
 3. **Understanding a GitHub repo** (docs, structure, issues, file contents) →
    zai **Zread MCP** (`zread`, tools `search_doc` / `get_repo_structure` /
-   `read_file`) — 1.2 credits/call. For full local exploration, prefer
+   `read_file`) — same shared monthly quota. For full local exploration, prefer
    `fetch_content` (GitHub URLs are cloned locally).
 4. **Images/screenshots/videos** → zai **Vision MCP** (`zai-vision`, stdio —
    `ui_to_artifact`, `diagnose_error_screenshot`, `understand_technical_diagram`,
