@@ -10,13 +10,14 @@ This is **not** a showcase. It's a single-operator production config: narrow and
 
 |                        |                                                                                 |
 | ---------------------- | ------------------------------------------------------------------------------- |
-| **Pi version**         | `0.84.4` (npm: `@earendil-works/pi-coding-agent`)                               |
+| **Pi version**         | `0.85.1` (npm: `@earendil-works/pi-coding-agent`)                               |
 | **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (**Legacy V2 Max-Quarterly**, prompt-quota-based, **no** balance fallback)       |
 | **Default model**      | `glm-5.3` @ `max` thinking, theme `e-punk`                                      |
 | **Extensions**         | 19 active top-level + 6 subpackages (`orchestration-engine/`, `memory/`, `budgets/`, `security/`, `lib/`, `tests/` — 0 disabled) — incl. chain widget, acceptance gates, clarify, background dispatch, compaction capture, command guard |
 | **Agents**             | 14 (6 personas + 8 Matrix operatives; 0 model pins)                             |
 | **Governance**        | 13 ADRs in `decisions/`; 19 pi-native skills in `skills/`                       |
 | **Secondary providers** | `opencode` + `opencode-go` (external/fallback tiers — only `artistry` is external-primary; `unspecified-low` moved to zai flash 2026-09-08) |
+| **Zero-cost capability stack** | 2026-09-08 additions under the no-extra-zai-payment constraint: `local-ocr` (tesseract/ocrmypdf → zai-vision escalation), `diagram-render` (glm-written dot/mermaid → local render) × `image-inspector` (flash eyes for the text-only primary) = **self-verifying visual feedback loop**, `model-audit` (plan-vs-config) |
 
 ---
 
@@ -115,7 +116,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── budgets/               # turn/tool/usage budget primitives + resolver (pure library, PORT-PLAN ①)
     ├── security/              # yaml-merge.ts — deny-additive YAML layer-merge as versioned security boundary (D5)
     ├── lib/                   # shared: prompt-hash.ts, upstream-adapter.ts (cross-version seam shim, D6), command-guard-core.ts (pure guard core)
-    └── tests/                 # 31 test files (node --experimental-strip-types; all green on 0.84.4)
+    └── tests/                 # 32 test files (node --experimental-strip-types; all green on 0.85.1)
 ```
 
 ---
