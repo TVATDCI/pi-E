@@ -1,22 +1,29 @@
 /**
  * Layer 2 — category → {provider, id, thinkingLevel} tier map for the Orchestration Engine.
- * Model assignments: operator 2026-09-07; probe evidence in PROBE-RESULTS.md.
+ * Model assignments: operator 2026-09-07, revised 2026-09-08 (V2 Max reroutes); probe evidence in PROBE-RESULTS.md.
  *
  * Category names/semantics ported verbatim from oh-my-openagent.json — they are the
  * dispatch vocabulary (prompts, skills, operator muscle memory key on them). Do NOT rename.
  *
- * ─── Z AI GLM Coding Plan (zai-coding-cn) — Pro tier, credit system (docs.z.ai 2026-09-07) ──
- * Models: ALL plans run GLM-5.3 + GLM-5.3-Flash only. Requests for glm-5.2/5.1 auto-route to
- *   5.3; glm-4.7 auto-routes to 5.3-Flash — legacy ids below are ALIASES, not distinct pools.
+ * ─── Z AI GLM Coding Plan (zai-coding-cn) — LEGACY PLAN V2 Max-Quarterly (dashboard-verified 2026-09-08) ──
+ * Models: ALL plans run GLM-5.3 + GLM-5.3-Flash only — re-verified 2026-09-08 on BOTH endpoints
+ *   (api.z.ai/api/anthropic + open.bigmodel.cn/api/coding/paas/v4, pi's endpoint). glm-5/5.1/5.2
+ *   auto-route to 5.3; glm-4.5/4.5-air/4.6/4.7/5-turbo auto-route to 5.3-Flash — legacy ids below
+ *   are ALIASES, not distinct pools (dashboard still BOOKS consumption by requested id).
  * glm-5.3-flash: native multimodal, thinking CANNOT be disabled — "off"/"minimal" stamps are
  *   tolerated no-ops (model reasons regardless).
- * glm-*-highspeed variants: unused by operator choice (never planned; no probe needed).
- * Quota = CREDITS (Pro: 12,000/5h · 60,000/week). usage = (in×mult + cached×mult + out×mult)/10⁴;
- *   5.3 = 6.9/1.7/24 · flash = 2.3/0.56/8. Off-peak = 50%. MCP servers (Web Search / Web Reader /
- *   Zread — wired at ~/.config/mcp/mcp.json, pi-only) run on a DEDICATED monthly quota (~1,000
- *   calls/month on Pro, shared across the three, resets monthly) — NOT the coding-credit pool;
- *   the devpack/overview ×1.2 text is STALE (operator-dashboard-verified 2026-09-07).
- * ⚠ NO balance fallback: exhausted credits = hard fail until the 5h window resets.
+ * glm-*-highspeed variants: unused by operator choice (never planned; no probe needed); store
+ *   also carries dead ids glm-4.6v/glm-5v-turbo (vision, outside plan scope) — picker clutter only.
+ * Quota = V2 PROMPTS (Max-Quarterly: ~1,600/5h · ~8,000/week, 20× Lite; 1 prompt ≈ 15–20 model
+ *   invocations). V2 is grandfathered until the QUARTERLY cycle ends, then converts to the new
+ *   credits system (Max: 28,000/5h · 140,000/week; usage = (in×mult+cached×mult+out×mult)/10⁴;
+ *   5.3 = 6.9/1.7/24 · flash = 2.3/0.56/8; off-peak 50%). MCP servers (Web Search / Web Reader /
+ *   Zread — wired at ~/.config/mcp/mcp.json, pi-only) run on a DEDICATED monthly quota on V2
+ *   (dashboard-confirmed 2026-09-08: "MCP Quota 1% Used, Reset 2026-10-07") — NOT the prompt
+ *   quota; the FAQ's ×1.2-credits-per-call MCP billing applies to NEW-plan credits accounts only.
+ * ⚠ NO balance fallback: exhausted quota = hard fail until the 5h window resets.
+ * V2 Max includes DEDICATED PEAK RESOURCES → the peak-downshift idea below is moot on this plan
+ *   (helpers kept for a possible post-conversion future).
  * ⚠ SELECTOR ≠ SUBSCRIPTION: pi's picker lists the full platform catalog; plan scope is
  *   enforced at CALL TIME. Never add unverified models here.
  * ⚠ FOOTGUN: pi's built-in zai provider default is glm-5.1 — an alias now; still avoid
@@ -135,8 +142,12 @@ export interface ModelRegistryLike {
 // Promo window (single source of truth — update the date as Z AI extends/ends it)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Z AI promo: glm-5.2 & glm-5-turbo at 1× off-peak through this date. */
-export const PROMO_SUNSET_ISO = "2026-09-30"; // per /devpack/overview "end of September"
+/** Z AI promo: glm-5.2 & glm-5-turbo at 1× off-peak through this date.
+ * RECHECKED 2026-09-08: ALL promo text REMOVED from /devpack/overview — promo no longer
+ * advertised; sunset pinned to the day BEFORE the recheck so isPromoActive() = false
+ * immediately (comparison is <= end-of-day UTC). V2 prompt-billing was never affected;
+ * relevant only for credits accounts post-conversion. */
+export const PROMO_SUNSET_ISO = "2026-09-07"; // promo text removed from docs 2026-09-08 (was 2026-09-30)
 
 export function isPromoActive(now = new Date()): boolean {
   return now <= new Date(PROMO_SUNSET_ISO + "T23:59:59Z");
@@ -146,6 +157,8 @@ export function isPromoActive(now = new Date()): boolean {
  * Peak window in UTC hours. 14:00–18:00 UTC+8 → 06:00–10:00 UTC.
  * Berlin operator works outside 08:00–12:00 local (= peak), so this is usually moot,
  * but L3 may consult it to downshift architecture→4.7 if a dispatch lands in peak.
+ * MOOT on V2 Max (dedicated peak resources, dashboard-verified 2026-09-08); matters again
+ * only if the account converts to credits at quarterly-cycle end.
  */
 export const PEAK_UTC_HOUR_START = 6;
 export const PEAK_UTC_HOUR_END = 10; // exclusive
@@ -156,8 +169,11 @@ export function isPeakHours(now = new Date()): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The map — 8 of 10 categories zai-plan-primary (glm-5.3 / glm-5.3-flash);
-// unspecified-low (gpt-5.6-luna) and artistry (minimax-m3) are opencode-go-primary.
+// The map — 9 of 10 categories zai-plan-primary (glm-5.3 / glm-5.3-flash); only artistry
+// (minimax-m3) remains opencode-go-primary. unspecified-low moved to zai/glm-5.3-flash
+// 2026-09-08 (operator go): V2 Max 20×-Lite volume removed the Pro-era plan-credit-preservation
+// rationale; direct call drops the opencode-go router hop/dependency. gpt-5.6-luna demoted to
+// first fallback (external diversity preserved).
 // Fallback chains are ordered + cross-provider; spawn.ts appends the global FALLBACK tail via
 // orderedFallbacks() and walks it on unavailable-primary and empty-output (quota exhaustion).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,15 +192,15 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
       "Short fast tasks; zai/glm-5.3-flash (3×-quota flash; thinking-off stamp tolerated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode/ling-3.0-flash-fin-free (FREE).",
   },
   "unspecified-low": {
-    provider: "opencode-go",
-    id: "gpt-5.6-luna",
+    provider: "zai-coding-cn",
+    id: "glm-5.3-flash",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode-go", id: "gpt-5.6-luna" },
       { provider: "opencode", id: "glm-5.3-flash" },
     ],
     thinkingLevel: "off",
     rationale:
-      "Routine low-effort fallback (also DEFAULT_CATEGORY); opencode-go/gpt-5.6-luna external, preserves plan points. Fallbacks: zai/glm-5.3-flash → opencode/glm-5.3-flash.",
+      "Routine low-effort fallback (also DEFAULT_CATEGORY); zai/glm-5.3-flash (moved 2026-09-08, operator go: V2 Max 20×-Lite volume removed the Pro-era preserve-plan-credits rationale; direct call drops the opencode-go router hop/dependency). Fallbacks: opencode-go/gpt-5.6-luna (external diversity) → opencode/glm-5.3-flash.",
   },
   "unspecified-high": {
     provider: "zai-coding-cn",

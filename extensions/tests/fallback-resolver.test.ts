@@ -122,17 +122,18 @@ eq(
   ["opencode-go/kimi-k2.7-code", "opencode-go/grok-4.6", "opencode-go/glm-5.3", "opencode-go/glm-5.2"],
 );
 
-// Unknown category → DEFAULT_CATEGORY (unspecified-low), primary opencode-go/gpt-5.6-luna (external).
-const unknownResolved = resolveModel("nonsense-category", mockRegistry([["opencode-go", "gpt-5.6-luna"]]));
+// Unknown category → DEFAULT_CATEGORY (unspecified-low), primary zai-coding-cn/glm-5.3-flash
+// (rerouted 2026-09-08, operator go — V2 Max volume removed the credit-preservation rationale).
+const unknownResolved = resolveModel("nonsense-category", mockRegistry([["zai-coding-cn", "glm-5.3-flash"]]));
 eq(
   "resolveModel(unknown): falls to DEFAULT_CATEGORY primary",
   [unknownResolved.category, unknownResolved.modelFlag],
-  [DEFAULT_CATEGORY, "opencode-go/gpt-5.6-luna"],
+  [DEFAULT_CATEGORY, "zai-coding-cn/glm-5.3-flash"],
 );
 eq(
   "resolveModel(unknown): DEFAULT_CATEGORY fallbackFlags",
   unknownResolved.fallbackFlags,
-  ["zai-coding-cn/glm-5.3-flash", "opencode/glm-5.3-flash"],
+  ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash"],
 );
 
 // Registry missing find() → throws (contract guard).
