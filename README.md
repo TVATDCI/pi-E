@@ -10,13 +10,13 @@ This is **not** a showcase. It's a single-operator production config: narrow and
 
 |                        |                                                                                 |
 | ---------------------- | ------------------------------------------------------------------------------- |
-| **Pi version**         | `0.84.2` (npm: `@earendil-works/pi-coding-agent`)                               |
-| **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (quota-based, **no** balance fallback)       |
-| **Default model**      | `glm-5.3` @ `high` thinking, theme `encom`                                      |
+| **Pi version**         | `0.84.4` (npm: `@earendil-works/pi-coding-agent`)                               |
+| **Provider (primary)** | `zai-coding-cn` — Z-AI Coding Plan (**Legacy V2 Max-Quarterly**, prompt-quota-based, **no** balance fallback)       |
+| **Default model**      | `glm-5.3` @ `max` thinking, theme `e-punk`                                      |
 | **Extensions**         | 19 active top-level + 6 subpackages (`orchestration-engine/`, `memory/`, `budgets/`, `security/`, `lib/`, `tests/` — 0 disabled) — incl. chain widget, acceptance gates, clarify, background dispatch, compaction capture, command guard |
-| **Agents**             | 15 (7 personas + 8 Matrix operatives; 0 model pins)                             |
-| **Governance**        | 13 ADRs in `decisions/`; 11 pi-native skills in `skills/`                       |
-| **Secondary providers** | `opencode` + `opencode-go` (FREE/external tiers — `quick` & `git-commit-message` primaries, `deep` & `ultrabrain` primaries, many fallbacks) |
+| **Agents**             | 14 (6 personas + 8 Matrix operatives; 0 model pins)                             |
+| **Governance**        | 13 ADRs in `decisions/`; 17 pi-native skills in `skills/`                       |
+| **Secondary providers** | `opencode` + `opencode-go` (external/fallback tiers — only `artistry` is external-primary; `unspecified-low` moved to zai flash 2026-09-08) |
 
 ---
 
@@ -68,7 +68,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── themes/encom.json         # the one theme
 ├── agents/                   # 14 agents: 6 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
-├── skills/                   # 12 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt, main-vault-query, risky-changes)
+├── skills/                   # 17 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt, main-vault-query, risky-changes, diagnose-crash, omarchy, omarchy-migration, model-audit, local-ocr)
 ├── prompts/                  # prompt templates (design, oracle, survey, verify)
 ├── planning/                 # PLAN docs (improvement-plan, reverse-bridge-writer, w8b-store-jsonl)
 ├── exports/                  # cross-session artifacts (pi-handoff, absorption plan + oracle review)
