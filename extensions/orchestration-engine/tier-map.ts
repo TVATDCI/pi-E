@@ -5,7 +5,7 @@
  * Category names/semantics ported verbatim from oh-my-openagent.json — they are the
  * dispatch vocabulary (prompts, skills, operator muscle memory key on them). Do NOT rename.
  *
- * ─── Z AI GLM Coding Plan (zai-coding-cn) — LEGACY PLAN V2 Max-Quarterly (dashboard-verified 2026-09-08) ──
+ * ─── Z AI GLM Coding Plan (zai-coding-cn) — LEGACY PLAN V2 Max-Quarterly (dashboard-verified 2026-09-11) ──
  * Models: ALL plans run GLM-5.3 + GLM-5.3-Flash only — re-verified 2026-09-08 on BOTH endpoints
  *   (api.z.ai/api/anthropic + open.bigmodel.cn/api/coding/paas/v4, pi's endpoint). glm-5/5.1/5.2
  *   auto-route to 5.3; glm-4.5/4.5-air/4.6/4.7/5-turbo auto-route to 5.3-Flash — legacy ids below
@@ -22,7 +22,16 @@
  *   (dashboard-confirmed 2026-09-08: "MCP Quota 1% Used, Reset 2026-10-07") — NOT the prompt
  *   quota; the FAQ's ×1.2-credits-per-call MCP billing applies to NEW-plan credits accounts only.
  * ⚠ NO balance fallback: exhausted quota = hard fail until the 5h window resets.
- * V2 Max includes DEDICATED PEAK RESOURCES → the peak-downshift idea below is moot on this plan
+ * PEAK WINDOW (dashboard 2026-09-11): Mon–Fri 14:00–18:00 SGT = 08:00–12:00 CEST — GLM-5.3 consumes
+ *   3× inside it, flash 1.2×; off-peak flash is 0.4× (the floor). Dedicated peak resources ≠ free
+ *   peak usage → schedule 5.3-class BULK work (sweeps, batch dispatches) outside the window;
+ *   evening/night sessions are optimal. (Supersedes the old 'peak-downshift moot' note.)
+ * FLASH-FIRST DOCTRINE (2026-09-11, operator-endorsed): mechanical/execution categories
+ *   (quick, unspecified-low=DEFAULT, writing, visual-engineering, research, git-commit-message)
+ *   are flash-primary — the loop's verification machinery converts quality risk into a cheap
+ *   retry, so flagship adds ~nothing at execution nodes (production-proven: the archivist ran
+ *   flash for 3 captures + 2 micro-passes, zero deviations). Flagships stay LOCKED at judging
+ *   nodes (unspecified-high, deep, ultrabrain) per STRONG-MODEL-AT-JUDGING.
  *   (helpers kept for a possible post-conversion future).
  * ⚠ SELECTOR ≠ SUBSCRIPTION: pi's picker lists the full platform catalog; plan scope is
  *   enforced at CALL TIME. Never add unverified models here.
@@ -157,8 +166,9 @@ export function isPromoActive(now = new Date()): boolean {
  * Peak window in UTC hours. 14:00–18:00 UTC+8 → 06:00–10:00 UTC.
  * Berlin operator works outside 08:00–12:00 local (= peak), so this is usually moot,
  * but L3 may consult it to downshift architecture→4.7 if a dispatch lands in peak.
- * MOOT on V2 Max (dedicated peak resources, dashboard-verified 2026-09-08); matters again
- * only if the account converts to credits at quarterly-cycle end.
+ * REVISED 2026-09-11 (dashboard): the 3×-flagship/1.2×-flash peak multipliers DO apply on
+ * V2 Max (usage-reference table) — keep this helper live; prefer flash tiers inside the
+ * window for bulk work regardless of the old 'dedicated resources' assumption.
  */
 export const PEAK_UTC_HOUR_START = 6;
 export const PEAK_UTC_HOUR_END = 10; // exclusive
