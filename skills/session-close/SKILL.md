@@ -12,6 +12,13 @@ description: |
 
 # Session Close (pi-native handoff)
 
+> **2026-09-11 — the 09-02 authorship A/B is settled** (operator ruling A, ddd
+> authors): step-4's doctrine is closed as written — handoffs are file-on-disk
+> ONLY, `/exports/` is gitignored at `.gitignore` L64 (commit `f0a0a9b`), and no
+> commit instruction exists anywhere in this skill. The close formula stands:
+> "handoff written (on disk, untracked by design); round-trip pending sisyphus's
+> next session-begin."
+
 End a pi session by writing the handoff export that sisyphus reads at its next
 `session-begin` (Step 4). This is **pi's only path for its work to reach the shared
 bd store** — sisyphus promotes `## Proposed bd facts` to bd after review (Step 5).
