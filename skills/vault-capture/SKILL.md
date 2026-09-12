@@ -8,9 +8,8 @@ description: |
   cross-desk replay through the other desk's own gates. Use whenever the
   operator wants work captured/recorded/landed/preserved in Main-vault, says
   "capture this", "vault capture", "run the loop", "land it in the vault",
-  mentions the vault-capture loop or runbook, wants a capture packaged for the
-  other desk (TNT/ddd replay), or asks what a capture of some completed work
-  would look like. Also fires for pre-flight consultation on capture timing or
+  mentions the vault-capture loop or runbook, or wants a capture packaged
+  for the other desk's replay. Also fires for pre-flight consultation on capture timing or
   claim scope (dual-oracle precedent). Do NOT use for: reading or querying the
   vault for knowledge (main-vault-query skill), writing the vault directly
   (pi NEVER writes the vault — that is the whole point of this loop),

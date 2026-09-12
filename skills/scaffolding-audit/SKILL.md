@@ -10,7 +10,7 @@ description: |
   flags carry file:line + class + verbatim quote + suggested action; the operator
   arbitrates every change. Triggers: "scaffolding audit", "stale scaffolding",
   "audit routing text", "model changed what's stale", "drift check", "routing state
-  drifted", "run scaffolding-audit". Do NOT use for: live endpoint/plan verification
+  drifted". Do NOT use for: live endpoint/plan verification
   (model-audit's domain — this skill invokes it, never reimplements it), skill-set
   gap/overlap maps (skill-auditor), applying any edit it proposes (propose-only), or
   opencode/sis-side surfaces (the config-repo twin's domain).
