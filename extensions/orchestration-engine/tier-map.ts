@@ -125,7 +125,7 @@ export interface TierEntry {
 }
 
 export interface ResolvedModel {
-  /** The literal `--model` flag value, e.g. "zai-coding-cn/glm-5.2". */
+  /** The literal `--model` flag value, e.g. "zai-coding-cn/glm-5.3". */
   modelFlag: string;
   provider: string;
   id: string;

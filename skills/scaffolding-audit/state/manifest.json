@@ -1,0 +1,140 @@
+{
+  "recorded-at": "2026-09-13T12:40:00.674Z",
+  "surface-scope": "pi",
+  "last-audit-commit": {
+    "~/.pi/agent": "dc2633fd6f2a1248dab060e85d13d430f02466a8"
+  },
+  "model-state": {
+    "source": {
+      "path": "extensions/orchestration-engine/tier-map.ts",
+      "sha256": "ecaa227c9a0bafaf934ca11256d6abc8f62b8bfea5c8b64eea9c3e295c07d88d"
+    },
+    "assignments": {
+      "quick": {
+        "primary": "zai-coding-cn/glm-5.3-flash",
+        "fallbacks": [
+          "opencode-go/gpt-5.6-luna",
+          "opencode/glm-5.3-flash",
+          "opencode/ling-3.0-flash-fin-free"
+        ]
+      },
+      "unspecified-low": {
+        "primary": "zai-coding-cn/glm-5.3-flash",
+        "fallbacks": [
+          "opencode-go/gpt-5.6-luna",
+          "opencode/glm-5.3-flash"
+        ]
+      },
+      "unspecified-high": {
+        "primary": "zai-coding-cn/glm-5.3",
+        "fallbacks": [
+          "zai-coding-cn/glm-5-turbo",
+          "opencode-go/gpt-5.6-luna",
+          "opencode-go/kimi-k2.7-code",
+          "opencode/glm-5.2"
+        ]
+      },
+      "deep": {
+        "primary": "zai-coding-cn/glm-5.3",
+        "fallbacks": [
+          "opencode-go/kimi-k2.7-code",
+          "opencode-go/grok-4.6",
+          "opencode-go/glm-5.3",
+          "opencode-go/glm-5.2"
+        ]
+      },
+      "ultrabrain": {
+        "primary": "zai-coding-cn/glm-5.3",
+        "fallbacks": [
+          "opencode-go/grok-4.6",
+          "opencode-go/kimi-k3",
+          "opencode-go/qwen3.8-max",
+          "opencode/kimi-k2.7-code"
+        ]
+      },
+      "writing": {
+        "primary": "zai-coding-cn/glm-5.3-flash",
+        "fallbacks": [
+          "opencode-go/gpt-5.6-luna",
+          "opencode/gpt-5.6-luna",
+          "opencode/deepseek-v4-flash"
+        ]
+      },
+      "visual-engineering": {
+        "primary": "zai-coding-cn/glm-5.3-flash",
+        "fallbacks": [
+          "opencode-go/minimax-m3",
+          "opencode-go/qwen3.6-plus",
+          "opencode/glm-5.1"
+        ]
+      },
+      "artistry": {
+        "primary": "opencode-go/minimax-m3",
+        "fallbacks": [
+          "opencode-go/qwen3.8-max",
+          "opencode-go/grok-4.6",
+          "zai-coding-cn/glm-5.3",
+          "zai-coding-cn/glm-5.3-flash"
+        ]
+      },
+      "research": {
+        "primary": "zai-coding-cn/glm-5.3-flash",
+        "fallbacks": [
+          "opencode-go/glm-5.3-flash",
+          "opencode/gpt-5.6-luna"
+        ]
+      },
+      "git-commit-message": {
+        "primary": "zai-coding-cn/glm-5.3-flash",
+        "fallbacks": [
+          "opencode-go/gpt-5.6-luna",
+          "opencode/glm-5.3-flash",
+          "opencode/ling-3.0-flash-fin-free"
+        ]
+      }
+    },
+    "judgingLocks": {
+      "categories": [
+        "unspecified-high",
+        "deep",
+        "ultrabrain"
+      ],
+      "chains": {
+        "unspecified-high": [
+          "zai-coding-cn/glm-5-turbo",
+          "opencode-go/gpt-5.6-luna",
+          "opencode-go/kimi-k2.7-code",
+          "opencode/glm-5.2"
+        ],
+        "deep": [
+          "opencode-go/kimi-k2.7-code",
+          "opencode-go/grok-4.6",
+          "opencode-go/glm-5.3",
+          "opencode-go/glm-5.2"
+        ],
+        "ultrabrain": [
+          "opencode-go/grok-4.6",
+          "opencode-go/kimi-k3",
+          "opencode-go/qwen3.8-max",
+          "opencode/kimi-k2.7-code"
+        ]
+      }
+    }
+  },
+  "finding-hashes": [
+    "50d7cc2f4598e148",
+    "fb88a7adc2d0c28b",
+    "01563e41a5fd9ba2",
+    "5a0d41762b88b922",
+    "e6a9bd7762366a2b",
+    "e6a9bd7762366a2b",
+    "a6c0378baee8b453",
+    "367eeb43a965a36a",
+    "1047cc6423938142",
+    "019eac7d6c14fc06",
+    "13fab2f19063e21a",
+    "14852ea56f4ef3a9",
+    "e1a3b6f92777e5aa",
+    "0f1a8a7d5f537190"
+  ]
+}
