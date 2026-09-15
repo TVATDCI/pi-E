@@ -3,7 +3,7 @@
 // 2026-09-07 + 2026-09-15): unread ~/lane-inbox/*.md MUST surface in the system prompt.
 // Pure tests: tmpdir fixtures, no home dependency.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readLaneInbox, formatInboxBlock, composeInboxSection } from "../inbox-sentinel.ts";
@@ -30,6 +30,12 @@ check("empty dir -> []", readLaneInbox(dir).length === 0);
 // root .md only, oldest first, size carried; subdirs (read/) excluded
 writeFileSync(join(dir, "b-second.md"), "hello world");
 writeFileSync(join(dir, "a-first.md"), "x");
+// Deterministic mtimes: explicit and distinct — never rely on write-order timing
+// or readdir hash order (CI flake root cause: same-tick mtimes + fs-dependent
+// readdir order made this assertion pass-by-luck locally and fail on the runner).
+const T0 = Date.now() / 1000 - 100;
+utimesSync(join(dir, "a-first.md"), T0, T0);
+utimesSync(join(dir, "b-second.md"), T0 + 50, T0 + 50);
 writeFileSync(join(dir, "notes.txt"), "not md");
 mkdirSync(join(dir, "read"));
 writeFileSync(join(dir, "read", "consumed.md"), "already read");
