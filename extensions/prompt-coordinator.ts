@@ -39,6 +39,7 @@ import { applyBudget, estimateTokens } from "./memory/budget.ts";
 import { formatMemoryBlock } from "./memory/formatter.ts";
 import type { MemoryRecord } from "./memory/schema.ts";
 import { readBridgeExport, formatBridgeLines, checkStale, bridgeStatus, type BridgeEntry } from "./bd-bridge.ts";
+import { composeInboxSection } from "./inbox-sentinel.ts";
 import { readPurpose } from "./mini-purpose-gate.ts";
 import { COST_DISCIPLINE_TEXT } from "./orchestration-engine/index.ts";
 import { SESSION_NOTES_TEXT } from "./session-notes.ts";
@@ -209,6 +210,9 @@ export default function (pi: ExtensionAPI) {
 
       // 3. Session notes (behavioral)
       prompt += "\n\n" + SESSION_NOTES_TEXT;
+
+      // 3b. Lane-inbox sentinel (forced attention: unread lane messages — standing discipline, structuralized)
+      prompt += await tryProduce("lane-inbox", () => composeInboxSection());
 
       // 4+5. Facts: memory + bridge, coordinated (dedup + per-injector rank/budget)
       prompt += await tryProduce("facts", () => composeFacts());
