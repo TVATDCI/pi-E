@@ -1,4 +1,5 @@
-// inbox-sentinel.ts — forced-attention producer for unread lane-inbox messages.
+// extensions/lib/inbox-sentinel.ts — forced-attention producer for unread lane-inbox messages.
+// (lives in lib/ — pure module, no factory; loaded via import from prompt-coordinator.ts, not as an extension)
 //
 // WHY: the standing discipline (constraint: pi_turn_inbox_discipline) says pi checks
 // ~/lane-inbox for unread .md at the FIRST action of EVERY operator turn. Behavioral

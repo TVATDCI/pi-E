@@ -6,7 +6,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLaneInbox, formatInboxBlock, composeInboxSection } from "../inbox-sentinel.ts";
+import { readLaneInbox, formatInboxBlock, composeInboxSection } from "../lib/inbox-sentinel.ts";
 
 let pass = 0;
 let fail = 0;
