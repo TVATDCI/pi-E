@@ -69,7 +69,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 ├── themes/encom.json         # the one theme
 ├── agents/                   # 14 agents: 6 personas + 8 Matrix operatives (.md w/ frontmatter: name/description/tools)
 ├── decisions/                # 13 ADRs (architecture decision records)
-├── skills/                   # 19 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, decisions, pi-web-search, research-prompt, main-vault-query, risky-changes, omarchy-migration, model-audit, local-ocr, diagram-render, image-inspector, vault-capture, scaffolding-audit) — omarchy + diagnose-crash live in the OS package via ~/.agents/skills
+├── skills/                   # 20 pi-native skills (git-commit-message, review-loop, session-close, shell-safety, skill-auditor, skill-creator, git-worktree, browser-tools, decisions, pi-web-search, research-prompt, main-vault-query, risky-changes, omarchy-migration, model-audit, local-ocr, diagram-render, image-inspector, vault-capture, scaffolding-audit) — omarchy + diagnose-crash live in the OS package via ~/.agents/skills
 ├── prompts/                  # prompt templates (design, oracle, survey, verify)
 ├── planning/                 # PLAN docs (improvement-plan, reverse-bridge-writer, w8b-store-jsonl)
 ├── exports/                  # cross-session artifacts (pi-handoff, absorption plan + oracle review)
