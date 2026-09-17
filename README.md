@@ -245,20 +245,20 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
     source ∈ {tier-map, persona-override, functional-agent, downshift-unavailable, downshift-exhausted}
 ```
 
-**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. 6 of 10 categories Z-AI-plan-primary; `quick`/`git-commit-message` → FREE `opencode`, `deep`/`ultrabrain` → external `opencode-go` quota shield, verified live 2026-08-14 — burn opencode-go's external quota first, Z-AI plan is the safety net):
+**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. 8 of 10 categories zai-plan-primary (flash/mechanical + the glm-5.3 judging pair); `ultrabrain`/`artistry` → external `opencode-go` (models not on the zai plan — grok-4.6/minimax-m3 double as the quota shield); a global `FALLBACK` tail (`opencode-go/gpt-5.6-luna`, R3 2026-09-18) is appended to every chain by spawn.ts — the dedupe-safe last resort that stays live under deep/ultrabrain):
 
 | Category             | Model                           | Thinking | Quota                          | Functional agent | Fallbacks                                        |
 | -------------------- | ------------------------------- | -------- | ------------------------------ | ---------------- | ------------------------------------------------ |
-| `quick`              | opencode/deepseek-v4-flash-free | off      | FREE                           | keymaker         | opencode/ling-3.0-flash-free                     |
-| `unspecified-low`    | zai-coding-cn/glm-4.7           | off      | 1×                             | trinity          | opencode/deepseek-v4-flash-free                  |
-| `unspecified-high`   | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | trinity          | opencode-go/kimi-k2.7-code → opencode-go/glm-5.2 |
-| `deep`               | opencode-go/glm-5.3             | high     | external (quota shield)        | morpheus         | zai/glm-5.3 → opencode-go/glm-5.2 → opencode-go/kimi-k2.7-code |
-| `ultrabrain`         | opencode-go/kimi-k3             | xhigh    | external                       | neo              | opencode-go/glm-5.3 → zai/glm-5.3                |
-| `writing`            | zai-coding-cn/glm-4.7           | medium   | 1×                             | mouse            | opencode/deepseek-v4-flash-free                  |
-| `research`           | zai-coding-cn/glm-4.7           | medium   | 1×                             | researcher       | opencode-go/minimax-m2.7                         |
-| `visual-engineering` | zai-coding-cn/glm-5-turbo       | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.2                              |
-| `artistry`           | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1                              |
-| `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | opencode-go/minimax-m2.7 → zai/glm-4.7           |
+| `quick`              | zai-coding-cn/glm-5.3-flash     | off      | 3× flash                       | keymaker         | opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode/ling-3.0-flash-fin-free |
+| `unspecified-low`    | zai-coding-cn/glm-5.3-flash     | off      | 3× flash                       | trinity          | opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash |
+| `unspecified-high`   | zai-coding-cn/glm-5.3           | high     | 1×                             | trinity          | opencode-go/glm-5.2 → opencode-go/kimi-k2.7-code → opencode/glm-5.2 |
+| `deep`               | zai-coding-cn/glm-5.3           | max      | 1×                             | morpheus         | opencode-go/glm-5.2 → opencode/glm-5.2 |
+| `ultrabrain`         | opencode-go/grok-4.6            | xhigh    | external                       | neo              | opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai/glm-5.3 → opencode/kimi-k2.7-code |
+| `writing`            | zai-coding-cn/glm-5.3-flash     | medium   | 3× flash                       | mouse            | opencode-go/gpt-5.6-luna → opencode/gpt-5.6-luna → opencode/deepseek-v4-flash |
+| `visual-engineering` | zai-coding-cn/glm-5.3-flash     | high     | 3× flash                       | architect        | opencode-go/minimax-m3 → opencode-go/qwen3.6-plus → opencode/glm-5.1 |
+| `artistry`           | opencode-go/minimax-m3          | high     | external                       | architect        | opencode-go/qwen3.8-max → opencode-go/grok-4.6 → zai/glm-5.3 → zai/glm-5.3-flash |
+| `research`           | zai-coding-cn/glm-5.3-flash     | medium   | 3× flash                       | researcher       | opencode-go/glm-5.3-flash → opencode/gpt-5.6-luna |
+| `git-commit-message` | zai-coding-cn/glm-5.3-flash     | off      | 3× flash                       | seraph           | opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode/ling-3.0-flash-fin-free |
 
 Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary fails **soft** (empty response — Z-AI plan quota has no balance fallback) **or loud** (in-band agent error, e.g. opencode-go monthly-cap `429 GoUsageLimitError` — PORT-PLAN ③ live-error half, live-verified `opencode-go/glm-5.3 → zai/glm-5.3` 2026-08-16). A fallback hop that also errors in-band keeps walking; a timeout aborts the chain (Edit 7). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/gpt-5.6-luna`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
 

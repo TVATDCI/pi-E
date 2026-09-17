@@ -39,6 +39,10 @@
  *   bare-provider fallbacks; scoped-models + this map are safe.
  * ⚠ opencode-go/deepseek-v4-flash & -pro: 403 region-blocked (China-hosted, workspace opt-in
  *   required) — never route there.
+ * 2026-09-18 (Captain revision): ultrabrain rerouted zai/glm-5.3 → opencode-go/grok-4.6 @xhigh
+ *   (glm-5.3 demoted to rung 3); deep fallbacks are glm-only cross-provider (workhorse models
+ *   out of the reasoning floor); unspecified-high's dead zai/glm-5-turbo rung purged (plan
+ *   auto-routes turbo→glm-5.3 = duplicate of the primary). 8 of 10 categories zai-primary.
  *
  * ─── STRONG-MODEL-AT-JUDGING INVARIANT ──────────────────────────────────────
  * unspecified-high / deep / ultrabrain: primaries, per-tier fallbacks AND the global FALLBACK
