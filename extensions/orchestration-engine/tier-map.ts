@@ -216,40 +216,37 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     provider: "zai-coding-cn",
     id: "glm-5.3",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-5-turbo" },
-      { provider: "opencode-go", id: "gpt-5.6-luna" },
+        { provider: "opencode-go", id: "glm-5.2" },
       { provider: "opencode-go", id: "kimi-k2.7-code" },
       { provider: "opencode", id: "glm-5.2" },
     ],
     thinkingLevel: "high",
     rationale:
-      "High-effort fallback; zai/glm-5.3 @high. Fallbacks: zai/glm-5-turbo → opencode-go/gpt-5.6-luna → opencode-go/kimi-k2.7-code → opencode/glm-5.2.",
+      "High-effort fallback; zai/glm-5.3 @high. Fallbacks: opencode-go/glm-5.2 → opencode-go/kimi-k2.7-code → opencode/glm-5.2.",
   },
   deep: {
     provider: "zai-coding-cn",
     id: "glm-5.3",
     fallbackModels: [
-      { provider: "opencode-go", id: "kimi-k2.7-code" },
-      { provider: "opencode-go", id: "grok-4.6" },
-      { provider: "opencode-go", id: "glm-5.3" },
       { provider: "opencode-go", id: "glm-5.2" },
+      { provider: "opencode", id: "glm-5.2" },
     ],
     thinkingLevel: "max",
     rationale:
-      "Deep codebase investigation/execution; zai/glm-5.3 @max (z.ai-recommended for coding; more token-efficient than 5.2 at max). Fallbacks: opencode-go kimi-k2.7-code → grok-4.6 → glm-5.3 → glm-5.2.",
+      "Deep codebase investigation/execution; zai/glm-5.3 @max (z.ai-recommended for coding; more token-efficient than 5.2 at max). Fallbacks: opencode-go/glm-5.2 → opencode/glm-5.2.",
   },
   ultrabrain: {
-    provider: "zai-coding-cn",
-    id: "glm-5.3",
+    provider: "opencode-go",
+    id: "grok-4.6",
     fallbackModels: [
-      { provider: "opencode-go", id: "grok-4.6" },
       { provider: "opencode-go", id: "kimi-k3" },
       { provider: "opencode-go", id: "qwen3.8-max" },
+      { provider: "zai-coding-cn", id: "glm-5.3" },
       { provider: "opencode", id: "kimi-k2.7-code" },
     ],
     thinkingLevel: "xhigh",
     rationale:
-      "Hardest logic; zai/glm-5.3 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go grok-4.6 → kimi-k3 → qwen3.8-max → opencode/kimi-k2.7-code (last rung replaced 2026-09-07: opencode-go/deepseek-v4-pro is 403 region-blocked).",
+      "Hardest logic; opencode-go/grok-4.6 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code (last rung replaced 2026-09-18).",
   },
   writing: {
     provider: "zai-coding-cn",
