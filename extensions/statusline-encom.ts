@@ -24,7 +24,8 @@
 //     the built-in footer (the footer-status.ts.disabled bug). setFooter
 //     REPLACES the built-in footer entirely (extensions.md:2303-2304).
 //   • Print-mode guard: `if (!c.hasUI) return` before setFooter/setInterval.
-//     ctx.ui throws in print/RPC mode (LR-0017; rpc.md:1060).
+//     ctx.ui is unavailable only in print/json mode (hasUI=false — LR-0017; rpc.md:1060).
+//     RPC reports hasUI=true: dialogs/notify reach the ACP client (extensions.md ctx.hasUI).
 //   • Model seed bug (footer #1): model_select fires only on CHANGE, so a fresh
 //     session showed "—" until the user cycled models. Fix: read ctx.model LIVE
 //     in render() — the accessor is always current, so no closure seed is needed

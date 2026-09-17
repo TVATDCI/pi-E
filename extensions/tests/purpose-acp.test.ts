@@ -3,7 +3,7 @@
 //
 // Proves the 8 scenarios of design-v0.2 (all verdict conditions from sis-verdict-v0.1.md):
 //   (1) rpc + env + unset purpose → ADOPTED (provenance source:"env"), NO dialog attempted.
-//   (2) tui + env + unset → NOT adopted; dialog path byte-for-byte unchanged.
+//   (2) tui + env + unset → NOT adopted; dialog path byte-for-byte unchanged (prompt text asserted).
 //   (3) env + existing purpose → existing wins (env never overrides a SET purpose).
 //   (4) whitespace-only env → ignored (and the input gate still BLOCKS — adoption didn't weaken it).
 //   (5) belt-and-braces: input-gate adoption when session_start did not adopt.
@@ -135,6 +135,7 @@ async function flush(): Promise<void> {
   await flush();
   check("(2) tui+env: NOT adopted (no purpose entry)", h.entries.filter((e) => e.customType === "purpose").length === 0);
   check("(2) tui+env: dialog path unchanged (promptOnce fired)", h.calls.input.length === 1);
+  check("(2) tui+env: dialog prompt text exact", h.calls.input[0]?.prompt === "What is the purpose of this agent?");
   check("(2) tui+env: no adoption notify", !adopted(h));
   setEnv(ORIG_ENV);
 }
