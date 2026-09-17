@@ -21,7 +21,29 @@ import { readdirSync, statSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import * as os from "node:os";
 
-const REPO = join(import.meta.dirname, ".."); // resolve relative to this script — supports scratch-clone verification (TNT F-finding 1)
+// Repo root — resolved from GIT, not from this script's location (brain-44j0, shape c).
+// Why: when the pre-commit gate fires for a linked-worktree commit, git runs the hook with
+// cwd = the WORKTREE root and exports GIT_DIR=<main>/.git/worktrees/<name> (GIT_WORK_TREE
+// unset). Under that INHERITED env, `git rev-parse --show-toplevel` answers with the
+// worktree actually being committed — so the gate tests the tree that is landing, not some
+// other checkout. The script's own location only coincidentally agrees when the runner is
+// invoked relatively from the hook cwd; derivation from import.meta.dirname silently tests
+// the wrong tree the moment that assumption slips (e.g. a hook or wrapper that cds first).
+// LOAD-BEARING: execSync below passes NO `env` on purpose — full inheritance. Never
+// sanitize GIT_DIR/GIT_WORK_TREE for this call: stripping them makes rev-parse answer for
+// a different checkout (typically the primary), and the gate would pass/fail on a tree it
+// never tested. (Zero-discovery from a wrong root stays a LOUD hard error: exit 2.)
+function repoRoot(): string {
+  try {
+    const out = execSync("git rev-parse --show-toplevel", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] });
+    return out.trim();
+  } catch {
+    // Non-git context (scratch clone / fresh export): fall back to the script's own
+    // location — supports scratch-clone verification (TNT F-finding 1).
+    return join(import.meta.dirname, "..");
+  }
+}
+const REPO = repoRoot();
 const EXT_DIR = join(REPO, "extensions");
 const DEFAULT_EXPECT = 30;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -188,7 +210,9 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const all = discover(EXT_DIR, trackedFiles(EXT_DIR));
+  // trackedFiles runs `git ls-files` from the git-resolved REPO root (repo-relative output
+  // is prefixed with REPO), so the tracked set describes the checkout rev-parse answered for.
+  const all = discover(EXT_DIR, trackedFiles(REPO));
   const files = flags.pattern ? all.filter((f) => f.includes(flags.pattern as string)) : all;
 
   if (files.length === 0) {
