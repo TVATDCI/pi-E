@@ -10,6 +10,18 @@
 //      /reload restores it WITHOUT re-prompting (mirrors mini-task-tracker's reconstruct).
 // API grounded in Pi extensions.md (appendEntry §1404, registerCommand §1457) +
 // disler/pi-vs-claude-code purpose-gate.ts. LR-0017 hasUI guards retained for print mode.
+//
+// ENV ADOPTION (2026-09-17, design-v0.2 + sis-verdict-v0.1.md — ACP/headless support):
+//   `PI_PURPOSE` is an INBOUND env var pi READS to supply the session purpose, so ACP
+//   clients (e.g. backpass) can drive a headless pi without tripping the input gate.
+//   Rule: adopted ONLY when (a) purpose is unset — env never overrides a set purpose;
+//   (b) ctx.mode === "rpc" by EXACT string equality (tui/json/print never adopt — the
+//   interactive TUI discipline is untouched); (c) the value trims non-empty. A CLEARED
+//   purpose counts as authoritative unset → rpc resume with PI_PURPOSE set ADOPTS
+//   (pinned semantic, Operator decision on verdict condition 4b). Guard→commit is fully
+//   synchronous (no await between), provenance persisted as { text, source: "env" } on
+//   the adoption path only. `PI_SESSION_*` remains pi's OUTBOUND namespace — this var
+//   is deliberately named PI_PURPOSE (verdict condition 3).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
@@ -56,11 +68,13 @@ export default function (pi: ExtensionAPI) {
   }
 
   // --- STATE COMMIT: set/clear purpose + persist for /reload reconstruct ---
-  function commitPurpose(text: string | undefined, ctx: ExtensionContext) {
+  // `source` tags provenance on the persisted entry (adoption path only: "env").
+  // Readers (readPurpose + reconstruct) read `text` only — backward compatible.
+  function commitPurpose(text: string | undefined, ctx: ExtensionContext, source?: "env") {
     purpose = text && text.trim() ? text.trim() : undefined;
     renderWidget(ctx);
     try {
-      pi.appendEntry("purpose", { text: purpose ?? null });
+      pi.appendEntry("purpose", { text: purpose ?? null, ...(source ? { source } : {}) });
     } catch {
       /* appendEntry best-effort; persistence is non-fatal */
     }
@@ -70,6 +84,19 @@ export default function (pi: ExtensionAPI) {
   // Delegates to the pure readPurpose() (shared with prompt-coordinator.ts) — DRY, no drift.
   function reconstruct(ctx: ExtensionContext) {
     purpose = readPurpose(ctx);
+  }
+
+  // --- ENV ADOPTION (design-v0.2 §2): PI_PURPOSE → purpose, rpc-only, synchronous ---
+  // Guard order per verdict: unset purpose → exact "rpc" mode → non-empty trimmed env.
+  // NO await between guard and commit (an async gap could race the dialog branch).
+  function tryAdoptPurposeFromEnv(ctx: ExtensionContext) {
+    const env = process.env.PI_PURPOSE;
+    if (purpose) return; // env never overrides a set purpose (cleared ≠ set — see header)
+    if (ctx.mode !== "rpc") return; // exact string equality — tui/json/print never adopt
+    const v = env?.trim();
+    if (!v) return;
+    commitPurpose(v, ctx, "env");
+    ctx.ui.notify("Purpose adopted from PI_PURPOSE (rpc)", "info");
   }
 
   // --- SINGLE PROMPT (non-looped): if input stale-no-ops or is cancelled, do NOT loop ---
@@ -106,9 +133,12 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // 1. SESSION_START: reconstruct (so /reload doesn't re-prompt) → render → single prompt if still unset
+  // 1. SESSION_START: reconstruct (so /reload doesn't re-prompt) → env adoption (rpc only,
+  //    BEFORE the dialog branch — an adopted purpose means no dialog) → render → single
+  //    prompt if still unset.
   pi.on("session_start", async (_event, ctx) => {
     reconstruct(ctx);
+    tryAdoptPurposeFromEnv(ctx);
     renderWidget(ctx);
     // LR-0017: guard dialogs in print mode. Single prompt only if interactive AND no purpose yet.
     if (ctx.hasUI && !purpose) void promptOnce(ctx);
@@ -119,8 +149,11 @@ export default function (pi: ExtensionAPI) {
 
   // 3. INPUT GATE: block prompts until a purpose is set. Points to /purpose (reliable setter).
   // LR-0017: in print mode there's no user to set a purpose → bypass (avoid swallowing every prompt).
+  // Env adoption sits BEFORE the !purpose check (belt-and-braces: if session_start didn't
+  // adopt, the first rpc prompt still adopts instead of being blocked).
   pi.on("input", async (_event, ctx) => {
     if (!ctx.hasUI) return { action: "continue" as const };
+    tryAdoptPurposeFromEnv(ctx);
     if (!purpose) {
       ctx.ui.notify("Set a purpose first: /purpose <text>", "warning");
       return { action: "handled" as const };

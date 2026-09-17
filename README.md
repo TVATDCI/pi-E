@@ -116,7 +116,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── budgets/               # turn/tool/usage budget primitives + resolver (pure library, PORT-PLAN ①)
     ├── security/              # yaml-merge.ts — deny-additive YAML layer-merge as versioned security boundary (D5)
     ├── lib/                   # shared: prompt-hash.ts, upstream-adapter.ts (cross-version seam shim, D6), command-guard-core.ts (pure guard core)
-    └── tests/                 # 32 test files (node --experimental-strip-types; all green on 0.85.1)
+    └── tests/                 # 34 test files (node --experimental-strip-types; all green on 0.85.1)
 ```
 
 ---
@@ -141,7 +141,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 | `mini-damage-control.ts`                                                   | 168 | Safety: fail-closed + deny-additive + `/dc-mode`                                                                                                        |
 | `orchestration-engine/routing-stats.ts`                                    | 204 | Pure aggregation for `/routing-stats` incl. usage section (unit-tested)                                                                                 |
 | `session-notes.ts`                                                         | 133 | `add_note` + `/note` persistent widget                                                                                                                  |
-| `mini-purpose-gate.ts`                                                     | 126 | Boot intent gate                                                                                                                                        |
+| `mini-purpose-gate.ts`                                                     | 163 | Boot intent gate + **`PI_PURPOSE`** env adoption: INBOUND var pi **reads** (rpc mode only; `PI_SESSION_*` stays pi's outbound namespace — design-v0.2)                                                                 |
 | `orchestration-engine/test-routing-stats.ts`                               | 58  | Aggregator unit tests (13/13)                                                                                                                           |
 | `web-research.ts`                                                          | 311 | Keyless `search` (Wikipedia+DDG-IA+npm+GitHub) + `fetch` (curl+w3m→text, truncated, SSRF-hardened) tools                                                    |
 | `test-web-research.ts`                                                     | 107 | web-research logic tests (42/42 pass); main-guard + no-op default (ADR 0011)                                                                                 |
