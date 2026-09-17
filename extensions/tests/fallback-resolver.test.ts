@@ -29,7 +29,8 @@ function eq<T>(name: string, got: T, want: T): void {
   const ok = JSON.stringify(got) === JSON.stringify(want);
   check(`${name}${ok ? "" : `  (got ${JSON.stringify(got)}, want ${JSON.stringify(want)})`}`, ok);
 }
-const GLOBAL = `${FALLBACK.provider}/${FALLBACK.id}`; // "opencode-go/glm-5.1"
+const GLOBAL = `${FALLBACK.provider}/${FALLBACK.id}`; // "opencode-go/gpt-5.6-luna"
+import { STRONG_FLAGSHIP_RE } from "../orchestration-engine/tier-map.ts";
 
 // ── orderedFallbacks: core ordering + tail + exclude ─────────────────────────
 eq(
@@ -169,8 +170,8 @@ for (const cat of JUDGING) {
   if (arr.length === 0) allJudgingNonEmpty = false;
   for (const fm of arr) {
     const flag = `${fm.provider}/${fm.id}`;
-    // strong = glm-5.x, kimi-*, grok-4.6, qwen3.8-max, gpt-5.6-luna (matches tier-map header invariant)
-    if (!/^glm-5\b/.test(fm.id) && !/^kimi-/.test(fm.id) && !/^grok-4\.6$/.test(fm.id) && !/^qwen3\.8-max$/.test(fm.id) && !/^gpt-5\.6-luna$/.test(fm.id)) {
+    // strong = the tier-map-exported doctrine regex (single source; R3 review condition 2b)
+    if (!STRONG_FLAGSHIP_RE.test(fm.id)) {
       allJudgingStrong = false;
       console.log(`    ✗ ${cat} fallback ${flag} is NOT strong-tier`);
     }
@@ -180,11 +181,11 @@ check("INVARIANT: all judging-category fallbacks are strong-tier (glm-5.x/kimi/g
 check("INVARIANT: all judging categories have ≥1 per-tier fallback", allJudgingNonEmpty);
 
 // Global FALLBACK itself must be strong (it's the tail for judging categories too).
-// R3: tail is luna (strong flagship, header list) — accept any strong-tier flagship.
-const STRONG_FLAGSHIPS = /^(glm-5\b|kimi|grok-4\.6|qwen3\.8-max|gpt-5\.6-luna)/;
+// R3 review condition 2b: the SAME exported doctrine regex as the per-tier invariant above —
+// single source, anchored (rejects -free/-mini variants).
 check(
   "INVARIANT: global FALLBACK is a strong-tier flagship — safe tail for judging categories",
-  STRONG_FLAGSHIPS.test(FALLBACK.id),
+  STRONG_FLAGSHIP_RE.test(FALLBACK.id),
 );
 
 // Every non-judging category also has a non-empty fallbackModels array (resilience floor).

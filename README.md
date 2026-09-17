@@ -232,7 +232,7 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
                       resolveFunctionalAgent(category) → Matrix operative (agent-map.ts)
 2. loadPersona(agent)        → persona.model (optional override); persona.tools / systemPrompt
 3. resolveModel(category)    → tier-map.ts TIERS[category] → {model, thinking}   (SOLE model authority)
-4. precedence:               persona.model  >  category tier  >  FALLBACK (opencode-go/glm-5.1)
+4. precedence:               persona.model  >  category tier  >  FALLBACK (opencode-go/gpt-5.6-luna)
 5. F4 availability precheck: getAvailable(); no key → downshift to FALLBACK (loud: notify+log)
 6. per-{agent,project} mutex → one writer per session file (delete-only-if-tail pattern)
 7. rotateIfNeeded:           session >100KB → rename to .archive.jsonl, start fresh (NOT truncate)
@@ -260,7 +260,7 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
 | `artistry`           | zai-coding-cn/glm-5.2           | high     | 1× promo → 2× after 2026-09-30 | architect        | opencode-go/glm-5.1                              |
 | `git-commit-message` | opencode/deepseek-v4-flash-free | off      | FREE                           | seraph           | opencode-go/minimax-m2.7 → zai/glm-4.7           |
 
-Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary fails **soft** (empty response — Z-AI plan quota has no balance fallback) **or loud** (in-band agent error, e.g. opencode-go monthly-cap `429 GoUsageLimitError` — PORT-PLAN ③ live-error half, live-verified `opencode-go/glm-5.3 → zai/glm-5.3` 2026-08-16). A fallback hop that also errors in-band keeps walking; a timeout aborts the chain (Edit 7). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/glm-5.1`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
+Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary fails **soft** (empty response — Z-AI plan quota has no balance fallback) **or loud** (in-band agent error, e.g. opencode-go monthly-cap `429 GoUsageLimitError` — PORT-PLAN ③ live-error half, live-verified `opencode-go/glm-5.3 → zai/glm-5.3` 2026-08-16). A fallback hop that also errors in-band keeps walking; a timeout aborts the chain (Edit 7). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/gpt-5.6-luna`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
 
 ---
 
