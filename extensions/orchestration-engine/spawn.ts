@@ -5,7 +5,7 @@ import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModel, orderedFallbacks, FALLBACK, type TaskCategory } from "./tier-map.ts";
 import { appendBudgetNudges, type ResolvedBudgets } from "../budgets/index.ts";
-import { classifySpawnOutcome, spawnFailedForFallback, type SpawnOutcome } from "./spawn-outcome.ts";
+import { classifySpawnOutcome, isMinidcRefusal, shouldWalkAfterFailure, spawnFailedForFallback, type SpawnOutcome } from "./spawn-outcome.ts";
 // Edit 7: re-export the outcome type so consumers keep importing from spawn.ts (the canonical spawn
 // surface); the pure classifier + type live in the zero-dep spawn-outcome.ts (unit-testable).
 export type { SpawnOutcome } from "./spawn-outcome.ts";
@@ -438,7 +438,9 @@ export async function resolveAndSpawn(
   // Edit 7: a timed-out dispatch ABORTs the fallback chain — retrying won't help a hung model.
   // (dispatchTimedOut breaks AFTER the first timeout, so worst-case wall-clock = timeoutMs × the
   // number of fallback candidates that hang before one succeeds or all are tried — not a per-dispatch budget.)
-  if (spawnFailedForFallback(output.length, primary.inbandError, dispatchTimedOut) && !signal?.aborted) {
+  // R2: mini-dc refusals are POLICY denials, not model failures — never downshift on them
+  // (design-v0.2 (v); sis-verdict C1 structural cure + C3 marker as secondary defense).
+  if (shouldWalkAfterFailure(output.length, primary.inbandError, dispatchTimedOut, output) && !signal?.aborted) {
     const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG).filter(isAvail);
     if (candidates.length > 0) {
       const exhaustedFrom = modelFlag;
@@ -453,7 +455,17 @@ export async function resolveAndSpawn(
         usage = mergeUsage(usage, fbResult.usage);
         if (fbResult.timedOut) { dispatchTimedOut = true; break; } // ABORT on timeout
         // A hop that ALSO errored in-band (e.g. its own 429) is NOT success — keep walking.
-        if (!spawnFailedForFallback(fbResult.output.length, fbResult.inbandError, false)) {
+        if (isMinidcRefusal(fbResult.output, fbResult.inbandError)) {
+          // R2: a hop refused by mini-dc — surface it as the result; do NOT keep walking
+          // (the same denial recurs on every rung) and do NOT count it as a rescue.
+          output = fbResult.output;
+          code = fbResult.code;
+          downshiftedFrom = modelFlag;
+          source = "downshift-exhausted";
+          rationale = `mini-dc refusal on fallback hop — not a model failure; walk halted, no rescue counted`;
+          break;
+        }
+        if (!shouldWalkAfterFailure(fbResult.output.length, fbResult.inbandError, false, fbResult.output)) {
           output = fbResult.output;
           code = fbResult.code;
           break;

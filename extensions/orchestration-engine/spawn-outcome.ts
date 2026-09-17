@@ -30,6 +30,46 @@ export function spawnFailedForFallback(
 }
 
 /**
+ * R2 (2026-09-17, design-v0.2 + sis-verdict-v0.1 C3): mini-dc refusal discrimination.
+ *
+ * The PRIMARY cure is structural (mini-dc headless denials settle in-band without ctx.abort(),
+ * so output is non-empty and inbandError unset — the walk cannot fire on its own predicates).
+ * This marker check is the SECONDARY defense, and its channel is model-echo text — untrusted
+ * and probabilistic. Both failure directions are ACCEPTED and documented here:
+ *   • FALSE NEGATIVE — refusal + empty/paraphrased output → marker absent → walk fires →
+ *     downshift. Accepted: conservative bias is justified by the stale-tail poisoning cost
+ *     (R5: 2 landings, $1.147; dispatch-log receipts 2026-09-17).
+ *   • FALSE POSITIVE — marker echo + a genuine later in-band error (e.g. quota 429 after an
+ *     earlier refusal) → walk suppressed → rescue lost. Also: a task that merely QUOTES
+ *     "BLOCKED by mini-dc" (plans/reviews about mini-dc) can suppress walks. Accepted.
+ * Follow-up (named, NOT this branch): a structured channel — spawnSub already parses the
+ * child event stream; a deterministic tool-execution block event would discriminate by
+ * construction instead of by echo.
+ */
+export const MINIDC_REFUSAL_RE = /BLOCKED by mini-dc/;
+
+/** True when the spawn's output (or in-band error text) carries a mini-dc refusal marker. */
+export function isMinidcRefusal(output: string, inbandError?: string): boolean {
+  return MINIDC_REFUSAL_RE.test(output) || (inbandError !== undefined && MINIDC_REFUSAL_RE.test(inbandError));
+}
+
+/**
+ * R2 walk gate: consult BEFORE spawnFailedForFallback at BOTH walk sites in spawn.ts.
+ * A mini-dc refusal is a POLICY denial, not a model failure — downshifting the model cannot
+ * cure it (the same denial recurs on every rung; the walk just burns quota and can land on
+ * the stale global tail). Refusal → no walk; everything else → the original predicates.
+ */
+export function shouldWalkAfterFailure(
+  outputLength: number,
+  inbandError: string | undefined,
+  timedOut: boolean,
+  output: string,
+): boolean {
+  if (isMinidcRefusal(output, inbandError)) return false;
+  return spawnFailedForFallback(outputLength, inbandError, timedOut);
+}
+
+/**
  * Classify a spawn's outcome from its kill causes + exit code.
  *
  * Precedence: **aborted > timeout > done/error**.

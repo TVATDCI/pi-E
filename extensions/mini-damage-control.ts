@@ -5,7 +5,12 @@
 // canonical permission-gate.ts) + try/catch notify so failures surface instead of silently aborting.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+// Local identity of pi 0.85.1 `isToolCallEventType` (`return event.toolName === toolName`).
+// Kept in-tree so unit tests can import this module — `@earendil-works/pi-coding-agent`
+// is injected at extension-load time and is not a worktree dependency.
+function isToolCallEventType(toolName: string, event: { toolName: string }): boolean {
+  return event.toolName === toolName;
+}
 import { parse as yamlParse } from "yaml";
 import { minimatch } from "minimatch";
 import { readFileSync, existsSync } from "node:fs";
@@ -225,6 +230,27 @@ class SafetyConfirmDialog implements Component {
   }
 }
 
+// --- R2 (2026-09-17, design-v0.2 + sis-verdict-v0.1 C1/C2): headless denials settle IN-BAND ---
+// In non-tui modes (json/print/rpc — dispatch sub-agents, ACP), dialogs are unanswerable:
+// ctx.ui.custom is a no-op resolve there (pi 0.85.1 noOpUIContext; rpc.md:1196), and
+// ctx.abort() poisons the parent's fallback walk (abort → stopReason=error → inbandError
+// → downshift). Headless denials therefore return {block:true, reason} WITHOUT abort —
+// the model finishes its turn, output is non-empty, and the walk structurally cannot fire.
+function isHeadless(mode: string | undefined): boolean {
+  return mode !== "tui";
+}
+
+function headlessReason(violation: string, askClass: boolean): string {
+  if (askClass) {
+    return (
+      `🛑 BLOCKED by mini-dc (headless ASK→deny): ${violation}. ` +
+      `This rule requires operator confirmation in interactive sessions; headless sessions cannot confirm. ` +
+      `Restructure the command (file-wrapped script, non-ASK phrasing) or route the action via the Operator.`
+    );
+  }
+  return `🛑 BLOCKED by mini-dc (headless): ${violation}. DO NOT work around this — surface to the Operator.`;
+}
+
 export default function (pi: ExtensionAPI) {
   // Part B: null = unloaded = DENY BASH BY DEFAULT (fail-closed)
   let rules: Rules | null = null;
@@ -302,8 +328,11 @@ export default function (pi: ExtensionAPI) {
         input: event.input,
         rule: "fail-closed (no rules)",
         mode,
+        ...(isHeadless(ctx.mode) ? { headlessDeny: true, askClass: false } : {}),
       });
       ctx.ui.notify("🛑 mini-dc: bash DENIED — no rules loaded", "error");
+      // R2 C2: headless fail-closed settles in-band — no abort (abort poisons the walk).
+      if (isHeadless(ctx.mode)) return { block: true, reason };
       if (mode === "abort") ctx.abort();
       return { block: true, reason };
     }
@@ -361,7 +390,7 @@ export default function (pi: ExtensionAPI) {
 
     if (!violation) return { block: false };
 
-    if (ask) {
+    if (ask && !isHeadless(ctx.mode)) {
       // Custom overlay confirm (Path B, 2026-07-10): loud + theme-independent; safe default = No.
       // Replaces the built-in ctx.ui.select (which inherited encom's teal border and blended in).
       // Preflight render precedent: ctx.ui.* dialogs render during tool_call preflight (0.80.3-verified);
@@ -396,7 +425,16 @@ export default function (pi: ExtensionAPI) {
       input: event.input,
       rule: violation,
       mode,
+      ...(isHeadless(ctx.mode) ? { headlessDeny: true, askClass: !!ask } : {}),
     });
+
+    // R2 C1 (load-bearing): headless denials settle IN-BAND — skip ctx.abort() entirely.
+    // The harness delivers `reason` as the blocked tool result; the model finishes its turn;
+    // output non-empty + inbandError unset → the parent's fallback walk cannot fire.
+    // The `BLOCKED by mini-dc` marker is the walker's SECONDARY defense (design-v0.2 C3).
+    if (isHeadless(ctx.mode)) {
+      return { block: true, reason: headlessReason(violation, !!ask) };
+    }
 
     const reason = `🛑 BLOCKED by mini-dc: ${violation}. DO NOT work around this — tell the user.`;
     if (mode === "abort") {
