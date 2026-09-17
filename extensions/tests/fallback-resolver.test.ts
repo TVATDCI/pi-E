@@ -180,9 +180,11 @@ check("INVARIANT: all judging-category fallbacks are strong-tier (glm-5.x/kimi/g
 check("INVARIANT: all judging categories have ≥1 per-tier fallback", allJudgingNonEmpty);
 
 // Global FALLBACK itself must be strong (it's the tail for judging categories too).
+// R3: tail is luna (strong flagship, header list) — accept any strong-tier flagship.
+const STRONG_FLAGSHIPS = /^(glm-5\b|kimi|grok-4\.6|qwen3\.8-max|gpt-5\.6-luna)/;
 check(
-  "INVARIANT: global FALLBACK is glm-5.x (strong) — safe tail for judging categories",
-  /^glm-5\b/.test(FALLBACK.id),
+  "INVARIANT: global FALLBACK is a strong-tier flagship — safe tail for judging categories",
+  STRONG_FLAGSHIPS.test(FALLBACK.id),
 );
 
 // Every non-judging category also has a non-empty fallbackModels array (resilience floor).

@@ -324,7 +324,10 @@ export const DEFAULT_CATEGORY: TaskCategory = "unspecified-low";
 export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> =
   new Set<TaskCategory>(["quick", "research", "git-commit-message"]);
 
-export const FALLBACK = { provider: "opencode-go", id: "glm-5.1" } as const;
+// R3: last-resort rung — luna is a current strong flagship (header list) from a DIFFERENT model
+// family than the glm rungs immediately above it in most chains (last-rung diversity), and already
+// proven reachable (unspecified-high rung-2). glm-5.1 stays on design-tier rungs (e.g. :272).
+export const FALLBACK = { provider: "opencode-go", id: "gpt-5.6-luna" } as const;
 
 /** Tier entry for a category, GUARDED: an unknown/invalid category (e.g. an unvalidated teams.yaml
  *  member.category / default_category, or a typo) falls back to DEFAULT_CATEGORY instead of

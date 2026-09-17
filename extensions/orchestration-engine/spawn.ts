@@ -440,6 +440,12 @@ export async function resolveAndSpawn(
   // number of fallback candidates that hang before one succeeds or all are tried — not a per-dispatch budget.)
   // R2: mini-dc refusals are POLICY denials, not model failures — never downshift on them
   // (design-v0.2 (v); sis-verdict C1 structural cure + C3 marker as secondary defense).
+  // F1 (sis R2-review): tri-state annotation — if the PRIMARY's output/error carries the mini-dc
+  // refusal marker, this is a policy denial, not a model failure; name it in the rationale and
+  // skip the downshift walk entirely (the same denial recurs on every rung).
+  if (isMinidcRefusal(output, primary.inbandError)) {
+    rationale = "mini-dc refusal — not a model failure; no downshift";
+  }
   if (shouldWalkAfterFailure(output.length, primary.inbandError, dispatchTimedOut, output) && !signal?.aborted) {
     const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG).filter(isAvail);
     if (candidates.length > 0) {
