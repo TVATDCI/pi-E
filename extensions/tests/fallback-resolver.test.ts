@@ -96,9 +96,9 @@ eq(
   ["tier-map", "zai-coding-cn/glm-5.3"],
 );
 eq(
-  "resolveModel(deep): fallbackFlags = per-tier 4-elem array (NO global tail — spawn.ts appends it)",
+  "resolveModel(deep): fallbackFlags = per-tier 2-elem array (NO global tail — spawn.ts appends it)",
   deepResolved.fallbackFlags,
-  ["opencode-go/kimi-k2.7-code", "opencode-go/grok-4.6", "opencode-go/glm-5.3", "opencode-go/glm-5.2"],
+  ["opencode-go/glm-5.2", "opencode/glm-5.2"],
 );
 check("resolveModel(deep): fallbackFlags is an array (not undefined/string)", Array.isArray(deepResolved.fallbackFlags));
 
@@ -119,7 +119,7 @@ eq(
 eq(
   "resolveModel(deep) primary-missing: fallbackFlags still the per-tier array",
   deepFallback.fallbackFlags,
-  ["opencode-go/kimi-k2.7-code", "opencode-go/grok-4.6", "opencode-go/glm-5.3", "opencode-go/glm-5.2"],
+  ["opencode-go/glm-5.2", "opencode/glm-5.2"],
 );
 
 // Unknown category → DEFAULT_CATEGORY (unspecified-low), primary zai-coding-cn/glm-5.3-flash
