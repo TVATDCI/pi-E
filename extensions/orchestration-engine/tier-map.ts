@@ -321,7 +321,22 @@ export const DEFAULT_CATEGORY: TaskCategory = "unspecified-low";
 export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> =
   new Set<TaskCategory>(["quick", "research", "git-commit-message"]);
 
-export const FALLBACK = { provider: "opencode-go", id: "glm-5.1" } as const;
+// R3: last-resort rung — luna is a current strong flagship (header list) from a DIFFERENT model
+// family than the glm rungs immediately above it in most chains (last-rung diversity), and already
+// proven reachable (unspecified-high rung-2). glm-5.1 stays on design-tier rungs (e.g. :272).
+// NOTE (sis R3-review finding 3): luna is the UNIQUELY correct tail — every other strong flagship
+// already sits in deep's or ultrabrain's per-tier chains, so as tail it would self-dedupe
+// (orderedFallbacks: tier position wins) and silently cancel the global tail on the apex judging
+// categories. Chains already containing opencode-go/gpt-5.6-luna exactly dedupe the tail away
+// (finding 4, accepted — their walk ends at their own last rung; invariant intact everywhere).
+export const FALLBACK = { provider: "opencode-go", id: "gpt-5.6-luna" } as const;
+
+/** R3 (sis review condition 2b): the SINGLE source of the strong-flagship doctrine — a model id
+ * is strong-tier iff it matches. Exported so tests (fallback-resolver, both invariant sites) and
+ * future surfaces consume ONE regex instead of re-stating the header list. Anchored per
+ * alternative: `kimi-` requires a suffix; fixed ids are $-anchored — rejects `-free`/`-mini`
+ * variants. Keep in sync with the header comment's prose list (:45-46). */
+export const STRONG_FLAGSHIP_RE = /^(?:glm-5[\w.-]*|kimi-(?!free)[\w.-]+|grok-4\.6|qwen3\.8-max|gpt-5\.6-luna)$/;
 
 /** Tier entry for a category, GUARDED: an unknown/invalid category (e.g. an unvalidated teams.yaml
  *  member.category / default_category, or a typo) falls back to DEFAULT_CATEGORY instead of

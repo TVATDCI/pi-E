@@ -319,10 +319,14 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
     // Part B: FAIL-CLOSED — if rules are null (unloaded), DENY bash; allow read/write/edit (non-destructive)
     if (isToolCallEventType("bash", event) && rules === null) {
-      const reason =
-        `🛑 BLOCKED by mini-dc: no rules loaded (no global ~/.pi/agent/mini-dc-rules.yaml, ` +
-        `no project .pi/mini-dc-rules.yaml). bash is DENIED until rules are configured. ` +
-        `Add a rules file or run with --no-extensions to bypass.`;
+      const body =
+        `no rules loaded (no global ~/.pi/agent/mini-dc-rules.yaml, ` +
+        `no project .pi/mini-dc-rules.yaml). bash is DENIED until rules are configured.`;
+      // F2 (sis R2-review): fail-closed headless denial gets the (headless) infix + Operator-routing
+      // guidance, matching the other headless reason classes.
+      const reason = isHeadless(ctx.mode)
+        ? `🛑 BLOCKED by mini-dc (headless): ${body} Headless session — surface this to the Operator (add a rules file or run with --no-extensions to bypass).`
+        : `🛑 BLOCKED by mini-dc: ${body} Add a rules file or run with --no-extensions to bypass.`;
       pi.appendEntry("mini-dc-log", {
         tool: event.toolName,
         input: event.input,
