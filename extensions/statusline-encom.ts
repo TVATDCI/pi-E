@@ -111,12 +111,20 @@
 //   — settingsManager isn't on the typed ctx + pi defaults to compaction-on, so the
 //   marker is low-signal; render-scheduler/layout-cache — pi already coalesces.)
 
+// ── V11 (built 2026-09-18) — backpass-watch tripwire segment ────────────────────
+//   Reads ~/operator/.backpass/watch-state.json ({ lastApplied: "YYYY-MM-DD" }) fresh
+//   each render (trivial sync read; no timers/watchers/loadtime side effects — ADR-0011).
+//   silent (>7d out) → hidden · countdown → ⚡bp:Nd muted · due → ⚡bp:DUE warning ·
+//   missing/invalid → ⚡bp:? muted (fail-open, visible). Pure core: lib/backpass-watch.ts.
+//   REMINDER display only — never runs backpass, never writes (R4 charter art. 0.6).
+
 import type { ExtensionAPI, ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { existsSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import { computeBackpassState, parseWatchState, type BackpassState } from "./lib/backpass-watch.ts";
 
 type Theme = ExtensionContext["ui"]["theme"];
 
@@ -564,11 +572,41 @@ const bridgeSegment: SegmentDef = {
   },
 };
 
+// ── V11: backpass-watch tripwire (charter-cadence reminder) ─────────────────
+// Mirrors the bridge pattern: pure date math lives in lib/backpass-watch.ts
+// (standalone-tested); this wrapper only reads state + maps it to a segment.
+// The file is read fresh on every render (a ~30-byte readFileSync — trivial by
+// design; no cache, no timers, no watchers, nothing at loadtime — ADR-0011).
+// Unreadable/invalid JSON → unknown → ⚡bp:? — a dead tripwire must be VISIBLE,
+// never silently "healthy". `today` is the UTC calendar date, matching the
+// lib's UTC-midnight math (no local-timezone drift at the day boundary).
+function readBackpassState(): BackpassState {
+  let raw: string;
+  try {
+    raw = readFileSync(path.join(os.homedir(), "operator", ".backpass", "watch-state.json"), "utf8");
+  } catch {
+    return { kind: "unknown" }; // missing file (or unreadable) → visible ?
+  }
+  return computeBackpassState(parseWatchState(raw), new Date().toISOString().slice(0, 10));
+}
+
+const backpassSegment: SegmentDef = {
+  id: "backpass",
+  render: () => {
+    const state = readBackpassState();
+    if (state.kind === "silent") return null; // > 7 days out → no segment at all
+    if (state.kind === "due") return single("⚡bp:DUE", "warning", SOLID.tokens);
+    if (state.kind === "countdown") return single(`⚡bp:${state.daysLeft}d`, "muted", SOLID.tokens);
+    return single("⚡bp:?", "muted", SOLID.tokens);
+  },
+};
+
 // Registry + default order. Phase 3 will let the operator override the order via
 // the encomStatusline.layout / preset settings. Unknown ids are silently dropped.
 const SEGMENT_REGISTRY: Record<string, SegmentDef> = {
   dir: dirSegment, git: gitSegment, context: contextSegment, tokens: tokensSegment,
   cache_read: cacheReadSegment, cache_write: cacheWriteSegment, bridge: bridgeSegment,
+  backpass: backpassSegment,
   model: modelSegment, tps: tpsSegment, cost: costSegment, time_spent: timeSpentSegment,
   session: sessionSegment, clock: clockSegment,
 };
@@ -593,9 +631,9 @@ type EncomConfig = {
 // Preset → ordered segment-id list. "default" mirrors the V8 layout, so an
 // unconfigured footer is byte-identical to V8. "full" adds cache_write + time_spent.
 export const PRESETS: Record<string, string[]> = {
-  default: ["dir", "git", "bridge", "context", "tokens", "cache_read", "model", "tps", "cost", "session", "clock"],
+  default: ["dir", "git", "bridge", "context", "tokens", "cache_read", "model", "tps", "cost", "session", "backpass", "clock"],
   minimal: ["dir", "git", "context"],
-  full: ["dir", "git", "bridge", "context", "tokens", "cache_read", "cache_write", "model", "tps", "cost", "time_spent", "session", "clock"],
+  full: ["dir", "git", "bridge", "context", "tokens", "cache_read", "cache_write", "model", "tps", "cost", "time_spent", "session", "backpass", "clock"],
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
