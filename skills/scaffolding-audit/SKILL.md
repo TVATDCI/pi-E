@@ -26,8 +26,10 @@ audited it on change. This skill is that audit. Posture first, always:
 - **Propose-only (INV-1).** Every flag is a suggestion with evidence. This skill never
   deletes, edits, or applies anything — the only permitted writes are its own state-dir
   manifest (only via the explicit non-dry `manifest.ts` run) and stdout.
-- **Read-only by default.** `scan.ts` and `drift-check.ts` never write. Run them with
-  `deno run --allow-read` — the permission grant itself proves the read-only posture.
+- **Read-only by default.** `scan.ts` and `drift-check.ts` never write. Run the
+  pure-read legs with `deno run --allow-read` — the permission grant itself proves
+  the read-only posture (the scan's git-anchor and record legs add non-write spawn
+  grants; see steps 3/6).
 - **Scope mode is invocation-selected, never auto-detected (AC-8).** `--scope=full` or
   `--scope=diff` must be supplied explicitly; without it the scan exits with a usage
   error. No code path guesses model-change days from ambient state.
@@ -54,7 +56,7 @@ audited it on change. This skill is that audit. Posture first, always:
    `routing state drifted since last audit — run scaffolding-audit` when stale or
    never-audited; silent when fresh; never writes.
 3. **Scan** (invoked leg):
-   `deno run --allow-read --allow-run=git scripts/scan.ts --scope=full`
+   `deno run --allow-read --allow-run=git --allow-env scripts/scan.ts --scope=full`
    (diff-scope needs a manifest anchor: `--scope=diff`). Emits the flag report +
    doctrine-diff section to stdout. Deterministic: no network, no model calls, no
    wall-clock fields in the report.
@@ -65,11 +67,19 @@ audited it on change. This skill is that audit. Posture first, always:
    action (always begins `PROPOSE ONLY — operator arbitrates:`) + finding hash.
    First live reports go to the operator — arbitration is the standing steering
    mechanism.
-6. **Record (explicit non-dry only).** `deno run --allow-read --allow-write=<state-dir>
+6. **Record (explicit non-dry only).**
+   `deno run --allow-read --allow-run=git --allow-env --allow-write=<state-dir>
    scripts/manifest.ts --scope=full` — runs the scan and writes
    `state/manifest.json` (recorded-at, surface-scope, last-audit-commit, model-state,
    finding-hashes per the vendored spec §3). Never at session start; superseded by
    each new audit; no cleanup job.
+
+> **Flag provenance.** `--allow-env` must be **unscoped** on both spawn legs — deno's
+> node-compat `child_process` copies the whole env table while normalizing the spawn
+> call (scoped `PATH,HOME` is insufficient; twice-evidenced 2026-09-18). The record
+> line's full flag set is restored from the build14 record, which the original pi
+> landing dropped at touchdown:
+> `exports/lane-build14-omo-align-20260914/patches/SKILL.md:90`.
 
 ## Session-start drift wiring (OPEN-2 ruling)
 
