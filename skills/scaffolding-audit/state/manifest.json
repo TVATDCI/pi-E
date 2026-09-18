@@ -1,13 +1,13 @@
 {
-  "recorded-at": "2026-09-13T12:40:00.674Z",
+  "recorded-at": "2026-09-18T13:00:42.401Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "dc2633fd6f2a1248dab060e85d13d430f02466a8"
+    "~/.pi/agent": "c30b603d742d25386d8e630b5fa53f01d7415fa7"
   },
   "model-state": {
     "source": {
       "path": "extensions/orchestration-engine/tier-map.ts",
-      "sha256": "ecaa227c9a0bafaf934ca11256d6abc8f62b8bfea5c8b64eea9c3e295c07d88d"
+      "sha256": "01e7061df764f930b4d78331aade87167e07a65757b1a042ea371802cfe53c04"
     },
     "assignments": {
       "quick": {
@@ -28,8 +28,7 @@
       "unspecified-high": {
         "primary": "zai-coding-cn/glm-5.3",
         "fallbacks": [
-          "zai-coding-cn/glm-5-turbo",
-          "opencode-go/gpt-5.6-luna",
+          "opencode-go/glm-5.2",
           "opencode-go/kimi-k2.7-code",
           "opencode/glm-5.2"
         ]
@@ -37,18 +36,16 @@
       "deep": {
         "primary": "zai-coding-cn/glm-5.3",
         "fallbacks": [
-          "opencode-go/kimi-k2.7-code",
-          "opencode-go/grok-4.6",
-          "opencode-go/glm-5.3",
-          "opencode-go/glm-5.2"
+          "opencode-go/glm-5.2",
+          "opencode/glm-5.2"
         ]
       },
       "ultrabrain": {
-        "primary": "zai-coding-cn/glm-5.3",
+        "primary": "opencode-go/grok-4.6",
         "fallbacks": [
-          "opencode-go/grok-4.6",
           "opencode-go/kimi-k3",
           "opencode-go/qwen3.8-max",
+          "zai-coding-cn/glm-5.3",
           "opencode/kimi-k2.7-code"
         ]
       },
@@ -101,21 +98,18 @@
       ],
       "chains": {
         "unspecified-high": [
-          "zai-coding-cn/glm-5-turbo",
-          "opencode-go/gpt-5.6-luna",
+          "opencode-go/glm-5.2",
           "opencode-go/kimi-k2.7-code",
           "opencode/glm-5.2"
         ],
         "deep": [
-          "opencode-go/kimi-k2.7-code",
-          "opencode-go/grok-4.6",
-          "opencode-go/glm-5.3",
-          "opencode-go/glm-5.2"
+          "opencode-go/glm-5.2",
+          "opencode/glm-5.2"
         ],
         "ultrabrain": [
-          "opencode-go/grok-4.6",
           "opencode-go/kimi-k3",
           "opencode-go/qwen3.8-max",
+          "zai-coding-cn/glm-5.3",
           "opencode/kimi-k2.7-code"
         ]
       }
@@ -125,16 +119,18 @@
     "50d7cc2f4598e148",
     "fb88a7adc2d0c28b",
     "01563e41a5fd9ba2",
-    "5a0d41762b88b922",
-    "e6a9bd7762366a2b",
-    "e6a9bd7762366a2b",
-    "a6c0378baee8b453",
-    "367eeb43a965a36a",
-    "1047cc6423938142",
-    "019eac7d6c14fc06",
-    "13fab2f19063e21a",
-    "14852ea56f4ef3a9",
-    "e1a3b6f92777e5aa",
+    "1158b13d2f04f343",
+    "87cb23ef7455dd03",
+    "2fc05369d76edb97",
+    "2fc05369d76edb97",
+    "a4b12277e985bde9",
+    "13bb70ba52ca2d48",
+    "dab331ea510c6a88",
+    "949b1ef26214da01",
+    "85236ebb966ce514",
+    "87b2380f2be4541e",
+    "5b4cf04955d68850",
+    "7e650cc337c79ab2",
     "0f1a8a7d5f537190"
   ]
 }
