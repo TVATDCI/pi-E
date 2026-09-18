@@ -38,7 +38,7 @@ run_chain({ …, background: true }) # fire-and-forget: returns now, toast on co
 /chain-status              # fleet view: all active + recent chain runs at a glance
 /chain-transcript <runId>  # tail a running chain's accumulated per-step output
 run_chain({ …, context: "…" }) # curated handoff: findings/constraints appended to every step's system prompt
-/tiers                     # see the 10 categories × model × REAL availability
+/tiers                     # see the 12 categories × model × REAL availability
 /routing-stats             # observability: aggregate dispatch-log across this project
 /persona-forge evolve <target>  # generate + momus-review a persona variant
 /persona-forge list        # list pending personas
@@ -192,15 +192,15 @@ Encom-themed single-line footer that **replaces Pi's built-in footer** via the c
 
 Specialist system prompts in `agents/*.md` — **0 of 14 pin a `model:` frontmatter**; `tier-map.ts` is the sole model authority. Two classes:
 
-**Personas (6)** — invoked explicitly via `agent=`:
+**Personas (6)** — invoked via `agent=` (home-keeper and security-reviewer are also the default seats of their categories):
 
 | Persona             | Depth    | Tools          | Role                                                                                                                                |
 | ------------------- | -------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `momus`             | 73 lines | read-only      | ruthless PRD/plan gate (PASS/WARNING/FAIL)                                                                                          |
 | `reviewer`          | 60 lines | read-only      | post-change code review + pre-merge hygiene                                                                                         |
-| `reviewer-security` | 94 lines | read-only      | generated variant of `reviewer` — deep security review (threat modeling, vuln-class checklist, auth/session flow, dependency audit) |
+| `security-reviewer` | 94 lines | read-only (category-pinned) | generated variant of `reviewer` — deep security review (threat modeling, vuln-class checklist, auth/session flow, dependency audit); default seat of `security-review` |
 | `oracle`            | 30 lines | read-only      | architecture/debug reasoning consultant (persona-only; `ultrabrain` now maps to `neo`)                                              |
-| `librarian`         | 36 lines | read-only      | docs / external-reference specialist                                                                                                |
+| `home-keeper`       | 44 lines | read + write/edit | local synthesis + housekeeping — digests, drift sweeps, evidence-anchored propose-only staging reports; operator-only vehicle (category `local-research`) |
 | `system-thinker`     | ~198 lines | read + write/edit | pre-flight system reasoning — models a system (incl. pi itself) before builders arrive; manual-only, never auto-dispatched         |
 
 **Matrix operatives (8)** — auto-resolved from the dispatch category when `agent=` (and `team=`) are omitted — see `agent-map.ts`:
@@ -216,7 +216,7 @@ Specialist system prompts in `agents/*.md` — **0 of 14 pin a `model:` frontmat
 | `seraph`     | `git-commit-message`              | 32 lines | read, bash, grep                          | commit protection — seals the work                                          |
 | `researcher` | `research`                        | 40 lines | read, grep, find, ls, bash, search, fetch | web research — keyless composite (Wikipedia/DDG-IA/npm/GitHub + docs-fetch) |
 
-**Removed:** `builder` (role split across `trinity` + `architect`) and `explore` (evolved into `keymaker`). **Rosters** (`teams.yaml`): `matrix` (the 8 operatives), `all` (all 15), plus `build` / `research` / `review`. Generated variants live in `generated-reviewers` with `review_status: pending`.
+**Removed:** `builder` (role split across `trinity` + `architect`) and `explore` (evolved into `keymaker`). **Rosters** (`teams.yaml`): `matrix` (the 8 operatives), `all` (all 14), plus `build` / `research` / `review`. Generated variants live in `generated-reviewers` with `review_status: pending`.
 
 ---
 
@@ -245,7 +245,7 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
     source ∈ {tier-map, persona-override, functional-agent, downshift-unavailable, downshift-exhausted}
 ```
 
-**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. 8 of 10 categories zai-plan-primary (flash/mechanical + the glm-5.3 judging pair); `ultrabrain`/`artistry` → external `opencode-go` (models not on the zai plan — grok-4.6/minimax-m3 double as the quota shield); a global `FALLBACK` tail (`opencode-go/gpt-5.6-luna`, R3 2026-09-18) is appended to every chain by spawn.ts — the dedupe-safe last resort that stays live under deep/ultrabrain):
+**Category→model map** (`tier-map.ts` is authoritative — category NAMES ported from OmO for cross-system LLM ergonomics; MODEL assignments are pi-owned and independent of OmO. 10 of 12 categories zai-plan-primary (flash/mechanical + the glm-5.3 judging trio); `ultrabrain`/`artistry` → external `opencode-go` (models not on the zai plan — grok-4.6/minimax-m3 double as the quota shield); a global `FALLBACK` tail (`opencode-go/gpt-5.6-luna`, R3 2026-09-18) is appended to every chain by spawn.ts — SUPPRESSED for the family-locked `local-research` — the dedupe-safe last resort that stays live under deep/ultrabrain. Two operator seats (2026-09-18): `security-review` — strong glm-only chain, read-only tool pin (`TOOL_PINNED_CATEGORIES`); `local-research` — flash-family only, OPERATOR-ONLY vehicle: the dispatch guard bounces auto-routing without the operator marker, and total family exhaustion is a distinct loud error, never a silent strong-for-flash substitution):
 
 | Category             | Model                           | Thinking | Quota                          | Functional agent | Fallbacks                                        |
 | -------------------- | ------------------------------- | -------- | ------------------------------ | ---------------- | ------------------------------------------------ |
@@ -259,6 +259,8 @@ parent calls dispatch(category, [agent], [team], [cwd])   ← category is REQUIR
 | `artistry`           | opencode-go/minimax-m3          | high     | external                       | architect        | opencode-go/qwen3.8-max → opencode-go/grok-4.6 → zai/glm-5.3 → zai/glm-5.3-flash |
 | `research`           | zai-coding-cn/glm-5.3-flash     | medium   | 3× flash                       | researcher       | opencode-go/glm-5.3-flash → opencode/gpt-5.6-luna |
 | `git-commit-message` | zai-coding-cn/glm-5.3-flash     | off      | 3× flash                       | seraph           | opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode/ling-3.0-flash-fin-free |
+| `security-review`    | zai-coding-cn/glm-5.3            | high     | 1×                             | security-reviewer | opencode-go/glm-5.2 → opencode/glm-5.2 (glm-only strong; read-only tool pin) |
+| `local-research`     | zai-coding-cn/glm-5.3-flash      | off      | 3× flash                       | home-keeper      | opencode-go/glm-5.3-flash → opencode/glm-5.3-flash (family-locked: no global tail; exhaustion = distinct loud error; operator-only) |
 
 Fallbacks are **per-tier** in `tier-map.ts` and are **automatically retried** by `resolveAndSpawn` when the primary fails **soft** (empty response — Z-AI plan quota has no balance fallback) **or loud** (in-band agent error, e.g. opencode-go monthly-cap `429 GoUsageLimitError` — PORT-PLAN ③ live-error half, live-verified `opencode-go/glm-5.3 → zai/glm-5.3` 2026-08-16). A fallback hop that also errors in-band keeps walking; a timeout aborts the chain (Edit 7). The pre-check fallback for missing keys still uses the global `FALLBACK` (`opencode-go/gpt-5.6-luna`). Both paths are surfaced in `/routing-stats` as `downshift-unavailable` and `downshift-exhausted`.
 
@@ -307,7 +309,7 @@ Sequential agent pipelines from `agent-chain.yaml` (deny-additive: projects ADD 
 
 ## Observability (F4 + F6 — shipped 2026-07-09)
 
-- **`/tiers`** — the 10 categories × model / thinking / quota× / **REAL availability** (key configured). Run before switching models.
+- **`/tiers`** — the 12 categories × model / thinking / quota× / **REAL availability** (key configured). Run before switching models.
 - **`/routing-stats`** — aggregates `dispatch-log` **cross-session / cwd-scoped**: per-category, per-model (with quota×), per-agent, routing-source views + threshold flags (fail-rate, override-rate, downshifts). Plus a **`▌ usage`** section (Tier 1): total/avg cost, turns, avg context-tokens — global and per-category. The tuning loop.
 - **Prompt-drift detector** (`prompt-observer.ts` + `lib/prompt-hash.ts`) — hashes the composed system prompt on `agent_start`, warns if the hash leaves the known-good set (catches composition corruption — a rogue extension rewriting the prompt, `AGENTS.md` tampering — _not_ injection, which lands in messages/tool output). `hashPrompt()` **strips the volatile blocks first** (`<memory-context>` + `<bridge-context>`) so memory growth / bridge re-exports don't false-fire — only real base-prompt changes do.
 - **Cost reads `$0` until provider pricing is configured** (`zai-coding-cn` isn't priced yet); tokens are tracked regardless. Oracle Q7 caveat: summed `input` over-counts across turns — rely on `cost` + `contextTokens`.

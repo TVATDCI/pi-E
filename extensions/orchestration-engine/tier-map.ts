@@ -45,11 +45,12 @@
  *   auto-routes turbo→glm-5.3 = duplicate of the primary). 8 of 10 categories zai-primary.
  *
  * ─── STRONG-MODEL-AT-JUDGING INVARIANT ──────────────────────────────────────
- * unspecified-high / deep / ultrabrain: primaries, per-tier fallbacks AND the global FALLBACK
- * tail land ONLY on strong-tier flagships (glm-5.x · kimi · grok-4.6 · qwen3.8-max ·
- * gpt-5.6-luna) — never FREE/cheap (deepseek-v4-flash-free, ling-*-flash-free, minimax-m2.7).
- * One cheap-model review in a fan-out cascades untraceably. AGENTS.md "Model selection"
- * mirrors this — update both files when touching judging chains.
+ * unspecified-high / deep / ultrabrain / security-review: primaries, per-tier fallbacks AND the
+ * global FALLBACK tail land ONLY on strong-tier flagships (glm-5.x · kimi · grok-4.6 ·
+ * qwen3.8-max · gpt-5.6-luna) — never FREE/cheap (deepseek-v4-flash-free, ling-*-flash-free,
+ * minimax-m2.7). security-review's per-tier chain is additionally glm-family-ONLY (sis plan
+ * 2026-09-18 C2). One cheap-model review in a fan-out cascades untraceably. AGENTS.md "Model
+ * selection" mirrors this — update both files when touching judging chains.
  *
  * ─── ROUTING GUARDRAIL ──────────────────────────────────────────────────────
  * "Deep models loop on vague goals." Reserve deep/ultrabrain/unspecified-high for tasks that
@@ -79,7 +80,9 @@ export type TaskCategory =
   | "visual-engineering" // UI/frontend/styling code (vision-capable preferred)
   | "artistry" // creative/design (multimodal judgment)
   | "research" // web/docs/package research (keyless composite search; general free-text web = known gap)
-  | "git-commit-message"; // trivial git ops
+  | "git-commit-message" // trivial git ops
+  | "security-review" // deep read-only security gate (strong glm-only chain; operator seat 2026-09-18)
+  | "local-research"; // really-local synthesis + housekeeping — OPERATOR-ONLY flash vehicle
 
 /** Pi thinking levels. null-able per model via thinkingLevelMap. "max" per pi-ai
  *  types.d.ts (accepted by --thinking; z.ai glm-5.3: reasoning_effort max = default +
@@ -116,8 +119,9 @@ export interface TierEntry {
    * balance fallback, so exhaustion = hard fail = empty output). Cross-provider entries survive a
    * single provider's outage/quota drain. The global FALLBACK const is always appended as the final
    * tail by orderedFallbacks(), so every category has at least one retry. Strong-model-at-judging
-   * invariant: the 3 judging categories (deep/ultrabrain/unspecified-high) carry arrays that land
-   * ONLY on glm-5.x/kimi — never cheap/FREE tiers (see MODEL TIERING + header comment). */
+   * invariant: the judging categories (deep/ultrabrain/unspecified-high/security-review) carry
+   * arrays that land ONLY on glm-5.x/kimi — never cheap/FREE tiers (see MODEL TIERING + header
+   * comment). */
   fallbackModels?: FallbackModel[];
   /**
    * Per-dispatch turn/tool budget DEFAULTS (PORT-PLAN-v0.40.md ①). Read-only categories carry
@@ -183,8 +187,8 @@ export function isPeakHours(now = new Date()): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The map — 9 of 10 categories zai-plan-primary (glm-5.3 / glm-5.3-flash); only artistry
-// (minimax-m3) remains opencode-go-primary. unspecified-low moved to zai/glm-5.3-flash
+// The map — 10 of 12 categories zai-plan-primary (glm-5.3 / glm-5.3-flash); ultrabrain and
+// artistry remain opencode-go-primary. unspecified-low moved to zai/glm-5.3-flash
 // 2026-09-08 (operator go): V2 Max 20×-Lite volume removed the Pro-era plan-credit-preservation
 // rationale; direct call drops the opencode-go router hop/dependency. gpt-5.6-luna demoted to
 // first fallback (external diversity preserved).
@@ -314,6 +318,29 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     rationale:
       "Trivial git ops; zai/glm-5.3-flash @off (cheapest flash stamp; thinking-off tolerated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode/ling-3.0-flash-fin-free (FREE).",
   },
+  "security-review": {
+    provider: "zai-coding-cn",
+    id: "glm-5.3",
+    fallbackModels: [
+      { provider: "opencode-go", id: "glm-5.2" },
+      { provider: "opencode", id: "glm-5.2" },
+    ],
+    thinkingLevel: "high",
+    turnBudget: { maxTurns: 20 },
+    rationale:
+      "Deep read-only security review gate; zai/glm-5.3 @high (audit-class reasoning effort). Fallbacks: deep's chain mirrored at implementation time (2026-09-18) and pruned to glm-family STRONG entries only — opencode-go/glm-5.2 → opencode/glm-5.2. Zero flash, zero non-glm in the per-tier chain (the strong-tier global tail still applies — luna is strong, not cheap). Tools category-pinned to read,grep,find,ls (TOOL_PINNED_CATEGORIES).",
+  },
+  "local-research": {
+    provider: "zai-coding-cn",
+    id: "glm-5.3-flash",
+    fallbackModels: [
+      { provider: "opencode-go", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "glm-5.3-flash" },
+    ],
+    thinkingLevel: "off",
+    rationale:
+      "Really-local synthesis + housekeeping — retrieval/collation of EXISTING local text (pattern-matching, not judgment; no verdicts rendered); zai/glm-5.3-flash quick-shaped (@off; no turnBudget — mutation category, conservative budget policy would warn). Fallbacks: glm flash-family ONLY — opencode-go/glm-5.3-flash → opencode/glm-5.3-flash; the global FALLBACK tail is SUPPRESSED (FAMILY_LOCKED_CATEGORIES) and total family exhaustion is a DISTINCT loud error (familyExhaustedMessage) — never a silent strong-for-flash substitution. OPERATOR-ONLY vehicle: dispatch-guard.ts bounces the auto path without the operator dispatch marker; explicit agent=home-keeper stays legal.",
+  },
 };
 
 export const DEFAULT_CATEGORY: TaskCategory = "unspecified-low";
@@ -323,7 +350,23 @@ export const DEFAULT_CATEGORY: TaskCategory = "unspecified-low";
  * policy (PORT-PLAN-v0.40.md ①). A turn/tool budget on any OTHER (mutation) category triggers a
  * WARNING from budgets/resolver.ts. Single source of truth for the read-only taxonomy. */
 export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> =
-  new Set<TaskCategory>(["quick", "research", "git-commit-message"]);
+  new Set<TaskCategory>(["quick", "research", "git-commit-message", "security-review"]);
+
+/** Category-level TOOL PIN — distinct from READ_ONLY_CATEGORIES (which gates the conservative
+ * budget policy): a pinned category strips EVERY seated persona's tool list down to the pin,
+ * overriding persona frontmatter AND caller toolsOverride alike. Today: security-review — a
+ * review gate that can modify what it reviews is a conflict of interest (sis plan §1.1, C3/T2;
+ * chain-runner's F1 reviewer toolsOverride hoisted to category level). */
+export const TOOL_PINNED_CATEGORIES: ReadonlyMap<TaskCategory, string> = new Map([
+  ["security-review", "read,grep,find,ls"],
+]);
+
+/** The category's tool pin, if any (undefined = no pin; persona/caller tools apply). */
+export function pinnedToolsFor(category: TaskCategory | string): string | undefined {
+  return category in TIERS
+    ? TOOL_PINNED_CATEGORIES.get(category as TaskCategory)
+    : undefined;
+}
 
 // R3: last-resort rung — luna is a current strong flagship (header list) from a DIFFERENT model
 // family than the glm rungs immediately above it in most chains (last-rung diversity), and already
@@ -339,7 +382,7 @@ export const FALLBACK = { provider: "opencode-go", id: "gpt-5.6-luna" } as const
  * is strong-tier iff it matches. Exported so tests (fallback-resolver, both invariant sites) and
  * future surfaces consume ONE regex instead of re-stating the header list. Anchored per
  * alternative: `kimi-` requires a suffix; fixed ids are $-anchored — rejects `-free`/`-mini`
- * variants. Keep in sync with the header comment's prose list (:45-46). */
+ * variants. Keep in sync with the header comment's prose list (:45-47). */
 export const STRONG_FLAGSHIP_RE = /^(?:glm-5[\w.-]*|kimi-(?!free)[\w.-]+|grok-4\.6|qwen3\.8-max|gpt-5\.6-luna)$/;
 
 /** Tier entry for a category, GUARDED: an unknown/invalid category (e.g. an unvalidated teams.yaml
@@ -468,6 +511,38 @@ export function orderedFallbacks(
     chain.push(f);
   }
   return chain;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Family-locked categories (sis plan §1.2 / C2, [ORACLE CONDITION 3])
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Family-locked categories: the fallback walk is LOCKED to the tier's declared model family —
+ * the global FALLBACK tail is NOT appended (no cross-tier substitution) and exhaustion of the
+ * whole family is a DISTINCT loud error, never a silent strong-for-flash downshift. Today:
+ * local-research — substitution would blur the tier semantics the categories exist to encode. */
+export const FAMILY_LOCKED_CATEGORIES: ReadonlySet<TaskCategory> =
+  new Set<TaskCategory>(["local-research"]);
+
+/** The DISTINCT family-exhaustion error — worded to be distinguishable from the dispatch-guard's
+ * operator-only bounce (dispatch-guard.ts) so the operator can tell "vehicle unavailable"
+ * from "not authorized". */
+export function familyExhaustedMessage(category: TaskCategory): string {
+  return `Dispatch failed: '${category}' is family-locked and its entire model family is unavailable or exhausted — operator-only vehicle unavailable; re-dispatch later or escalate to deep.`;
+}
+
+/** Ordered fallback chain for a CATEGORY: orderedFallbacks with the global tail suppressed for
+ * family-locked categories (buildFallbackChain is what spawn.ts walks; orderedFallbacks stays
+ * the pure dedupe primitive + existing test surface). */
+export function buildFallbackChain(
+  category: TaskCategory | string,
+  primaryFlag: string,
+  tierFallbacks: string[],
+  globalFallbackFlag: string,
+  exclude: string[] = [],
+): string[] {
+  const familyLocked = category in TIERS && FAMILY_LOCKED_CATEGORIES.has(category as TaskCategory);
+  return orderedFallbacks(primaryFlag, tierFallbacks, familyLocked ? "" : globalFallbackFlag, exclude);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

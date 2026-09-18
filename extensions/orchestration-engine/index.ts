@@ -11,7 +11,9 @@ import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
 import { isPeakHours, isPromoActive, TIERS, READ_ONLY_CATEGORIES, tierEntryFor, type TaskCategory } from "./tier-map.ts";
 import { aggregateDispatchLog, quotaMarker, type DispatchLogEntry } from "./routing-stats.ts";
-import { resolveAndSpawn, sessionKey } from "./spawn.ts";
+import { resolveAndSpawn, loadPersona, sessionKey } from "./spawn.ts";
+import { OPERATOR_ONLY_MARKER, guardOperatorOnlyAutoPath } from "./dispatch-guard.ts";
+import { isHumanTurn } from "../lib/upstream-adapter.ts";
 import { resolveBudgets, budgetUsageState } from "../budgets/index.ts";
 import { accumulateUsage, sessionUsage, resetUsage } from "./session-state.ts";
 import { resolveFunctionalAgent } from "./agent-map.ts";
@@ -23,6 +25,16 @@ export const COST_DISCIPLINE_TEXT =
   "Delegate grunt work to dispatch(category) — cheaper sub-agents do the work, you synthesize results. " +
   "Codebase search, implementation, investigation, writing, UI work — all have dedicated operatives. " +
   "Reserve your tokens for decisions and synthesis. The cheapest model that does the job is the right model.";
+
+/** Defensive text extraction for the input event (C10): the docs type event.text, but this
+ *  module must not depend on the exact runtime shape across pi bumps — unknown-safe narrow. */
+function humanInputText(event: unknown): string | undefined {
+  if (typeof event === "object" && event !== null && "text" in event) {
+    const t = (event as { text?: unknown }).text;
+    if (typeof t === "string") return t;
+  }
+  return undefined;
+}
 
 // 0b: per-{agent, project} Promise mutex. Corrected delete-only-if-tail pattern
 // (Oracle Q2): only the tail holder deletes the map entry → no delete-after-clobber.
@@ -175,6 +187,7 @@ const CategoryEnum = Type.Union([
   Type.Literal("quick"), Type.Literal("unspecified-low"), Type.Literal("unspecified-high"),
   Type.Literal("deep"), Type.Literal("ultrabrain"), Type.Literal("writing"),
   Type.Literal("visual-engineering"), Type.Literal("artistry"), Type.Literal("research"), Type.Literal("git-commit-message"),
+  Type.Literal("security-review"), Type.Literal("local-research"),
 ]);
 
 export default function (pi: ExtensionAPI) {
@@ -248,6 +261,27 @@ export default function (pi: ExtensionAPI) {
     if (tick && ![...subs.values()].some((s) => s.status === "running")) { clearInterval(tick); tick = undefined; }
   };
 
+  // C10 marker latch: armed ONLY by a human-typed input (isHumanTurn — the 0.79.9→0.80.x
+  // input-source seam lives in lib/upstream-adapter.ts) whose text carries the operator
+  // marker; consumed one-shot by the first guarded dispatch; disarmed at turn end —
+  // authorization never outlives the turn whose input armed it. Model-emitted text, extension
+  // sendMessage (source "extension") and rpc input can NEVER arm it — provenance is structural.
+  let operatorMarkerText: string | undefined;
+  pi.on("input", async (event) => {
+    try {
+      if (isHumanTurn(event)) {
+        const text = humanInputText(event);
+        if (text && text.toLowerCase().includes(OPERATOR_ONLY_MARKER)) operatorMarkerText = text;
+      }
+    } catch {
+      /* fail-closed: an unverifiable input never arms the marker */
+    }
+    return { action: "continue" as const };
+  });
+  pi.on("agent_end", async () => {
+    operatorMarkerText = undefined;
+  });
+
   pi.on("session_start", async (_e, ctx) => {
     widgetCtx = ctx;
     loadTeams(ctx);
@@ -279,10 +313,12 @@ export default function (pi: ExtensionAPI) {
       "Delegate a sub-task to an isolated sub-agent. BLOCKS until finished. " +
       "Pick the category that matches the task's weight — this chooses the model via tier-map AND auto-resolves a functional agent (Matrix operative). " +
       "When agent is omitted AND no team is specified, the category's default operative is used: " +
-      "quick→keymaker, unspecified→trinity, deep→morpheus, ultrabrain→neo, writing→mouse, visual-engineering/artistry→architect, research→researcher, git-commit-message→seraph. " +
+      "quick→keymaker, unspecified→trinity, deep→morpheus, ultrabrain→neo, writing→mouse, visual-engineering/artistry→architect, research→researcher, git-commit-message→seraph, security-review→security-reviewer, local-research→home-keeper. " +
       "Explicit agent= overrides the default (e.g. agent='momus' for a PRD gate, agent='oracle' for architecture reasoning). " +
       "Categories (tier-map.ts is authoritative): quick (zai/glm-5.3-flash), unspecified-low (zai/glm-5.3-flash), unspecified-high (zai/glm-5.3), " +
       "deep (zai/glm-5.3), ultrabrain (opencode-go/grok-4.6), writing (zai/glm-5.3-flash), visual-engineering (zai/glm-5.3-flash), artistry (opencode-go/minimax-m3), research (zai/glm-5.3-flash), git-commit-message (zai/glm-5.3-flash). " +
+      "security-review: deep read-only security gate (zai/glm-5.3 @high; glm-only strong chain; tools pinned to read,grep,find,ls — the seat never writes). " +
+      "local-research: OPERATOR-ONLY vehicle (zai/glm-5.3-flash, flash-family fallbacks only) — local synthesis + housekeeping for the operator's own dispatches; auto-routing into it BOUNCES unless the operator named home-keeper in their typed message this turn; explicit agent=home-keeper stays legal. " +
       "Routing: for vague/ambiguous work (UX, product, planning, 'scoping IS the task') prefer writing/unspecified-low (reads intent) — reserve deep/ultrabrain for well-scoped hard tasks; they loop on open-ended goals (tier-map.ts ROUTING GUARDRAIL). " +
       "0 of 14 agents pin a model — category is the sole model authority. " +
       "One focused objective per dispatch.",
@@ -351,6 +387,34 @@ export default function (pi: ExtensionAPI) {
       if (!params.agent && !params.team) {
         agentName = resolveFunctionalAgent(category);
         agentSource = "functional-agent";
+      }
+
+      // C10: operator-only guard — binds the AUTO path only (explicit agent= and team
+      // member dispatch are the legal, unguarded paths; Charter 0.6). Bounces when the
+      // auto path routes into local-research or onto any persona carrying the operatorOnly
+      // marker WITHOUT the operator dispatch marker (trusted human-input latch above).
+      // Marker provenance ([ORACLE CONDITION 1]) is enforced inside guardOperatorOnlyAutoPath:
+      // markers self-asserted in task text / sub-agent context / persona output fail closed.
+      if (!params.agent) {
+        const autoPersona = agentName ? loadPersona(agentName) : undefined;
+        const guard = guardOperatorOnlyAutoPath({
+          category,
+          agentProvided: false,
+          autoAgent: agentName,
+          autoAgentOperatorOnly: autoPersona?.operatorOnly,
+          task: params.task,
+          trustedOperatorText: operatorMarkerText,
+        });
+        if (guard.decision === "bounce") {
+          const detail = guard.rejectedProvenance
+            ? ` (operator marker self-asserted in ${guard.rejectedProvenance} — not honored, fail closed)`
+            : "";
+          return {
+            content: [{ type: "text" as const, text: guard.message + detail }],
+            details: { error: guard.error, ...(guard.rejectedProvenance ? { rejectedProvenance: guard.rejectedProvenance } : {}) },
+          };
+        }
+        if (guard.guarded) operatorMarkerText = undefined; // consumed one-shot
       }
 
       // ① resolve budgets + usageBudget pre-launch gate (PORT-PLAN §①). usage enforcement is a
@@ -534,11 +598,11 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // /tiers (Decision 0005 / F4): the operator's setup/testing tool — the 9 dispatch
+  // /tiers (Decision 0005 / F4): the operator's setup/testing tool — the 12 dispatch
   // categories × model / thinking / quota× / REAL availability (key configured).
   // Run before switching models so you know what actually has a key.
   pi.registerCommand("tiers", {
-    description: "Setup tool (F4): the 10 dispatch categories × model / thinking / quota× / REAL availability (key configured)",
+    description: "Setup tool (F4): the 12 dispatch categories × model / thinking / quota× / REAL availability (key configured)",
     handler: async (_args, ctx) => {
       const available = ctx.modelRegistry.getAvailable();
       const isAvail = (mf: string) => {
@@ -552,7 +616,7 @@ export default function (pi: ExtensionAPI) {
         return (t.length > w ? t.slice(0, Math.max(1, w - 1)) + "…" : t).padEnd(w);
       };
       const lines = [
-        `/tiers · 10 categories · availability = key configured (getAvailable)`,
+        `/tiers · 12 categories · availability = key configured (getAvailable)`,
         `peak=${peak} · promo=${promo}`,
         "",
         pad("category", 20) + pad("model", 26) + pad("think", 7) + pad("quota", 6) + "avail",
@@ -564,7 +628,7 @@ export default function (pi: ExtensionAPI) {
       }
       const table = lines.join("\n");
       if (ctx.hasUI) {
-        ctx.ui.notify("10 categories + real availability", "info");
+        ctx.ui.notify("12 categories + real availability", "info");
         await ctx.ui.editor("/tiers", table);
       } else {
         console.log(table);

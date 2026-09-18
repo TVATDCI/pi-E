@@ -7,12 +7,12 @@ teams:
         file: agents/momus.md
       - id: reviewer
         file: agents/reviewer.md
-      - id: reviewer-security
-        file: agents/reviewer-security.md
+      - id: security-reviewer
+        file: agents/security-reviewer.md
       - id: oracle
         file: agents/oracle.md
-      - id: librarian
-        file: agents/librarian.md
+      - id: home-keeper
+        file: agents/home-keeper.md
       - id: keymaker
         file: agents/keymaker.md
       - id: trinity
@@ -81,8 +81,8 @@ teams:
     members:
       - id: keymaker
         file: agents/keymaker.md
-      - id: librarian
-        file: agents/librarian.md
+      - id: home-keeper
+        file: agents/home-keeper.md
       - id: morpheus
         file: agents/morpheus.md
       - id: researcher
@@ -92,9 +92,9 @@ teams:
     description: Generated variants of the review team (pending approval)
     default_category: deep
     members:
-      - id: reviewer-security
-        file: agents/reviewer-security.md
-        category: deep
+      - id: security-reviewer
+        file: agents/security-reviewer.md
+        category: security-review
         provenance:
           source: generated
           generated_by: persona-forge@v1

@@ -1,5 +1,5 @@
 ---
-name: reviewer-security
+name: security-reviewer
 description: "Deep, systematic security review as a read-only gate (specialized variant of reviewer). Threat modeling, vulnerability-class enumeration (SSRF, IDOR, deserialization, prototype pollution, auth bypass, supply-chain), auth/session data-flow tracing, and dependency/CVE auditing across changed files + their callers. Use for pre-deploy security gates, sensitive-feature review, or when reviewer's shallow 'no secrets/input validation' checklist is insufficient."
 tools: read,grep,find,ls
 ---

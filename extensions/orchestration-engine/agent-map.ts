@@ -15,6 +15,8 @@ const CATEGORY_AGENT_DEFAULTS: Record<TaskCategory, string> = {
   "artistry": "architect",
   "research": "researcher",
   "git-commit-message": "seraph",
+  "security-review": "security-reviewer",
+  "local-research": "home-keeper",
 };
 
 /** Resolve the default functional-agent name for a category. Fallback: trinity. */

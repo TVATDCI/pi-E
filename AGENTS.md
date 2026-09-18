@@ -61,11 +61,12 @@ Not the session JSONL, not `/note`, not compaction summaries — those are ephem
 Curate `/scoped-models` as a small tiered set for `Ctrl+P` cycling: a **cheap/fast** model for exploration, search, and bulk mechanical edits; a **strong reasoning** model for planning, synthesis, gate review, and hard debugging. Raise `--thinking` (Shift+Tab) only for genuinely hard problems. Don't burn the strong model on work the cheap one handles cleanly. **Dispatch-tier routing:** when delegating to sub-agents (if enabled), route trivial mechanical work to the cheap tier and reserve the strong tier for synthesis.
 
 - **No cheap model at a judging node.** Review, verify, and oracle dispatches
-  (`unspecified-high`→reviewer, `deep`→reviewer-security/morpheus,
-  `ultrabrain`→oracle/neo) must use a strong-tier category. All three judging
+  (`unspecified-high`→reviewer, `deep`→morpheus, `security-review`→security-reviewer,
+  `ultrabrain`→oracle/neo) must use a strong-tier category. All judging
   categories' primaries AND fallback chains land only on strong-tier flagships
   (glm-5.x / kimi / grok-4.6 / qwen3.8-max / gpt-5.6-luna — see the
-  STRONG-MODEL-AT-JUDGING block in tier-map.ts) — never on FREE/cheap tiers
+  STRONG-MODEL-AT-JUDGING block in tier-map.ts; security-review's per-tier chain
+  is glm-family-only) — never on FREE/cheap tiers
   (deepseek-v4-flash-free / ling-*-flash-free / minimax-m2.7). One bad
   cheap-model review among parallel reviewers cascades through the whole graph
   and can't be traced.

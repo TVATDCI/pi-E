@@ -10,7 +10,7 @@ description: |
   narrow-writer for fixes. Triggers: "review this", "review loop", "parallel
   review", "iterate until clean", "multi-angle review", "parallel research".
   Do NOT use for: a single one-pass review (use `reviewer` directly), a security
-  review (use `reviewer-security`), or implementing code as the primary task (use
+  review (use `security-reviewer`), or implementing code as the primary task (use
   `trinity` — review-loop's fix step only follows a review synthesis).
 ---
 
@@ -63,7 +63,7 @@ When the user wants N reviewers on a change/diff/PR:
    - **Tests & validation** — assertions meaningful, verification commands sufficient.
    - **Simplicity & maintainability** — duplicate structure, brittle abstractions,
      confusing names, verbosity worth removing.
-   Adapt per change: add **security** (→ `reviewer-security`), **performance**,
+   Adapt per change: add **security** (→ `security-reviewer`), **performance**,
    **docs/API contracts**, **UX/accessibility** for UI work, or a 4th reviewer for
    large multi-file structural friction.
 2. **Dispatch one reviewer per angle, in one turn** (parallel):
@@ -74,7 +74,7 @@ When the user wants N reviewers on a change/diff/PR:
      the smallest safe fix. Do not edit files." })
    ```
    - Prefer **3 strong reviewers over many vague ones.**
-   - Use `reviewer-security` (category `deep`) for the security angle; `morpheus`
+   - Use `security-reviewer` (category `security-review`) for the security angle; `morpheus`
      (category `deep`) if the angle needs dependency/flow tracing beyond a surface review.
 3. **Synthesize only over complete fan-in.** Each foreground dispatch blocks,
    so all N reviewer results land in your context before you synthesize. A
@@ -95,7 +95,7 @@ When the user wants N reviewers on a change/diff/PR:
    `extensions/orchestration-engine/spawn.ts`; not executable today)**
 6. **Second-opinion lane (high-risk only, post-synthesis).** If synthesis
    surfaced a high-risk trigger — reviewer FAIL at high confidence,
-   reviewer-security CRITICAL/HIGH, or momus FAIL — fire ONE fresh oracle
+   security-reviewer CRITICAL/HIGH, or momus FAIL — fire ONE fresh oracle
    pass before applying fixes:
    `dispatch({category:"ultrabrain", agent:"oracle", task:"Confirm or clear
    this high-risk finding from a fresh read; do not inherit prior reasoning.
@@ -157,7 +157,7 @@ dispatch({ category: "deep",      agent: "morpheus",   task: "Practical tradeoff
 
 - **Fresh context always** — review/research agents read the repo/diff directly,
   never the parent's chat history.
-- **Read-only review agents** (`reviewer`, `reviewer-security`, `morpheus`,
+- **Read-only review agents** (`reviewer`, `security-reviewer`, `morpheus`,
   `researcher`, `keymaker`) — they must not edit. Only the fix `trinity` writes,
   one writer at a time.
 - **Category sets the model** (tier-map is the sole model authority): review =

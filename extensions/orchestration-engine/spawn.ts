@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync, statSync, renameSync } from "node:
 import { join, resolve, dirname } from "node:path";
 import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resolveModel, orderedFallbacks, FALLBACK, type TaskCategory } from "./tier-map.ts";
+import { resolveModel, buildFallbackChain, pinnedToolsFor, FAMILY_LOCKED_CATEGORIES, familyExhaustedMessage, FALLBACK, type TaskCategory } from "./tier-map.ts";
 import { appendBudgetNudges, type ResolvedBudgets } from "../budgets/index.ts";
 import { classifySpawnOutcome, isMinidcRefusal, shouldWalkAfterFailure, spawnFailedForFallback, type SpawnOutcome } from "./spawn-outcome.ts";
 // Edit 7: re-export the outcome type so consumers keep importing from spawn.ts (the canonical spawn
@@ -85,6 +85,10 @@ export interface Persona {
   description: string;
   tools: string;
   model?: string;
+  /** Operator-only vehicle marker (dispatch-guard.ts, C10 layer 1): frontmatter
+   *  `operatorOnly: true` — the auto dispatch path onto this persona bounces without
+   *  the operator dispatch marker. Explicit agent= stays legal. */
+  operatorOnly?: boolean;
   systemPrompt: string;
 }
 
@@ -125,6 +129,7 @@ export function loadPersona(name: string): Persona | undefined {
     description: fm.description ?? "",
     tools: fm.tools ?? "read,grep,find,ls",
     model: fm.model || undefined,
+    operatorOnly: fm.operatorOnly === "true" || undefined,
     systemPrompt: m[2].trim(),
   };
 }
@@ -147,7 +152,7 @@ export function buildFullSystemPrompt(personaPrompt: string | undefined, context
 const HANDOFF_CAP = 2000;
 
 export function spawnSub(
-  _category: TaskCategory,
+  category: TaskCategory,
   task: string,
   agent: string | undefined,
   ctx: ExtensionContext,
@@ -165,7 +170,10 @@ export function spawnSub(
    *  resolves with `timedOut: true` + whatever partial output was captured. */
   timeoutMs?: number,
 ): Promise<{ output: string; code: number; elapsedMs: number; toolCount: number; usage: UsageStats | undefined; timedOut: boolean; inbandError?: string }> {
-  const tools = toolsOverride ?? persona?.tools ?? "read,grep,find,ls";
+  // Category tool pin (C3/T2): a pinned category strips every persona's + caller's tool list
+  // down to the pin — the pin WINS over toolsOverride (F1) and persona frontmatter alike.
+  // Today: security-review — a review gate must never hold write tools.
+  const tools = pinnedToolsFor(category) ?? toolsOverride ?? persona?.tools ?? "read,grep,find,ls";
   const needsBash = tools.includes("bash");
 
   const dir = join(os.homedir(), ".pi", "agent", "sessions", "orch-engine");
@@ -393,8 +401,10 @@ export async function resolveAndSpawn(
     // Primary unavailable (no configured key). Walk the per-tier fallback chain then the global
     // FALLBACK tail, picking the FIRST available (PORT-PLAN-v0.40.md ③). Previously this leapt
     // straight to the global FALLBACK, ignoring the per-tier array entirely.
+    // buildFallbackChain suppresses the global tail for family-locked categories (C2) — no
+    // cross-tier substitution; a fully unavailable family is the DISTINCT loud error below.
     downshiftedFrom = modelFlag;
-    const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG);
+    const candidates = buildFallbackChain(category, modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG);
     const pick = candidates.find(isAvail);
     if (pick) {
       modelFlag = pick;
@@ -402,6 +412,20 @@ export async function resolveAndSpawn(
       source = "downshift-unavailable";
       rationale = `${downshiftedFrom} unavailable (no configured key) → fell back to ${pick}`;
       if (ctx.hasUI) ctx.ui.notify(`⚠ ${downshiftedFrom} unavailable → downshifted to ${pick}`, "info");
+    } else if (FAMILY_LOCKED_CATEGORIES.has(category)) {
+      // [ORACLE CONDITION 3]: family-locked exhaustion — DISTINCT from the dispatch-guard bounce
+      // ("vehicle unavailable", not "not authorized"); never a silent strong-for-flash substitution.
+      return {
+        output: familyExhaustedMessage(category),
+        code: 1,
+        elapsedMs: 0,
+        modelFlag,
+        thinkingLevel,
+        rationale: "family-locked: whole model family unavailable — operator-only vehicle unavailable",
+        source: "family-exhausted",
+        toolCount: 0,
+        outcome: "error",
+      };
     } else {
       return {
         output: `Dispatch aborted: '${downshiftedFrom}' is unavailable (no configured key) and no fallback in [${candidates.join(", ")}] has a key either. Run /tiers to see which models have keys.`,
@@ -447,7 +471,7 @@ export async function resolveAndSpawn(
     rationale = "mini-dc refusal — not a model failure; no downshift";
   }
   if (shouldWalkAfterFailure(output.length, primary.inbandError, dispatchTimedOut, output) && !signal?.aborted) {
-    const candidates = orderedFallbacks(modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG).filter(isAvail);
+    const candidates = buildFallbackChain(category, modelFlag, tierDefault.fallbackFlags, GLOBAL_FALLBACK_FLAG).filter(isAvail);
     if (candidates.length > 0) {
       const exhaustedFrom = modelFlag;
       const retriedWith: string[] = [];
@@ -488,6 +512,18 @@ export async function resolveAndSpawn(
         rationale = `all of ${[exhaustedFrom, ...retriedWith].join(" → ")} failed (empty or in-band error)`;
       }
     }
+  }
+
+  // [ORACLE CONDITION 3]: family-locked category with NOTHING rescued — the whole model family
+  // is drained (quota-empty primaries + no available fallback keys) or every hop failed. This is
+  // the DISTINCT loud exhaustion error ("vehicle unavailable"), never a silent cross-tier
+  // substitution and never the generic exhausted message. Abort/timeout classifications keep
+  // their own outcome — those are not family exhaustion.
+  if (FAMILY_LOCKED_CATEGORIES.has(category) && output.trim().length === 0 && !dispatchTimedOut && !signal?.aborted) {
+    output = familyExhaustedMessage(category);
+    code = 1;
+    source = "family-exhausted";
+    rationale = "family-locked: whole model family unavailable or exhausted — operator-only vehicle unavailable";
   }
 
   // Edit 7: classify once from the accumulated kill causes + final exit code. aborted > timeout
