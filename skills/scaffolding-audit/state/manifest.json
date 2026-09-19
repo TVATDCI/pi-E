@@ -1,13 +1,13 @@
 {
-  "recorded-at": "2026-09-18T13:00:42.401Z",
+  "recorded-at": "2026-09-18T23:16:00.767Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "c30b603d742d25386d8e630b5fa53f01d7415fa7"
+    "~/.pi/agent": "14435cacd4df91f4530beee0be5aa199ea41bab4"
   },
   "model-state": {
     "source": {
       "path": "extensions/orchestration-engine/tier-map.ts",
-      "sha256": "01e7061df764f930b4d78331aade87167e07a65757b1a042ea371802cfe53c04"
+      "sha256": "b73e76cbecefe351fdcc2a77cc4dd2829c937f6fe032b67da0f99709021135e7"
     },
     "assignments": {
       "quick": {
@@ -88,6 +88,20 @@
           "opencode/glm-5.3-flash",
           "opencode/ling-3.0-flash-fin-free"
         ]
+      },
+      "security-review": {
+        "primary": "zai-coding-cn/glm-5.3",
+        "fallbacks": [
+          "opencode-go/glm-5.2",
+          "opencode/glm-5.2"
+        ]
+      },
+      "local-research": {
+        "primary": "zai-coding-cn/glm-5.3-flash",
+        "fallbacks": [
+          "opencode-go/glm-5.3-flash",
+          "opencode/glm-5.3-flash"
+        ]
       }
     },
     "judgingLocks": {
@@ -120,17 +134,17 @@
     "fb88a7adc2d0c28b",
     "01563e41a5fd9ba2",
     "1158b13d2f04f343",
-    "87cb23ef7455dd03",
-    "2fc05369d76edb97",
-    "2fc05369d76edb97",
-    "a4b12277e985bde9",
-    "13bb70ba52ca2d48",
-    "dab331ea510c6a88",
-    "949b1ef26214da01",
-    "85236ebb966ce514",
-    "87b2380f2be4541e",
-    "5b4cf04955d68850",
-    "7e650cc337c79ab2",
+    "859401188b0c10c4",
+    "5f1fe023fbb67d3c",
+    "5f1fe023fbb67d3c",
+    "96ac335d58bc2331",
+    "c4440dffaa3a0b65",
+    "8426669d47a919a8",
+    "18b7cd50ac504f1a",
+    "2de42e3f3430c071",
+    "ff3c00a428650e6d",
+    "ac7633202dc3557d",
+    "2e942811a91f6efe",
     "0f1a8a7d5f537190"
   ]
 }
