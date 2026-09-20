@@ -5,7 +5,7 @@
 // canonical permission-gate.ts) + try/catch notify so failures surface instead of silently aborting.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-// Local identity of pi 0.85.1 `isToolCallEventType` (`return event.toolName === toolName`).
+// Local identity of pi 0.86.1 `isToolCallEventType` (`return event.toolName === toolName`; re-verified against the 0.86.1 binary).
 // Kept in-tree so unit tests can import this module — `@earendil-works/pi-coding-agent`
 // is injected at extension-load time and is not a worktree dependency.
 function isToolCallEventType(toolName: string, event: { toolName: string }): boolean {
@@ -232,7 +232,7 @@ class SafetyConfirmDialog implements Component {
 
 // --- R2 (2026-09-17, design-v0.2 + sis-verdict-v0.1 C1/C2): headless denials settle IN-BAND ---
 // In non-tui modes (json/print/rpc — dispatch sub-agents, ACP), dialogs are unanswerable:
-// ctx.ui.custom is a no-op resolve there (pi 0.85.1 noOpUIContext; rpc.md:1196), and
+// ctx.ui.custom is a no-op resolve there (pi 0.86.1 rpc docs: `custom()` returns `undefined`; re-verified ~rpc.md:1196), and
 // ctx.abort() poisons the parent's fallback walk (abort → stopReason=error → inbandError
 // → downshift). Headless denials therefore return {block:true, reason} WITHOUT abort —
 // the model finishes its turn, output is non-empty, and the walk structurally cannot fire.

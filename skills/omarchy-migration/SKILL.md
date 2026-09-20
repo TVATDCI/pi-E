@@ -71,7 +71,8 @@ check persisted to memory.
 - Hardware log: HP EliteBook 840 G6 (F10/F9, AX200 cold-drain quirk, cheap-stick
   incompatibility) · Lenovo ThinkPad 21EB (F1/F12, MediaTek MT7921 — no AX quirk)
 - Pins at authoring: pi-tui@0.84.4, yaml@2.9.0, minimatch@10.2.6, typebox@1.3.22,
-  oh-my-openagent 4.19.4 exact, suite = 31 files
+  oh-my-openagent 4.19.4 exact, suite = 31 files (pi-tui since moved to 0.86.1 —
+  track `~/.pi/agent/package.json`, 2026-09-20)
 - Desktop OS-switch preconditions (Oracle round 1): soak on the sibling incl. cold
   boots (operator may accept organic usage as soak), backup test-restore sample,
   runbook consolidated, non-git state exported, install media + ethernet/tether at
