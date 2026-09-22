@@ -58,6 +58,13 @@ export const KNOWN_GOOD_HASHES: Set<string> = new Set<string>([
   // snapshot) — immaterial to this entry: every fresh process runs the on-disk 3-strip
   // stableParts, which is purpose-independent by construction (verified by direct test).
   "41ecd366ca2476dd", // 3-strip, purpose-insensitive, post-prompt-coordinator order
+  // 2ee214 is the CURRENT stable composition baseline (captured 2026-09-22, pi 0.87.0).
+  // Cross-verified twice same-day with different purposes — a 10:56Z spawned worker with
+  // PI_PURPOSE set, and a 17:15Z console probe with none — purpose-insensitive, consistent
+  // with the 41ecd finding. Stable across the day's legitimate changes (AGENTS.md growth
+  // 1108→1233 tok at 5371eab, ticker fix b84f953): supersedes 41ecd as the current baseline
+  // without invalidating it.
+  "2ee214da6b2a34c3", // 3-strip, purpose-insensitive, pi 0.87.0 baseline (2026-09-22)
 ]);
 
 export function isKnownGood(hash: string): boolean {
