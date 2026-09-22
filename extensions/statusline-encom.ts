@@ -699,8 +699,10 @@ export default function (pi: ExtensionAPI) {
   const STATUS_RENDER_MS = 250;
   const tickMs = (): number => (isStreaming ? STATUS_RENDER_MS : CLOCK_INTERVAL_MS);
   const startTicker = (): void => {
+    if (!ctx) return; // headless (print/json): never mounted — no interval, no pinned loop.
     if (clockTick) clearInterval(clockTick);
     clockTick = setInterval(() => requestRender?.(), tickMs());
+    clockTick.unref?.(); // defense-in-depth: even a leaked tick can't pin the event loop.
   };
 
   // ── V2/V8 runtime stats (cost + tps + cache tokens + session timer) ────────
@@ -990,6 +992,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_end", () => { isStreaming = false; startTicker(); });
 
   pi.on("session_shutdown", () => {
+    // Clear unconditionally: headless runs never mount (ctx undefined) but agent_start/agent_end may have started a tick.
+    if (clockTick) { clearInterval(clockTick); clockTick = undefined; }
     if (ctx) unmount(ctx);
   });
 }
