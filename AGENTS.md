@@ -58,7 +58,7 @@ Not the session JSONL, not `/note`, not compaction summaries — those are ephem
 
 ## Model selection
 
-Curate `/scoped-models` as a small tiered set for `Ctrl+P` cycling: a **cheap/fast** model for exploration, search, and bulk mechanical edits; a **strong reasoning** model for planning, synthesis, gate review, and hard debugging. Raise `--thinking` (Shift+Tab) only for genuinely hard problems. Don't burn the strong model on work the cheap one handles cleanly. **Dispatch-tier routing:** when delegating to sub-agents (if enabled), route trivial mechanical work to the cheap tier and reserve the strong tier for synthesis.
+The curated pair is **configured** (`enabledModels`: `zai-coding-cn/glm-5.3` strong ↔ `glm-5.3-flash` cheap/fast) — `Ctrl+P` toggles tiers. Cheap/fast tier: exploration, search, bulk mechanical edits. Strong tier: planning, synthesis, gate review, hard debugging. Startup thinking is `high`; raise (`/thinking max`, Shift+Tab) only for genuinely hard problems, then drop back. Don't burn the strong model on work the cheap one handles cleanly. **Dispatch-tier routing:** when delegating to sub-agents (if enabled), route trivial mechanical work to the cheap tier and reserve the strong tier for synthesis.
 
 - **No cheap model at a judging node.** Review, verify, and oracle dispatches
   (`unspecified-high`→reviewer, `deep`→morpheus, `security-review`→security-reviewer,
