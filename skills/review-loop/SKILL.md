@@ -76,6 +76,9 @@ When the user wants N reviewers on a change/diff/PR:
    - Prefer **3 strong reviewers over many vague ones.**
    - Use `security-reviewer` (category `security-review`) for the security angle; `morpheus`
      (category `deep`) if the angle needs dependency/flow tracing beyond a surface review.
+   - Every reviewer dispatch uses the **output schema** in [Findings carry](#findings-carry-mode-b-all-rounds)
+     below (`reviewed_paths` + `finding_dispositions` + action triage) — round 1 seeds the
+     carry list for Mode B.
 3. **Synthesize only over complete fan-in.** Each foreground dispatch blocks,
    so all N reviewer results land in your context before you synthesize. A
    reviewer that ERRORED or returned EMPTY is a MISSING angle — re-dispatch
@@ -123,11 +126,61 @@ Parent-orchestrated worker → reviewers → fix, repeated until clean:
    commands+exit codes, validation evidence, surprises, anything left undone." })`.
    **Only one writer at a time.**
 5. **Re-review ONLY if** the fix made MATERIAL changes or addressed non-trivial
-   findings. **Never auto-chain round 2 or 3** — each round is a deliberate parent
+   findings. Re-review rounds run under the **findings-carry contract** below.
+   **Never auto-chain round 2 or 3** — each round is a deliberate parent
    decision made AFTER synthesis. Don't loop for optional polish or deferred items.
 6. **Hard cap: 3 review rounds TOTAL.** Count a round each time fresh reviewers
    inspect the diff. At 3 (or the user's cap), **stop and summarize regardless** of
-   any remaining findings — don't keep grinding.
+   any remaining findings — don't keep grinding. Findings still outstanding at the
+   cap → bd spill + ONE batched ask-user receipt (Findings carry, below).
+
+### Findings carry (Mode B, all rounds)
+
+Findings are **append-only across rounds**. A finding leaves the carry list ONLY by
+**positive coverage** — the re-review names its file in `reviewed_paths` AND does not
+re-report it — or by an explicit **`stale`** mark with a reason from the fixed set
+`{renamed, deleted, out-of-scope}`. **Silence is the only illegal disposition**: an
+unmentioned finding is carried, never cleared. A `covered` claim for a file NOT in
+`reviewed_paths`, or for a re-reported finding, does NOT clear it.
+
+**Reviewer output schema (all review dispatches, Modes A + B):**
+
+```json
+{ "reviewed_paths": ["<files this pass actually judged>"],
+  "finding_dispositions": [
+    { "id": "<finding-id>", "disposition": "covered|stale|re-reported",
+      "reason": "<stale only: renamed|deleted|out-of-scope>" }
+  ],
+  "findings": [
+    { "file": "<path>", "line": 0, "issue": "<evidence-backed>",
+      "action": "no-op|auto-fix|ask-user" }
+  ] }
+```
+
+- **Action triage fail-closed:** anything not clearly `no-op` or mechanically `auto-fix`
+  is `ask-user`.
+- **Re-review prompts EMBED the outstanding-findings list** and require a per-finding
+  disposition (`covered` / `stale+reason` / `re-reported`).
+- **Schema-rejection ≠ verdict:** output that fails to parse as this schema (invalid
+  JSON, missing required keys, disposition outside the enum, stale reason outside the
+  fixed set) is NOT a verdict — the round is **void**: retry once with a fresh dispatch;
+  a second malformed output fails closed to ask-user. A voided round never touches the
+  carry list.
+- **Stale-bound:** more than 2 stale closes in one round trips ask-user FOR THE ROUND;
+  every stale close (attempted or granted) is listed with its reason in the final
+  receipt.
+- **Cap + spill — max 1 operator interruption per loop:** carry list caps at **10**
+  outstanding findings. At cap-overflow, OR at the round cap with findings
+  outstanding: spill outstanding findings to **bd** as open issues (repeat findings
+  merge into one line with a count) and emit **ONE batched ask-user receipt** covering
+  all escalation classes (cap-overflow, stale-cap trips, schema double-faults,
+  ask-user-triaged findings). bd is the persistent queue; the receipt is the
+  notification — never per-finding interrupts.
+
+**Executable spec:** `fixtures/drill.mjs` (`node fixtures/drill.mjs`) encodes this
+contract as a decision table with the four fixture groups (positive coverage,
+schema-rejection, stale-abuse red team, cap+spill). All groups must pass after any
+edit to this section.
 
 **STOP when any is true (non-negotiable):** no blockers / fixes-now · remaining
 feedback is optional/speculative/deferred · a reviewer surfaced an unapproved
