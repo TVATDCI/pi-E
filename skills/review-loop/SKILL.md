@@ -147,6 +147,7 @@ unmentioned finding is carried, never cleared. A `covered` claim for a file NOT 
 
 ```json
 { "reviewed_paths": ["<files this pass actually judged>"],
+  "intent_restated": { "intent": "<one-line restatement>", "met": "met|partial|not-met", "note": "<optional>" },
   "finding_dispositions": [
     { "id": "<finding-id>", "disposition": "covered|stale|re-reported",
       "reason": "<stale only: renamed|deleted|out-of-scope>" }
@@ -159,6 +160,13 @@ unmentioned finding is carried, never cleared. A `covered` claim for a file NOT 
 
 - **Action triage fail-closed:** anything not clearly `no-op` or mechanically `auto-fix`
   is `ask-user`.
+- **Intent verdict is required (A3):** when the target has a Captain's intent
+  (crew brief / intake contract), the reviewer dispatch embeds it VERBATIM and the
+  output MUST carry `intent_restated` — the intent in the reviewer's own words plus
+  `met|partial|not-met` against the DIFF. Absence or enum violation is a schema
+  rejection → void round (same path as any malformed output). Intent is the
+  acceptance criterion; generalization beyond it is out of scope by construction.
+  Targets with no stated intent (raw diffs) omit the field freely.
 - **Re-review prompts EMBED the outstanding-findings list** and require a per-finding
   disposition (`covered` / `stale+reason` / `re-reported`).
 - **Schema-rejection ≠ verdict:** output that fails to parse as this schema (invalid

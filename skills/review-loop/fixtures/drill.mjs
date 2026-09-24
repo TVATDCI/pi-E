@@ -11,6 +11,8 @@ const STALE_TRIP = 2; // >2 stale closes in a round trips ask-user
 const STALE_REASONS = new Set(["renamed", "deleted", "out-of-scope"]);
 const DISPOSITIONS = new Set(["covered", "stale", "re-reported"]);
 const ACTIONS = new Set(["no-op", "auto-fix", "ask-user"]);
+const MET_ENUM = new Set(["met", "partial", "not-met"]);
+let INTENT_REQUIRED = false; // A3: set true when the target has a stated Captain's intent
 
 // ── schema validation (schema-rejection ≠ verdict) ──────────────────────────
 function validate(output) {
@@ -30,6 +32,11 @@ function validate(output) {
   for (const f of o.findings) {
     if (!f || typeof f.file !== "string" || typeof f.issue !== "string" || !ACTIONS.has(f.action))
       return { ok: false, why: `bad finding ${JSON.stringify(f)}` };
+  }
+  if (INTENT_REQUIRED) {
+    const ir = o.intent_restated;
+    if (!ir || typeof ir.intent !== "string" || !MET_ENUM.has(ir.met))
+      return { ok: false, why: "missing/invalid intent_restated (intent target: intent verdict required)" };
   }
   return { ok: true, data: o };
 }
@@ -163,6 +170,18 @@ eq(receiptCheck(greenReceipt, "abc1234").accept, true, "receipt at current HEAD 
 eq(receiptCheck(greenReceipt, "def9999").accept, false, "green receipt at stale SHA refused (HEAD advanced)");
 eq(receiptCheck(greenReceipt, "def9999").why.includes("stale"), true, "refusal names staleness");
 eq(receiptCheck({ verdict: "clean", risk: "low" }, "abc1234").accept, false, "receipt with no head_sha cannot certify (historical only)");
+
+// ── F6: intent verdict (A3) ─────────────────────────────────────────────────
+console.log("F6 intent verdict");
+const validRoundNoIntent = { reviewed_paths: [], finding_dispositions: [], findings: [] };
+INTENT_REQUIRED = true;
+eq(validate(validRoundNoIntent).ok, false, "intent target: review omitting intent_restated is VOIDED (A1 schema path)");
+const badMet = { reviewed_paths: [], intent_restated: { intent: "x", met: "probably" }, finding_dispositions: [], findings: [] };
+eq(validate(badMet).ok, false, "met outside enum {met,partial,not-met} ⇒ void");
+const goodIntent = { reviewed_paths: ["a.py"], intent_restated: { intent: "fix the login loop", met: "met" }, finding_dispositions: [], findings: [] };
+eq(validate(goodIntent).ok, true, "restated intent + met-in-enum ⇒ valid verdict");
+INTENT_REQUIRED = false;
+eq(validate(validRoundNoIntent).ok, true, "no stated intent (raw diff target): field omitted freely ⇒ valid");
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (fails) { console.error(`\n${fails} FAILURE(S)`); process.exit(1); }
