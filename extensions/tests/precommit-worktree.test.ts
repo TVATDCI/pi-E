@@ -44,6 +44,9 @@ function canarySrc(logPath: string, marker: string): string {
 }
 
 const base = mkdtempSync(join(tmpdir(), "pcwt-"));
+// Node 26 needs a package.json above ESM-syntax .ts or it CJS-parses and dies; this base
+// covers repo, linked worktree, runner copy, and canaries via nearest-package lookup.
+writeFileSync(join(base, "package.json"), '{"type":"module"}\n');
 const repo = join(base, "repo");
 const wt = join(base, "wt");
 const log = join(base, "gate.log");

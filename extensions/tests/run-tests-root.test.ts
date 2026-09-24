@@ -38,6 +38,9 @@ function runRunner(args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv 
 }
 
 const base = mkdtempSync(join(tmpdir(), "rtroot-"));
+// Node 26 needs a package.json above ESM-syntax .ts or it CJS-parses and dies; covers the
+// out-of-repo runner copy and both scratch repos via nearest-package lookup.
+writeFileSync(join(base, "package.json"), '{"type":"module"}\n');
 try {
   // scratch repo S1 with one canary; runner copy lives elsewhere (no extensions/ beside it)
   const s1 = join(base, "s1");

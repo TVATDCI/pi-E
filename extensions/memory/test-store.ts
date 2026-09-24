@@ -50,6 +50,9 @@ async function main() {
   // each subprocess test uses a FRESH data filePath (isolation, no cross-test contamination).
   const STORE_ABS = new URL("./store.ts", import.meta.url).pathname;
   const procDir = await fs.mkdtemp(path.join(os.tmpdir(), "w8b-proc-"));
+  // Node 26 resolves ESM by nearest package.json — with none above /tmp scratch, proc.ts
+  // would CJS-parse and crash ("Cannot use import statement outside a module"). Seed one.
+  await fs.writeFile(path.join(procDir, "package.json"), '{"type":"module"}\n');
   const procPath = path.join(procDir, "proc.ts");
   const procSrc = `import { JsonlMemoryStore } from ${JSON.stringify(STORE_ABS)};
 const a = process.argv.slice(2);
