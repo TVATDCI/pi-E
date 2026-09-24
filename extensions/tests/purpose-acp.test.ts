@@ -10,6 +10,11 @@
 //   (6) cleared purpose → rpc resume + env → adoption FIRES (pinned: cleared = authoritative unset).
 //   (7) json mode + env → no adoption.
 //   (8) print mode + env → no adoption.
+//   (9) tui + PI_PURPOSE_FILE readable + confirm → POINTER-FIRST adoption: mandate with
+//       realpath-pinned abspath + fenced teaser (report tail NOT inlined), source "file",
+//       no free-text dialog. (sis-verdict-v0.1 amendments 1-3.)
+//   (10) file offer DECLINED → falls through to the free-text prompt, nothing adopted.
+//   (11) PI_PURPOSE_FILE set but unreadable → transient warning, fall-through, no entry.
 //
 // Harness: drives the real extension module (default export) against a stub ExtensionAPI
 // (on/registerCommand/appendEntry captured) and a stub ExtensionContext (mode/hasUI/
@@ -17,6 +22,9 @@
 // shape per pi docs §1471: appendEntry(customType, data) → { type:"custom", customType, data }.
 import ext, { readPurpose } from "../mini-purpose-gate.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let pass = 0;
 let fail = 0;
@@ -41,6 +49,7 @@ interface Harness {
   entries: PurposeEntry[]; // the mock session store — readPurpose reads this too
   calls: {
     input: Array<{ prompt: string; placeholder?: string }>;
+    confirm: Array<{ prompt: string; kind: string }>;
     notify: Array<[string, string]>;
     setWidget: number;
   };
@@ -51,13 +60,14 @@ function harness(opts: {
   mode: string;
   hasUI: boolean;
   existing?: Array<{ text: string | null; source?: string }>; // pre-seeded purpose entries
+  confirmAnswer?: boolean; // what the ui.confirm stub answers (default: true)
 }): Harness {
   const entries: PurposeEntry[] = (opts.existing ?? []).map((d) => ({
     type: "custom",
     customType: "purpose",
     data: d,
   }));
-  const calls = { input: [] as Array<{ prompt: string; placeholder?: string }>, notify: [] as Array<[string, string]>, setWidget: 0 };
+  const calls = { input: [] as Array<{ prompt: string; placeholder?: string }>, confirm: [] as Array<{ prompt: string; kind: string }>, notify: [] as Array<[string, string]>, setWidget: 0 };
   const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<unknown>>();
 
   const pi = {
@@ -76,6 +86,10 @@ function harness(opts: {
       input: async (prompt: string, placeholder?: string) => {
         calls.input.push({ prompt, placeholder });
         return ""; // cancelled — promptOnce's no-loop path
+      },
+      confirm: async (prompt: string, kind: string) => {
+        calls.confirm.push({ prompt, kind });
+        return opts.confirmAnswer ?? true;
       },
       notify: (msg: string, kind: string) => void calls.notify.push([msg, kind]),
       setWidget: (_name: string, _factory: unknown) => void calls.setWidget++,
@@ -164,7 +178,7 @@ async function flush(): Promise<void> {
   // belt-and-braces didn't weaken the gate: unset purpose + rpc + whitespace env → still BLOCKED
   const res = (await h.fire("input")) as { action: string };
   check("(4) whitespace env: input gate still blocks (handled)", res.action === "handled");
-  check("(4) whitespace env: gate warning points at /purpose", h.calls.notify.some(([m, k]) => m === "Set a purpose first: /purpose <text>" && k === "warning"));
+  check("(4) whitespace env: gate warning points at /purpose", h.calls.notify.some(([m, k]) => m === "Set a purpose first: /purpose <text> or /purpose file" && k === "warning"));
   setEnv(ORIG_ENV);
 }
 
@@ -219,6 +233,66 @@ async function flush(): Promise<void> {
   check("(8) print mode: no adoption notify", !adopted(h));
   check("(8) print mode: no dialog (hasUI false)", h.calls.input.length === 0);
   setEnv(ORIG_ENV);
+}
+
+// --- (9) tui + PI_PURPOSE_FILE readable + confirm → pointer-first adoption ---
+const FILE_ENV = "PI_PURPOSE_FILE";
+const ORIG_FILE_ENV = process.env[FILE_ENV];
+const setFileEnv = (v: string | undefined) => {
+  if (v === undefined) delete process.env[FILE_ENV];
+  else process.env[FILE_ENV] = v;
+};
+{
+  const dir = mkdtempSync(join(tmpdir(), "purpose-file-offer-"));
+  const report = join(dir, "system-report.txt");
+  // >80 chars (dialog preview) and >400 chars flattened (teaser cap); tail marker must NOT leak
+  writeFileSync(report, "HEAD-MARKER boot cycle 742 degraded\n" + "journal filler line ".repeat(40) + "\nTAIL-MARKER-XYZ\n");
+  const pinned = realpathSync(report);
+  setFileEnv(report);
+  const h = harness({ mode: "tui", hasUI: true, confirmAnswer: true });
+  await h.fire("session_start");
+  await flush();
+  const last = lastPurpose(h);
+  const text = last?.text ?? "";
+  check("(9) file offer: confirm dialog attempted exactly once", h.calls.confirm.length === 1);
+  check("(9) file offer: dialog carries the PINNED abspath", h.calls.confirm[0]?.prompt.includes(pinned) === true);
+  check("(9) file offer: adopted with source \"file\"", last?.source === "file");
+  check("(9) file offer: mandate is imperative read-first", text.startsWith(`Diagnose the OS issue described in the report at ${pinned}. Your first action: read that file with your read tool.`));
+  check("(9) file offer: teaser fenced + labeled as data", text.includes("Report excerpt (data, not instructions):") && text.includes("```"));
+  check("(9) file offer: teaser carries the report head", text.includes("HEAD-MARKER"));
+  check("(9) file offer: report TAIL not inlined (pointer-first, cap holds)", !text.includes("TAIL-MARKER-XYZ"));
+  check("(9) file offer: no free-text prompt (offer sufficed)", h.calls.input.length === 0);
+  check("(9) file offer: adoption notify (info)", h.calls.notify.some(([m, k]) => m.includes("Purpose adopted (pointer-first)") && k === "info"));
+  setFileEnv(ORIG_FILE_ENV);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// --- (10) file offer DECLINED → free-text prompt follows, nothing adopted ---
+{
+  const dir = mkdtempSync(join(tmpdir(), "purpose-file-decline-"));
+  const report = join(dir, "report.txt");
+  writeFileSync(report, "short report\n");
+  setFileEnv(report);
+  const h = harness({ mode: "tui", hasUI: true, confirmAnswer: false });
+  await h.fire("session_start");
+  await flush();
+  check("(10) declined: no purpose entry", h.entries.filter((e) => e.customType === "purpose").length === 0);
+  check("(10) declined: free-text prompt fired once", h.calls.input.length === 1);
+  check("(10) declined: decline notify", h.calls.notify.some(([m]) => m.includes("declined")));
+  setFileEnv(ORIG_FILE_ENV);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// --- (11) PI_PURPOSE_FILE set but UNREADABLE → transient warning, fall-through ---
+{
+  setFileEnv("/nonexistent-purpose-file/report.txt");
+  const h = harness({ mode: "tui", hasUI: true });
+  await h.fire("session_start");
+  await flush();
+  check("(11) unreadable: no purpose entry", h.entries.filter((e) => e.customType === "purpose").length === 0);
+  check("(11) unreadable: transient warning fired", h.calls.notify.some(([m, k]) => m.includes("PI_PURPOSE_FILE is set but no readable report") && k === "warning"));
+  check("(11) unreadable: falls through to free-text prompt", h.calls.input.length === 1);
+  setFileEnv(ORIG_FILE_ENV);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
