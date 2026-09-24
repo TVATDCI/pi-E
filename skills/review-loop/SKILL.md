@@ -197,6 +197,32 @@ contract as a decision table with the four fixture groups (positive coverage,
 schema-rejection, stale-abuse red team, cap+spill). All groups must pass after any
 edit to this section.
 
+### Eval corpus (B2) — capture, replay, annotation
+
+The green-then-missed corpus lives at `~/operator/eval-corpus/` (host-namespaced,
+desk-local, synced to the peer via md5+kick lane; mechanics:
+`~/operator/scripts/eval-corpus.mjs`). Four rules:
+
+1. **Replay injection:** every reviewer dispatch (Modes A + B) embeds the
+   eval-corpus checklist — run `node ~/operator/scripts/eval-corpus.mjs replay`
+   and paste its output block into the dispatch prompt. Active cases are
+   checklist items the reviewer must verify and cite; false-positive cases are
+   DO-NOT-reflag counterweights. Empty corpus → no injection.
+2. **Capture is operator-initiated (structural admission):** when the operator
+   says "capture-miss" / "capture-false-positive" after a review that passed but
+   proved wrong (or flagged-but-fine), run the `add` subcommand with
+   `--operator-confirmed` — the operator's initiation IS the confirmation; a
+   capture never self-admits. `--pattern` is the checklist imperative a reviewer
+   should have applied.
+3. **Catch recording:** when a corpus-sourced checklist item produces a finding
+   (or a DO-NOT-reflag prevents one), record it: `eval-corpus.mjs catch --id <id>
+   --by-host <desk>` — this refreshes decay and feeds the annotation.
+4. **Receipt annotation:** every final verdict receipt from a corpus-equipped
+   loop carries the line `node ~/operator/scripts/eval-corpus.mjs stats` emits
+   (`corpus catches: cross-host N, self M`). Persistent self-only catches with
+   zero cross-host = the memorization/ossification signal (Oracle Q4) — surface
+   it, don't smooth it.
+
 **STOP when any is true (non-negotiable):** no blockers / fixes-now · remaining
 feedback is optional/speculative/deferred · a reviewer surfaced an unapproved
 decision that needs the user · the round cap is reached. Then inspect the final
