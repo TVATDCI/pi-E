@@ -176,6 +176,13 @@ unmentioned finding is carried, never cleared. A `covered` claim for a file NOT 
   all escalation classes (cap-overflow, stale-cap trips, schema double-faults,
   ask-user-triaged findings). bd is the persistent queue; the receipt is the
   notification — never per-finding interrupts.
+- **SHA-bound receipts:** every verdict/round/final/escalation receipt carries
+  `head_sha` = `git rev-parse HEAD` of the review target at verdict time.
+  **Staleness rule:** a receipt whose `head_sha` ≠ the target's current HEAD is
+  STALE — it cannot certify new work. A receipt with no `head_sha` is historical
+  record only, never certification. Any consumer (fix application, promotion,
+  ledger, operator) must check the binding before accepting a receipt as evidence
+  for current state; stale → re-review the new HEAD, never wave through.
 
 **Executable spec:** `fixtures/drill.mjs` (`node fixtures/drill.mjs`) encodes this
 contract as a decision table with the four fixture groups (positive coverage,

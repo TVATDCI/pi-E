@@ -88,6 +88,16 @@ function eq(actual, expected, label) {
   else { fails++; console.error(`  ✗ ${label}\n    expected ${e}\n    actual   ${a}`); }
 }
 
+// ── A2: SHA-bound receipts ─────────────────────────────────────────────────
+// receiptCheck: acceptance of a receipt as EVIDENCE for current work.
+function receiptCheck(receipt, head) {
+  if (!receipt || typeof receipt.head_sha !== "string" || !receipt.head_sha)
+    return { accept: false, why: "unbound: no head_sha — historical record only" };
+  if (receipt.head_sha !== head)
+    return { accept: false, why: `stale: certified ${receipt.head_sha} ≠ current ${head}` };
+  return { accept: true, why: "bound to current HEAD" };
+}
+
 // ── F1: positive coverage ────────────────────────────────────────────────────
 console.log("F1 positive coverage");
 const carryABC = [{ id: "a", file: "a.py" }, { id: "b", file: "b.py" }, { id: "c", file: "c.py" }];
@@ -145,6 +155,14 @@ const r4 = resolveRound(carry11, {
 eq(r4.escalate, true, "11 outstanding (>10) trips cap");
 eq(r4.spill.length, 11, "all 11 outstanding findings spilled to bd");
 eq(r4.receipt && r4.receipt.escalated && !r4.receipt.staleCloses.length ? 1 : 1, 1, "ONE batched receipt emitted");
+
+// ── F5: SHA-bound receipts (A2) ──────────────────────────────────────────────
+console.log("F5 SHA-bound receipts");
+const greenReceipt = { verdict: "clean", risk: "low", head_sha: "abc1234" };
+eq(receiptCheck(greenReceipt, "abc1234").accept, true, "receipt at current HEAD accepted");
+eq(receiptCheck(greenReceipt, "def9999").accept, false, "green receipt at stale SHA refused (HEAD advanced)");
+eq(receiptCheck(greenReceipt, "def9999").why.includes("stale"), true, "refusal names staleness");
+eq(receiptCheck({ verdict: "clean", risk: "low" }, "abc1234").accept, false, "receipt with no head_sha cannot certify (historical only)");
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (fails) { console.error(`\n${fails} FAILURE(S)`); process.exit(1); }
