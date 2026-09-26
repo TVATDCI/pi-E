@@ -1,8 +1,9 @@
 {
   "name": "pi-agent-config",
   "private": true,
-  "description": "pi agent config repo (pi-E) — pinned extension deps",
+  "description": "pi agent config repo (pi-E) \u2014 pinned extension deps",
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.1",
     "@earendil-works/pi-tui": "0.87.1",
     "minimatch": "10.2.6",
     "typebox": "1.3.22",
