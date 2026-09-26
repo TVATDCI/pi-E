@@ -46,9 +46,13 @@ before debugging anything else.
 Post-install: `sudo pacman -S --needed zsh ghostty`, `chsh -s /usr/bin/zsh`,
 `gh auth login`, `opencode auth login` — the new desk's OWN accounts.
 **R Restore:** dotfiles clone (or tar-pipe if private repo + no auth yet) →
-`install.sh` → repos pull → `bash scripts/bootstrap.sh` → omo.jsonc ships per-machine
+**prereq bootstrap FIRST** (`sudo pacman -S --needed git github-cli nodejs jq` —
+install.sh step ① verifies these and hard-fails without them; pattern absorbed
+from kunchenguid/dotfiles bootstrap.sh, 2026-09-25) → `install.sh` → repos pull →
+`bash scripts/bootstrap.sh` → omo.jsonc ships per-machine
 (live-test with one real `opencode run`). Identity files come from the BACKUP tar,
-never from git.
+never from git. Note: install.sh also provisions the ghostty shaders/themes dir
+symlinks (ADR-0007) — a fresh desk gets the full terminal surface, no manual links.
 **V Verify:** omo doctor exit 0 (fallback_models deprecations = cosmetic), suite
 green on BOTH desks, one live round-trip per agent, fresh-clone rehearsal in a
 scratch dir — the gate that proves the rebuild path.
