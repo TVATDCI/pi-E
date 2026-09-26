@@ -68,3 +68,6 @@ store.jsonl
 # (skills/diagnose-crash + skills/omarchy were symlinked distro skills here;
 #  2026-09-08 materialized as tracked real files — see that commit)
 themes/omarchy-system.json
+
+# Pi Calm preference state file (runtime, never committed — suite-enforced)
+/calm

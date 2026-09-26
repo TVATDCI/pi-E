@@ -17,6 +17,7 @@
 // Run: node --experimental-strip-types scripts/run-tests.ts [--expect N] [--timeout ms] [pattern...]
 
 import { spawn, execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { readdirSync, statSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import * as os from "node:os";
@@ -139,6 +140,22 @@ interface FileResult {
 function runOne(absPath: string, timeoutMs: number): Promise<FileResult> {
   return new Promise((resolve) => {
     const rel = relative(REPO, absPath);
+    // Per-file timeout override (2026-09-26, calm promote): a test file may declare
+    // `// run-tests-timeout: <ms>` in its first ~40 lines to extend its own budget
+    // (e.g. suites wrapping real-TUI E2E). Marker is read-only, integer-bounded,
+    // and can only RAISE the budget up to a 10-minute ceiling — never lower it.
+    let fileTimeoutMs = timeoutMs;
+    try {
+      const head = readFileSync(absPath, "utf8").split("\n").slice(0, 40).join("\n");
+      const m = head.match(/^\/\/ run-tests-timeout: (\d+)\s*$/m);
+      if (m) {
+        const v = Number(m[1]);
+        if (Number.isInteger(v) && v > timeoutMs && v <= 600_000) fileTimeoutMs = v;
+      }
+    } catch {
+      /* unreadable head → default budget */
+    }
+    timeoutMs = fileTimeoutMs;
     const started = Date.now();
     const child = spawn(process.execPath, ["--experimental-strip-types", absPath], {
       cwd: dirname(absPath), // each family runs from its own dir (their headers' contract)
