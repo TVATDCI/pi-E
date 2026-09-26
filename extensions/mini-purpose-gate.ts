@@ -132,7 +132,17 @@ export default function (pi: ExtensionAPI) {
       "What is the purpose of this agent?",
       "e.g. Refactor the auth module to use JWT",
     );
-    if (answer && answer.trim()) {
+    const trimmed = answer?.trim() ?? "";
+    if (trimmed.startsWith("/")) {
+      // Slash-refusal (2026-09-26, calm-trial wart, TNT operator-repro): a leading-"/"
+      // answer is a command aimed at the agent, not a purpose statement — never
+      // capture it ("PURPOSE: /calm testing" swallowed the operator's first command).
+      // Single-prompt discipline kept: no loop; point at the reliable setter.
+      ctx.ui.notify(
+        `'${trimmed}' looks like a command, not a purpose — not captured. Use /purpose <text> or restate the task.`,
+        "warning",
+      );
+    } else if (trimmed) {
       commitPurpose(answer, ctx);
       ctx.ui.notify(`Purpose set: ${purpose}`, "info");
     } else {

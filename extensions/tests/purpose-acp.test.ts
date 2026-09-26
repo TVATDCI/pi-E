@@ -61,6 +61,7 @@ function harness(opts: {
   hasUI: boolean;
   existing?: Array<{ text: string | null; source?: string }>; // pre-seeded purpose entries
   confirmAnswer?: boolean; // what the ui.confirm stub answers (default: true)
+  inputAnswer?: string; // what the ui.input stub answers (default: "" — cancelled)
 }): Harness {
   const entries: PurposeEntry[] = (opts.existing ?? []).map((d) => ({
     type: "custom",
@@ -85,7 +86,7 @@ function harness(opts: {
     ui: {
       input: async (prompt: string, placeholder?: string) => {
         calls.input.push({ prompt, placeholder });
-        return ""; // cancelled — promptOnce's no-loop path
+        return opts.inputAnswer ?? ""; // default: cancelled — promptOnce's no-loop path
       },
       confirm: async (prompt: string, kind: string) => {
         calls.confirm.push({ prompt, kind });
@@ -293,6 +294,33 @@ const setFileEnv = (v: string | undefined) => {
   check("(11) unreadable: transient warning fired", h.calls.notify.some(([m, k]) => m.includes("PI_PURPOSE_FILE is set but no readable report") && k === "warning"));
   check("(11) unreadable: falls through to free-text prompt", h.calls.input.length === 1);
   setFileEnv(ORIG_FILE_ENV);
+}
+
+// --- (12) slash-refusal: dialog answer starting "/" is a command, NEVER captured ---
+// Wart class (2026-09-26 calm trial, TNT operator-repro): fresh purpose-less
+// session → purpose dialog grabs the first line → operator's /calm became
+// "PURPOSE: /calm testing" and never executed. Guard: refuse, warn, stay unset.
+{
+  setEnv(undefined);
+  const h = harness({ mode: "tui", hasUI: true, inputAnswer: "/calm testing" });
+  await h.fire("session_start");
+  await flush();
+  check("(12) slash: no purpose entry committed", h.entries.filter((e) => e.customType === "purpose").length === 0);
+  check("(12) slash: refusal warning fired", h.calls.notify.some(([m, k]) => m.includes("looks like a command, not a purpose") && k === "warning"));
+  check("(12) slash: dialog fired exactly once (single-prompt discipline)", h.calls.input.length === 1);
+
+  // whitespace-padded slash also refused (trim guard)
+  const h2 = harness({ mode: "tui", hasUI: true, inputAnswer: "   /purpose sneaky" });
+  await h2.fire("session_start");
+  await flush();
+  check("(12) padded slash: refused too", h2.entries.filter((e) => e.customType === "purpose").length === 0 && h2.calls.notify.some(([m]) => m.includes("not captured")));
+
+  // control: a REAL task answer still adopts (guard must not over-block)
+  const h3 = harness({ mode: "tui", hasUI: true, inputAnswer: "Fix the login bug in session 42" });
+  await h3.fire("session_start");
+  await flush();
+  const p3 = lastPurpose(h3);
+  check("(12) control: plain task answer still adopted", typeof p3?.text === "string" && (p3.text as string).includes("login bug"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
