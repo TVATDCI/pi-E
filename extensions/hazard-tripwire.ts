@@ -230,6 +230,16 @@ function listFmt(items: string[], max = 4): string {
   return items.length > max ? `${shown} +${items.length - max} more` : shown;
 }
 
+// State→status-key mapping: color lives in settings.json customItems per key
+// (static theme tokens), so the footer "turns green when all green" by the
+// extension publishing exactly one key per state. See statusline-encom.ts
+// CustomItem: { id, color, hideWhenMissing } — text-only setStatus.
+export function statusKeyFor(state: TripwireState): "tripwire-ok" | "tripwire-warn" | "tripwire-hazard" {
+  if (state.status === "pass") return "tripwire-ok";
+  if (state.status === "unarmed") return "tripwire-warn";
+  return "tripwire-hazard";
+}
+
 export function formatStatusLine(state: TripwireState): string {
   if (state.status === "pass") return "tripwire: armed ✓";
   if (state.status === "unarmed") return "⚠ tripwire UNARMED (no baseline — /tripwire rearm)";
@@ -283,7 +293,13 @@ let current: TripwireState = { status: "pass", missing: [], extra: [], failures:
 function paint(ctx: { ui?: { notify(m: string, t?: "info" | "warning" | "error"): void; setStatus(k: string, t: string | undefined): void; setWidget(k: string, c: string[] | undefined): void } }): void {
   const ui = ctx.ui;
   if (!ui) return;
-  ui.setStatus("hazard", formatStatusLine(current));
+  const key = statusKeyFor(current);
+  // Publish exactly one key (the customItem bound to it carries the state
+  // color); clear the siblings so no stale label survives a re-arm.
+  for (const k of ["tripwire-ok", "tripwire-warn", "tripwire-hazard"]) {
+    if (k !== key) ui.setStatus(k, undefined);
+  }
+  ui.setStatus(key, formatStatusLine(current));
   if (current.status === "hazard") {
     ui.setWidget("hazard-tripwire", formatWidget(current));
     ui.notify(`HAZARD TRIPWIRE\n\n${formatDetail(current)}`, "error");

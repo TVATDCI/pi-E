@@ -15,6 +15,7 @@ import {
   loadBaseline,
   writeBaseline,
   checkScaffolding,
+  statusKeyFor,
   formatStatusLine,
   formatWidget,
   formatHazardBlock,
@@ -297,6 +298,15 @@ run("formatters: widget truncates long lists (+N more)", () => {
   };
   const w = formatWidget(hz).join("\n");
   assertTrue(w.includes("+2 more"), "truncation marker");
+});
+
+run("statusKeyFor: state→key mapping (footer color switches per state)", () => {
+  const pass = { status: "pass" as const, missing: [], extra: [], failures: [] };
+  assertEq(statusKeyFor(pass), "tripwire-ok", "pass → ok key (green)");
+  const unarmed = { status: "unarmed" as const, missing: [], extra: [], failures: [] };
+  assertEq(statusKeyFor(unarmed), "tripwire-warn", "unarmed → warn key (amber)");
+  const hz = { status: "hazard" as const, missing: ["memory.md"], extra: [], failures: [] };
+  assertEq(statusKeyFor(hz), "tripwire-hazard", "hazard → hazard key (red)");
 });
 
 run("symlink fixture sanity: existsSync follows links the loader way", () => {
