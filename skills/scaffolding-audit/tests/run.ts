@@ -114,8 +114,8 @@ const currentState = extractModelState(currentText, TIER_MAP_REL);
 const parentState = extractModelState(parentText, TIER_MAP_REL);
 
 check(
-  "model-state: extracts all 10 categories from live tier-map",
-  Object.keys(currentState.assignments).length === 10,
+  "model-state: extracts all 12 categories from live tier-map (re-pinned 2026-09-29: security-review + local-research joined after authoring)",
+  Object.keys(currentState.assignments).length === 12,
 );
 check(
   "model-state: judging locks cover the 3 judging categories with chains",
@@ -140,8 +140,9 @@ check(
   JSON.stringify(parentState) !== JSON.stringify(currentState),
 );
 check(
-  "model-state: parent vs current ASSIGNMENTS identical (0ce0b18 was doctrine-only) — drift rides the source digest",
-  JSON.stringify(parentState.assignments) === JSON.stringify(currentState.assignments),
+  "model-state: parent vs current assignments DIVERGED legitimately (re-pinned 2026-09-29: wallet-frame moved ultrabrain zai glm-5.3 → opencode-go/grok-4.6 after the 0ce0b18 era) — both digest and assignments carry drift now",
+  JSON.stringify(parentState.assignments) !== JSON.stringify(currentState.assignments) &&
+    currentState.assignments.ultrabrain?.primary === "opencode-go/grok-4.6",
 );
 
 // ─── drift-flag branch (both manifest fixtures + boundaries) ─────────────────
