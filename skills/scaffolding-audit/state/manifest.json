@@ -1,8 +1,8 @@
 {
-  "recorded-at": "2026-09-18T23:16:00.767Z",
+  "recorded-at": "2026-09-28T23:59:23.945Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "14435cacd4df91f4530beee0be5aa199ea41bab4"
+    "~/.pi/agent": "a864825c1a331cb40d507cf3ee43849b20a3d5e1"
   },
   "model-state": {
     "source": {
