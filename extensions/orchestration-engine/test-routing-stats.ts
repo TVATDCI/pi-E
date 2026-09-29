@@ -10,7 +10,7 @@ function check(name: string, cond: boolean) {
 }
 
 // --- empty ---
-const empty = aggregateDispatchLog([], { peak: false, promo: true });
+const empty = aggregateDispatchLog([], { peak: false });
 check("empty: n=0, no flags", empty.n === 0 && empty.flags.length === 0);
 
 // --- seeded: mirrors the real probe findings (builder overrides, deep fails) ---
@@ -25,7 +25,7 @@ const seed: DispatchLogEntry[] = [
   { category: "unspecified-high", modelFlag: "zai-coding-cn/glm-5.2", source: "tier-map", agent: null, outcome: "done", elapsedMs: 22000 },
   { category: "git-commit-message", modelFlag: "opencode/deepseek-v4-flash-free", source: "tier-map", agent: null, outcome: "done", elapsedMs: 26000 },
 ];
-const s = aggregateDispatchLog(seed, { peak: false, promo: true });
+const s = aggregateDispatchLog(seed, { peak: false });
 check("seeded: n=9", s.n === 9);
 check("seeded: fails=2", s.fails === 2);
 check("seeded: overrides=4", s.overrides === 4);
@@ -34,14 +34,14 @@ check("flag: builder overrides 100%", s.flags.some((f) => f.includes("builder ov
 check("flag: high override rate 44%", s.flags.some((f) => f.includes("high override rate")));
 check("no false flag on clean quick", !s.flags.some((f) => f.includes("quick fails")));
 
-// --- quota marker matrix ---
-check("quota: opencode = FREE", quotaMarker("opencode/deepseek-v4-flash-free", false, true) === "FREE");
-check("quota: funded opencode = ext", quotaMarker("opencode/gpt-5.6-luna", false, true) === "ext");
-check("quota: opencode-go = ext", quotaMarker("opencode-go/glm-5.2", false, false) === "ext");
-check("quota: glm-5.2 promo off-peak = 1×", quotaMarker("zai-coding-cn/glm-5.2", false, true) === "1×");
-check("quota: glm-5.2 post-promo = 2×", quotaMarker("zai-coding-cn/glm-5.2", false, false) === "2×");
-check("quota: glm-5.2 peak = 3×", quotaMarker("zai-coding-cn/glm-5.2", true, true) === "3×");
-check("quota: glm-4.7 always 1×", quotaMarker("zai-coding-cn/glm-4.7", true, false) === "1×");
+// --- quota marker matrix (promo retired 2026-09-07: off-peak flat 2×, peak 3×) ---
+check("quota: opencode = FREE", quotaMarker("opencode/deepseek-v4-flash-free", false) === "FREE");
+check("quota: funded opencode = ext", quotaMarker("opencode/gpt-5.6-luna", false) === "ext");
+check("quota: opencode-go = ext", quotaMarker("opencode-go/glm-5.2", false) === "ext");
+check("quota: glm-5.2 off-peak = 2×", quotaMarker("zai-coding-cn/glm-5.2", false) === "2×");
+check("quota: glm-5-turbo off-peak = 2×", quotaMarker("zai-coding-cn/glm-5-turbo", false) === "2×");
+check("quota: glm-5.2 peak = 3×", quotaMarker("zai-coding-cn/glm-5.2", true) === "3×");
+check("quota: glm-4.7 always 1×", quotaMarker("zai-coding-cn/glm-4.7", true) === "1×");
 
 // --- downshift-unavailable source (F4) ---
 const ds = aggregateDispatchLog(

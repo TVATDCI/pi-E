@@ -156,24 +156,15 @@ export interface ModelRegistryLike {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Promo window (single source of truth — update the date as Z AI extends/ends it)
+// Peak window (UTC). Historical: zai's off-peak discount on glm-5.2/5-turbo ended
+// 2026-09-07 (fully retired from this codebase 2026-09-29) — off-peak zai billing is
+// flat: flagships 2×, flash 1×. Only the PEAK multipliers below remain live.
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Z AI promo: glm-5.2 & glm-5-turbo at 1× off-peak through this date.
- * RECHECKED 2026-09-08: ALL promo text REMOVED from /devpack/overview — promo no longer
- * advertised; sunset pinned to the day BEFORE the recheck so isPromoActive() = false
- * immediately (comparison is <= end-of-day UTC). V2 prompt-billing was never affected;
- * relevant only for credits accounts post-conversion. */
-export const PROMO_SUNSET_ISO = "2026-09-07"; // promo text removed from docs 2026-09-08 (was 2026-09-30)
-
-export function isPromoActive(now = new Date()): boolean {
-  return now <= new Date(PROMO_SUNSET_ISO + "T23:59:59Z");
-}
 
 /**
  * Peak window in UTC hours. 14:00–18:00 UTC+8 → 06:00–10:00 UTC.
  * Berlin operator works outside 08:00–12:00 local (= peak), so this is usually moot,
- * but L3 may consult it to downshift architecture→4.7 if a dispatch lands in peak.
+ * but L3 may consult it to downshift to a flash tier if a dispatch lands in peak.
  * REVISED 2026-09-11 (dashboard): the 3×-flagship/1.2×-flash peak multipliers DO apply on
  * V2 Max (usage-reference table) — keep this helper live; prefer flash tiers inside the
  * window for bulk work regardless of the old 'dedicated resources' assumption.
@@ -552,18 +543,15 @@ export function buildFallbackChain(
 export interface TierStatus extends TierEntry {
   category: TaskCategory;
   available: boolean;
-  promoAffected: boolean; // promo-susceptible flagships (5.3/5-turbo; 5.3 multiplier status unverified)
 }
 
 export function listTiers(registry: ModelRegistryLike): TierStatus[] {
-  const promoModels = new Set(["glm-5.3", "glm-5-turbo"]);
   return (Object.keys(TIERS) as TaskCategory[]).map((category) => {
     const e = TIERS[category];
     return {
       ...e,
       category,
       available: !!registry.find(e.provider, e.id),
-      promoAffected: promoModels.has(e.id),
     };
   });
 }

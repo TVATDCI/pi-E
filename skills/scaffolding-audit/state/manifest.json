@@ -1,13 +1,13 @@
 {
-  "recorded-at": "2026-09-28T23:59:23.945Z",
+  "recorded-at": "2026-09-29T11:51:45.541Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "a864825c1a331cb40d507cf3ee43849b20a3d5e1"
+    "~/.pi/agent": "eab9c8cb0615f3bc61092d4e6be39cdc7fe6eed5"
   },
   "model-state": {
     "source": {
       "path": "extensions/orchestration-engine/tier-map.ts",
-      "sha256": "b73e76cbecefe351fdcc2a77cc4dd2829c937f6fe032b67da0f99709021135e7"
+      "sha256": "93fc4b6f9d0104f0f7a3c2ab69f058467b3de52307cb91175eba44aa08fa8294"
     },
     "assignments": {
       "quick": {
@@ -134,17 +134,8 @@
     "fb88a7adc2d0c28b",
     "01563e41a5fd9ba2",
     "1158b13d2f04f343",
-    "859401188b0c10c4",
-    "5f1fe023fbb67d3c",
-    "5f1fe023fbb67d3c",
-    "96ac335d58bc2331",
-    "c4440dffaa3a0b65",
-    "8426669d47a919a8",
-    "18b7cd50ac504f1a",
-    "2de42e3f3430c071",
-    "ff3c00a428650e6d",
-    "ac7633202dc3557d",
-    "2e942811a91f6efe",
+    "c3596877e47ac93a",
+    "3da70164b5e7f713",
     "0f1a8a7d5f537190"
   ]
 }

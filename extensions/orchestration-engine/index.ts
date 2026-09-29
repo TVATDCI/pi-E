@@ -9,7 +9,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
-import { isPeakHours, isPromoActive, TIERS, READ_ONLY_CATEGORIES, tierEntryFor, type TaskCategory } from "./tier-map.ts";
+import { isPeakHours, TIERS, READ_ONLY_CATEGORIES, tierEntryFor, type TaskCategory } from "./tier-map.ts";
 import { aggregateDispatchLog, quotaMarker, type DispatchLogEntry } from "./routing-stats.ts";
 import { resolveAndSpawn, loadPersona, sessionKey } from "./spawn.ts";
 import { OPERATOR_ONLY_MARKER, guardOperatorOnlyAutoPath } from "./dispatch-guard.ts";
@@ -574,7 +574,7 @@ export default function (pi: ExtensionAPI) {
           }
         }
       }
-      const stats = aggregateDispatchLog(entries, { peak: isPeakHours(), promo: isPromoActive() });
+      const stats = aggregateDispatchLog(entries, { peak: isPeakHours() });
       const scope = `${sessionCount} session${sessionCount === 1 ? "" : "s"} scanned (cwd-scoped)`;
       // D1 observer (partial-revert v1.3): surface prompt-composition drift hashes.
       const uniqueDrift = [...new Set(driftHashes)];
@@ -610,21 +610,20 @@ export default function (pi: ExtensionAPI) {
         return available.some((m) => m.provider === mf.slice(0, sep) && m.id === mf.slice(sep + 1));
       };
       const peak = isPeakHours();
-      const promo = isPromoActive();
       const pad = (s: unknown, w: number) => {
         const t = String(s ?? "");
         return (t.length > w ? t.slice(0, Math.max(1, w - 1)) + "…" : t).padEnd(w);
       };
       const lines = [
         `/tiers · 12 categories · availability = key configured (getAvailable)`,
-        `peak=${peak} · promo=${promo}`,
+        `peak=${peak} · promo ended 2026-09-07`,
         "",
         pad("category", 20) + pad("model", 26) + pad("think", 7) + pad("quota", 6) + "avail",
       ];
       for (const [cat, entry] of Object.entries(TIERS)) {
         const mf = `${entry.provider}/${entry.id}`;
         const av = isAvail(mf) ? "✓ yes" : "✗ NO KEY";
-        lines.push(pad(cat, 20) + pad(mf, 26) + pad(entry.thinkingLevel ?? "off", 7) + pad(quotaMarker(mf, peak, promo), 6) + av);
+        lines.push(pad(cat, 20) + pad(mf, 26) + pad(entry.thinkingLevel ?? "off", 7) + pad(quotaMarker(mf, peak), 6) + av);
       }
       const table = lines.join("\n");
       if (ctx.hasUI) {

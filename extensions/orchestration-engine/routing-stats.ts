@@ -42,16 +42,17 @@ function fmtMs(v: number | null): string {
   return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`;
 }
 
-/** Quota marker for the per-model view. zai: 1×/2×/3× promo math; opencode/opencode-go:
- *  external — "FREE" only for *-free ids, "ext" for funded (opencode-go is monthly-capped). */
-export function quotaMarker(modelFlag: string | undefined, peak: boolean, promo: boolean): string {
+/** Quota marker for the per-model view. zai: 2×/3× peak math — the off-peak promo
+ *  (1×) ended 2026-09-07 and is retired; opencode/opencode-go: external — "FREE" only
+ *  for *-free ids, "ext" for funded (opencode-go is monthly-capped). */
+export function quotaMarker(modelFlag: string | undefined, peak: boolean): string {
   if (!modelFlag) return "?";
   if (modelFlag.startsWith("opencode/")) {
     return /-free$/.test(modelFlag.split("/")[1] ?? "") ? "FREE" : "ext";
   }
   if (modelFlag.startsWith("opencode-go/")) return "ext";
   const id = modelFlag.split("/")[1] ?? "";
-  if (id === "glm-5.2" || id === "glm-5-turbo") return peak ? "3×" : promo ? "1×" : "2×";
+  if (id === "glm-5.2" || id === "glm-5-turbo") return peak ? "3×" : "2×";
   return "1×";
 }
 
@@ -72,7 +73,7 @@ function group<K extends string>(entries: DispatchLogEntry[], key: (e: DispatchL
  */
 export function aggregateDispatchLog(
   entries: DispatchLogEntry[],
-  opts: { peak: boolean; promo: boolean },
+  opts: { peak: boolean },
 ): RoutingStats {
   const n = entries.length;
   // F6 (Edit 7): count `timeout` as a failure (a hung model IS a routing problem) but NOT `aborted`
@@ -137,7 +138,7 @@ export function aggregateDispatchLog(
         pad(pctStr(f, es.length), 6) +
         pad(fmtMs(pctNum(ms, 50)), 8) +
         pad(fmtMs(pctNum(ms, 95)), 8) +
-        pad(quotaMarker(m, opts.peak, opts.promo), 6),
+        pad(quotaMarker(m, opts.peak), 6),
     );
   }
 
