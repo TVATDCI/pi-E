@@ -1,6 +1,6 @@
 ---
 name: git-worktree
-description: Use git worktrees to run multiple coding agents in parallel on one repo without collisions. Use when starting a task in a shared repo, when the operator says "worktree", "parallel agents", "one worktree per task", or when agents keep overwriting each other's changes. Do NOT use for ordinary branching in one checkout, or for herdr pane layout questions (that's herdr's own worktree command group — this skill is the parallel-agent discipline).
+description: Use git worktrees to run multiple coding agents in parallel on one repo without collisions. Use when starting a task in a shared repo, when the operator says "worktree", "parallel agents", "one worktree per task", or when agents keep overwriting each other's changes. Do NOT use for ordinary branching in one checkout, or for herdr pane layout questions (that's herdr's own worktree command group — this skill is the parallel-agent discipline). Do NOT use when running as a firstmate-spawned crewmate — worktree administration belongs to the firstmate supervisor; crewmates work inside the worktree they were given.
 ---
 
 # Git Worktrees for Parallel Agents
