@@ -15,6 +15,12 @@
 //       no free-text dialog. (sis-verdict-v0.1 amendments 1-3.)
 //   (10) file offer DECLINED → falls through to the free-text prompt, nothing adopted.
 //   (11) PI_PURPOSE_FILE set but unreadable → transient warning, fall-through, no entry.
+//   (13) RELOAD RACE BELT (ship-006): record holds a purpose, module var fresh-empty (fresh
+//        ext() closure = post-/reload state), input races ahead of session_start → the gate
+//        re-reads the record and PASSES the first input (no warning, no swallowed message),
+//        re-renders the widget, and appends NOTHING (persistence format unchanged).
+//   (14) belt negative control: record's LATEST entry is a CLEAR (text null) → belt finds
+//        no purpose → gate still warns + handled (a cleared purpose stays authoritative).
 //
 // Harness: drives the real extension module (default export) against a stub ExtensionAPI
 // (on/registerCommand/appendEntry captured) and a stub ExtensionContext (mode/hasUI/
@@ -321,6 +327,38 @@ const setFileEnv = (v: string | undefined) => {
   await flush();
   const p3 = lastPurpose(h3);
   check("(12) control: plain task answer still adopted", typeof p3?.text === "string" && (p3.text as string).includes("login bug"));
+}
+
+// --- (13) RELOAD RACE BELT: record intact + closure var empty (post-/reload) → first input PASSES ---
+// The race: /reload re-imports the module (fresh ext() closure → `purpose` undefined) while
+// the session record still holds the purpose; an input landing before session_start's
+// reconstruct() used to warn AND return handled — one swallowed message. Harness shape IS
+// the race: no session_start fired, entries pre-seeded, fresh closure.
+{
+  setEnv(undefined);
+  const h = harness({ mode: "tui", hasUI: true, existing: [{ text: "Fix the purpose-gate reload race" }] });
+  const res = (await h.fire("input")) as { action: string };
+  check("(13) belt: first input PASSES (continue), not swallowed", res.action === "continue");
+  check("(13) belt: NO gate warning", !h.calls.notify.some(([m]) => m === "Set a purpose first: /purpose <text> or /purpose file"));
+  check("(13) belt: restored purpose matches the record (readPurpose)", readPurpose(h.ctx) === "Fix the purpose-gate reload race");
+  check("(13) belt: no dialog fired (input passed straight through)", h.calls.input.length === 0);
+  check("(13) belt: no new entry appended (restore is assign-only)", h.entries.length === 1);
+  check("(13) belt: widget re-rendered on restore", h.calls.setWidget === 1);
+  // second input passes too — the belt leaves normal operation untouched
+  const res2 = (await h.fire("input")) as { action: string };
+  check("(13) belt: second input still passes", res2.action === "continue");
+  setEnv(ORIG_ENV);
+}
+
+// --- (14) belt negative control: CLEARED purpose in record → gate still blocks ---
+// A cleared purpose is authoritative unset (pinned in (6)) — the belt must not resurrect it.
+{
+  setEnv(undefined);
+  const h = harness({ mode: "tui", hasUI: true, existing: [{ text: "old purpose" }, { text: null }] });
+  const res = (await h.fire("input")) as { action: string };
+  check("(14) belt+cleared: still handled (no resurrect)", res.action === "handled");
+  check("(14) belt+cleared: gate warning still fires", h.calls.notify.some(([m, k]) => m === "Set a purpose first: /purpose <text> or /purpose file" && k === "warning"));
+  setEnv(ORIG_ENV);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
