@@ -38,6 +38,16 @@
 //   absent files behave as no offer, with a transient notice when the env var was set.
 //   `/purpose file [<path>]` (path defaults to $PI_PURPOSE_FILE) is the manual setter in
 //   any mode with a UI.
+//
+// RECONSTRUCT-ON-INPUT BELT (2026-10-01, ship-006 — the /reload race):
+//   /reload re-imports this module, so the closure `purpose` starts empty; session_start's
+//   reconstruct() restores it from the session record, but an input landing BEFORE that
+//   restore saw the empty var — the gate warned AND returned handled, swallowing one message
+//   even though the record held an intact purpose (TUI-only: crews set purpose via the
+//   /purpose first-input command path, rpc adopts env before the check — both untouched).
+//   Belt: the input gate re-reads the record (reconstruct → readPurpose, fresh each call)
+//   BEFORE deciding, mirroring the env-adoption belt already in the handler. Restore is
+//   assign-only — no appendEntry, the persistence format is untouched.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, realpathSync, statSync } from "node:fs";
@@ -272,9 +282,18 @@ export default function (pi: ExtensionAPI) {
   // LR-0017: in print mode there's no user to set a purpose → bypass (avoid swallowing every prompt).
   // Env adoption sits BEFORE the !purpose check (belt-and-braces: if session_start didn't
   // adopt, the first rpc prompt still adopts instead of being blocked).
+  // Reconstruct-on-input belt (header, ship-006): an empty var is NOT evidence of an unset
+  // purpose after /reload — re-read the session record first, so the gate decides from the
+  // record rather than a stale closure. No await between restore and check (same sync-gap
+  // discipline as the env belt); a restored purpose re-renders the widget (correct display
+  // only — no commit, no appendEntry, persistence format unchanged).
   pi.on("input", async (_event, ctx) => {
     if (!ctx.hasUI) return { action: "continue" as const };
     tryAdoptPurposeFromEnv(ctx);
+    if (!purpose) {
+      reconstruct(ctx); // belt: the record is authoritative, the closure var may lag /reload
+      if (purpose) renderWidget(ctx);
+    }
     if (!purpose) {
       ctx.ui.notify("Set a purpose first: /purpose <text> or /purpose file", "warning");
       return { action: "handled" as const };
