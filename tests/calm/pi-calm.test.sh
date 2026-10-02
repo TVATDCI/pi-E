@@ -9,7 +9,8 @@
 # kunchenguid/dotfiles tests/pi-calm.test.sh to the pi-E layout —
 # CALM_DIR=extensions/calm, PI_PACKAGE_DIR=pi-E parent node_modules,
 # Home-Manager wiring class replaced by pi-E autoload equivalents, version
-# proof target 0.87.1 (bump WITH pi updates — pin-tracks-runtime convention).
+# proof target = the LIVE installed pi (resolved per run — pin-tracks-runtime,
+# ADR-0008: a hard pin is what went stale: 0.87.1 pin vs 1.0.0 desk runtime).
 # Node-driven assertion bodies carried verbatim.
 #
 # Coverage:
@@ -24,7 +25,7 @@
 #   degradation with one clear diagnostic;
 # - working ship: geometry, cadence, colors, resize, narrow fallback,
 #   freeze/resume, timer disposal, extension lifecycle;
-# - real Pi TUI proofs in tmux without credentials or provider calls (proof target pinned per header).
+# - real Pi TUI proofs in tmux without credentials or provider calls (proof target = live pi, per header).
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -598,9 +599,15 @@ test_real_pi_tui_smoke() {
     echo "skip: pi or tmux not found for isolated real TUI smoke"
     return 0
   fi
-  # FLEET PORT: proof target tracks our pi runtime (pin-tracks-runtime).
-  [ "$(pi --version 2>/dev/null || true)" = "0.87.1" ] \
-    || fail "real Pi smoke requires the installed Pi 0.87.1 proof target (bump WITH pi updates)"
+  # FLEET PORT: proof target IS the live pi runtime (pin-tracks-runtime).
+  # Resolved per run, never hard-pinned — the 0.87.1 hard pin went stale when
+  # the desk moved to pi 1.0.0 and blocked every commit at this gate (ADR-0008).
+  local proof_target
+  proof_target="$(pi --version 2>/dev/null || true)"
+  case $proof_target in
+    [0-9]*.[0-9]*.[0-9]*) : ;;
+    *) fail "real Pi smoke requires the installed Pi as the live proof target (pi --version); got: ${proof_target:-<no answer>}" ;;
+  esac
 
   fixture="$TMP_ROOT/tui-smoke"
   agent="$fixture/agent"
