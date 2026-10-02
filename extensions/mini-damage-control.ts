@@ -133,7 +133,7 @@ class SafetyConfirmDialog implements Component {
     this.timer = setInterval(() => {
       this.remainingSec -= 1;
       this.tui.requestRender();
-      if (this.remainingSec <= 0) this.finish(undefined); // timeout → block
+      if (this.remainingSec <= 0) this.finish("timeout"); // unanswered window → "timeout" (park, distinct from deny)
     }, 1000);
   }
 
@@ -394,6 +394,7 @@ export default function (pi: ExtensionAPI) {
 
     if (!violation) return { block: false };
 
+    let dialogTimedOut = false; // unanswered 180s window ≠ explicit deny (parked-resume wording below)
     if (ask && !isHeadless(ctx.mode)) {
       // Custom overlay confirm (Path B, 2026-07-10): loud + theme-independent; safe default = No.
       // Replaces the built-in ctx.ui.select (which inherited encom's teal border and blended in).
@@ -404,7 +405,7 @@ export default function (pi: ExtensionAPI) {
           (tui, _theme, _kb, done) =>
             new SafetyConfirmDialog({
               violation,
-              timeoutMs: 60000,
+              timeoutMs: 180000,
               tui,
               onResult: done,
             }),
@@ -419,6 +420,7 @@ export default function (pi: ExtensionAPI) {
           },
         );
         if (choice === "proceed") return { block: false };
+        dialogTimedOut = choice === "timeout";
       } catch (e) {
         ctx.ui.notify(`🛡️ mini-dc dialog error: ${String(e)}`, "error");
       }
@@ -440,7 +442,13 @@ export default function (pi: ExtensionAPI) {
       return { block: true, reason: headlessReason(violation, !!ask) };
     }
 
-    const reason = `🛑 BLOCKED by mini-dc: ${violation}. DO NOT work around this — tell the user.`;
+    const reason = dialogTimedOut
+      ? (
+          `🛑 BLOCKED by mini-dc (parked): ${violation}. ` +
+          `No answer within 180s — this is a park, not a denial: ` +
+          `surface a reminder to the user, then re-attempt the same action to raise the confirm again.`
+        )
+      : `🛑 BLOCKED by mini-dc: ${violation}. DO NOT work around this — tell the user.`;
     if (mode === "abort") {
       ctx.abort();
       return { block: true, reason };
