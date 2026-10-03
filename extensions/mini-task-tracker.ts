@@ -50,9 +50,9 @@ export default function (pi: ExtensionAPI) {
       invalidate() {},
       render(width: number): string[] {
         if (tasks.length === 0)
-          return [theme.fg("muted", "📋 no tasks — use the task tool to add some")];
+          return [theme.fg("muted", "📌 no tasks — use the task tool to add some")];
         const done = tasks.filter((t) => t.status === "done").length;
-        const header = theme.fg("accent", `📋 tasks [${done}/${tasks.length}]`);
+        const header = theme.fg("accent", `📌 tasks [${done}/${tasks.length}]`);
         // Compact: show pending work only (done is collapsed into the count).
         // in-progress first, then idle; cap rows so the widget never grows tall.
         const pending = tasks
