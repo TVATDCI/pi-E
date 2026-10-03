@@ -72,3 +72,6 @@ themes/omarchy-system.json
 # Pi Calm preference state file (runtime, never committed — suite-enforced)
 /calm
 mcp.json
+
+# pi runtime trust store (machine-local, never committed)
+trust.json
