@@ -34,7 +34,7 @@ export default function (pi: ExtensionAPI) {
               truncateToWidth(
                 theme.fg(
                   "muted",
-                  "📓 session-notes: empty — /note <text> or the add_note tool",
+                  "⚓ session-notes: empty — /note <text> or the add_note tool",
                 ),
                 width,
               ),
@@ -42,7 +42,7 @@ export default function (pi: ExtensionAPI) {
           }
           return [
             truncateToWidth(
-              theme.fg("accent", `📓 session-notes (${notes.length})`),
+              theme.fg("accent", `⚓ session-notes (${notes.length})`),
               width,
             ),
             ...notes.map((n) =>
