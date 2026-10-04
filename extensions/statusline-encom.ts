@@ -112,7 +112,7 @@
 //   marker is low-signal; render-scheduler/layout-cache — pi already coalesces.)
 
 // ── V11 (built 2026-09-18) — backpass-watch tripwire segment ────────────────────
-//   Reads ~/operator/.backpass/watch-state.json ({ lastApplied: "YYYY-MM-DD" }) fresh
+//   Reads ~/.pi/agent/.backpass/watch-state.json ({ lastApplied: "YYYY-MM-DD" }) fresh
 //   each render (trivial sync read; no timers/watchers/loadtime side effects — ADR-0011).
 //   silent (>7d out) → hidden · countdown → ⚡bp:Nd muted · due → ⚡bp:DUE warning ·
 //   missing/invalid → ⚡bp:? muted (fail-open, visible). Pure core: lib/backpass-watch.ts.
@@ -583,7 +583,7 @@ const bridgeSegment: SegmentDef = {
 function readBackpassState(): BackpassState {
   let raw: string;
   try {
-    raw = readFileSync(path.join(os.homedir(), "operator", ".backpass", "watch-state.json"), "utf8");
+    raw = readFileSync(path.join(os.homedir(), ".pi", "agent", ".backpass", "watch-state.json"), "utf8");
   } catch {
     return { kind: "unknown" }; // missing file (or unreadable) → visible ?
   }

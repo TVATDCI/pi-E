@@ -75,3 +75,5 @@ mcp.json
 
 # pi runtime trust store (machine-local, never committed)
 trust.json
+.backpassrc.json
+.backpass/
