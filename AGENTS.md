@@ -84,6 +84,13 @@ Sub-agents (dispatch) and the task tool ARE live via extensions. Treat **every d
 
 Use non-interactive flags for anything that could prompt: `cp -f`, `mv -f`, `rm -f`, `ssh -o BatchMode=yes`, `scp -o BatchMode=yes`, `apt-get -y`, `HOMEBREW_NO_AUTO_UPDATE=1`. Validate source/target paths (existence, scope, intended destination) before destructive moves.
 
+## Firstmate era (2026-10 — labeled for retirement by a future pass)
+
+- **Routing:** project execution goes through firstmate (~/firstmate, ADR-0009) — crews, worktrees, PRs, supervision. Console pi = daily driver + captain-level system thinker. Firstmate owns the loop; console owns the rulings; fleet gates judge; the captain rules everything.
+- **Ask-first:** when not sure about any surface of this stack — search the source, ask the captain, or ask the console — **never assume and implement**.
+- **Comms:** three-party — captain through firstmate; firstmate may ask console anything; rulings/doctrine = captain only.
+- **Writes:** pushes are the captain's word alone (statement of intent ≠ order; full-sync orders carry push authorization). Cross-desk agent writes = receipt + md5 + pane kick in the same turn. pi never writes bd / ~/.pi (foreign) / ~/.sisyphus / Main-vault.
+
 ## Session continuity
 
 On `continue` / `where was I` / `pick up`: read the active section of `memory.md` and check recent context (`/session`, `pi -c`). The structured store (`memory/store.jsonl`) is auto-injected each turn — no manual read needed. State recovered status plainly; if nothing is recoverable, say so explicitly — never invent prior progress.
