@@ -243,12 +243,13 @@ check("every teams.yaml member file exists (renames followed through)", memberFi
 console.log("T6 — Docs sync");
 const readme = readFileSync(join(ROOT, "README.md"), "utf-8");
 const agentsMd = readFileSync(join(ROOT, "AGENTS.md"), "utf-8");
+const modelTiersSkill = readFileSync(join(ROOT, "skills", "model-tiers", "SKILL.md"), "utf-8");
 const indexTs = readFileSync(join(ROOT, "extensions/orchestration-engine/index.ts"), "utf-8");
 check("README category table carries the security-review row with the tier-map model", readme.includes("| `security-review`    | zai-coding-cn/glm-5.3"));
 check("README category table carries the local-research row with the tier-map model", readme.includes("| `local-research`     | zai-coding-cn/glm-5.3-flash"));
 check("README rows name the new default seats (security-reviewer / home-keeper)", readme.includes("| security-reviewer |") && readme.includes("| home-keeper"));
-check("AGENTS.md strong-model line swapped to security-review→security-reviewer", agentsMd.includes("`security-review`\u2192security-reviewer") && !agentsMd.includes("reviewer-security"));
-check("AGENTS.md notes the glm-family-only security-review chain", agentsMd.includes("glm-family-only"));
+check("AGENTS.md strong-model line swapped to security-review→security-reviewer (AGENTS.md or model-tiers skill)", (agentsMd.includes("`security-review`\u2192security-reviewer") || modelTiersSkill.includes("`security-review`\u2192security-reviewer")) && !agentsMd.includes("reviewer-security"));
+check("AGENTS.md notes the glm-family-only security-review chain (AGENTS.md or model-tiers skill)", agentsMd.includes("glm-family-only") || modelTiersSkill.includes("glm-family-only"));
 check("dispatch description lists both categories, local-research marked OPERATOR-ONLY", indexTs.includes("security-review: deep read-only security gate") && indexTs.includes("local-research: OPERATOR-ONLY vehicle"));
 check("dispatch tool schema accepts the new categories (CategoryEnum literals)", indexTs.includes('Type.Literal("security-review")') && indexTs.includes('Type.Literal("local-research")'));
 check("dispatch description's default-operative line includes the new seats", indexTs.includes("security-review\u2192security-reviewer, local-research\u2192home-keeper"));
