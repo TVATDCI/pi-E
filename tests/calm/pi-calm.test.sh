@@ -126,7 +126,9 @@ test_zero_coupling_and_state_file() {
   # The upstream project name may appear only in a license attribution.
   local attribution_name="First""mate"
   # FLEET PORT: -vi — our headers carry lowercase "adapted from" attributions.
-  license_hits=$(grep -rni "$attribution_name" "$CALM_DIR" "$ROOT/README.md" 2>/dev/null | grep -vi "adapted from" || true)
+  # The tracked skill name "first""mate-era" is a repo-own skill directory, not an
+  # upstream reference — exempt the literal name (not any other occurrence).
+  license_hits=$(grep -rni "$attribution_name" "$CALM_DIR" "$ROOT/README.md" 2>/dev/null | grep -vi "adapted from" | grep -v "first""mate-era" || true)
   [ -z "$license_hits" ] || fail "unexpected upstream references outside license attribution: $license_hits"
   grep -q "MIT License" "$CALM_DIR/LICENSE" || fail "calm LICENSE lost the MIT permission text"
   grep -q "Copyright (c) 2026 Kun Chen" "$CALM_DIR/LICENSE" || fail "calm LICENSE lost the copyright notice"
