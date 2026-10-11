@@ -83,7 +83,7 @@ jobs:
 
       - name: Tier 2.3 — README skill-count consistency (drift guard)
         run: |
-          ACTUAL=$(ls -d skills/*/ | wc -l)
+          ACTUAL=$(find skills -mindepth 1 -maxdepth 1 -type d | wc -l)
           CLAIMED=$(grep -oE '[0-9]+ pi-native skills in' README.md | grep -oE '[0-9]+' | head -1)
           LISTED=$(grep -oE '# [0-9]+ pi-native skills' README.md | grep -oE '[0-9]+' | head -1)
           echo "actual dirs: $ACTUAL | table row: $CLAIMED | tree listing: $LISTED"
