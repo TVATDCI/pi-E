@@ -331,6 +331,12 @@ export default function register(pi: ExtensionAPI): void {
   // prompt every turn. Composes from the getter (never a cached base) so
   // prompt-coordinator and this gate chain correctly in any discovery order.
   pi.on("before_agent_start", async (event) => {
+    // pi 1.2.0 tolerates machine-triggered runs (pi.sendMessage triggerTurn): they fire this
+    // hook with a non-"user" messageType and no prompt. Tripwire composition is for
+    // operator-typed prompts only. 1.1.0's types don't declare messageType — narrow cast keeps
+    // tsc clean; field absent on 1.1.0 events, so the guard is a no-op there.
+    const messageType = (event as { messageType?: string }).messageType;
+    if (messageType && messageType !== "user") return;
     if (current.status !== "hazard") return;
     return { systemPrompt: event.systemPrompt + "\n\n" + formatHazardBlock(current) };
   });
