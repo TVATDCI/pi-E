@@ -193,6 +193,12 @@ export default function (pi: ExtensionAPI) {
   // SOLE before_agent_start registrant. The five former injectors are now libraries exporting
   // pure producers; none registers this hook anymore.
   pi.on("before_agent_start", async (event, ctx) => {
+    // pi 1.2.0 tolerates machine-triggered runs (pi.sendMessage triggerTurn): they fire this
+    // hook with a non-"user" messageType and no prompt. Bridge/prompt composition is for
+    // operator-typed prompts only. 1.1.0's types don't declare messageType — narrow cast keeps
+    // tsc clean; field absent on 1.1.0 events, so the guard is a no-op there.
+    const messageType = (event as { messageType?: string }).messageType;
+    if (messageType && messageType !== "user") return;
     try {
       let prompt = event.systemPrompt;
 
