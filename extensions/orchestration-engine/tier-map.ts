@@ -46,7 +46,7 @@
  *
  * ─── STRONG-MODEL-AT-JUDGING INVARIANT ──────────────────────────────────────
  * unspecified-high / deep / ultrabrain / security-review: primaries, per-tier fallbacks AND the
- * global FALLBACK tail land ONLY on strong-tier flagships (glm-5.x · kimi · grok-4.6 ·
+ * global FALLBACK tail land ONLY on strong-tier flagships (glm-5.x · kimi · grok-4.7 ·
  * qwen3.8-max · gpt-5.6-luna) — never FREE/cheap (deepseek-v4-flash-free, ling-*-flash-free,
  * minimax-m2.7). security-review's per-tier chain is additionally glm-family-ONLY (sis plan
  * 2026-09-18 C2). One cheap-model review in a fan-out cascades untraceably. AGENTS.md "Model
@@ -236,7 +236,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   },
   ultrabrain: {
     provider: "opencode-go",
-    id: "grok-4.6",
+    id: "grok-4.7",
     fallbackModels: [
       { provider: "opencode-go", id: "kimi-k3" },
       { provider: "opencode-go", id: "qwen3.8-max" },
@@ -245,7 +245,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     ],
     thinkingLevel: "xhigh",
     rationale:
-      "Hardest logic; opencode-go/grok-4.6 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code (last rung replaced 2026-09-18).",
+      "Hardest logic; opencode-go/grok-4.7 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code (last rung replaced 2026-09-18).",
   },
   writing: {
     provider: "zai-coding-cn",
@@ -276,13 +276,13 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     id: "minimax-m3",
     fallbackModels: [
       { provider: "opencode-go", id: "qwen3.8-max" },
-      { provider: "opencode-go", id: "grok-4.6" },
+      { provider: "opencode-go", id: "grok-4.7" },
       { provider: "zai-coding-cn", id: "glm-5.3" },
       { provider: "zai-coding-cn", id: "glm-5.3-flash" },
     ],
     thinkingLevel: "high",
     rationale:
-      "Creative/design; opencode-go/minimax-m3 (multimodal judgment). Fallbacks: opencode-go/qwen3.8-max → opencode-go/grok-4.6 → zai/glm-5.3 → zai/glm-5.3-flash (multimodal).",
+      "Creative/design; opencode-go/minimax-m3 (multimodal judgment). Fallbacks: opencode-go/qwen3.8-max → opencode-go/grok-4.7 → zai/glm-5.3 → zai/glm-5.3-flash (multimodal).",
   },
   research: {
     provider: "zai-coding-cn",

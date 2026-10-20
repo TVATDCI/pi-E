@@ -79,10 +79,10 @@ const SNAPSHOT: Record<string, { flag: string; think?: string; fbs: string[]; ag
   "unspecified-low": { flag: "zai-coding-cn/glm-5.3-flash", think: "off", fbs: ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash"], agent: "trinity" },
   "unspecified-high": { flag: "zai-coding-cn/glm-5.3", think: "high", fbs: ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code", "opencode/glm-5.2"], agent: "trinity" },
   deep: { flag: "zai-coding-cn/glm-5.3", think: "max", fbs: ["opencode-go/glm-5.2", "opencode/glm-5.2"], agent: "morpheus" },
-  ultrabrain: { flag: "opencode-go/grok-4.6", think: "xhigh", fbs: ["opencode-go/kimi-k3", "opencode-go/qwen3.8-max", "zai-coding-cn/glm-5.3", "opencode/kimi-k2.7-code"], agent: "neo" },
+  ultrabrain: { flag: "opencode-go/grok-4.7", think: "xhigh", fbs: ["opencode-go/kimi-k3", "opencode-go/qwen3.8-max", "zai-coding-cn/glm-5.3", "opencode/kimi-k2.7-code"], agent: "neo" },
   writing: { flag: "zai-coding-cn/glm-5.3-flash", think: "medium", fbs: ["opencode-go/gpt-5.6-luna", "opencode/gpt-5.6-luna", "opencode/deepseek-v4-flash"], agent: "mouse" },
   "visual-engineering": { flag: "zai-coding-cn/glm-5.3-flash", think: "high", fbs: ["opencode-go/minimax-m3", "opencode-go/qwen3.6-plus", "opencode/glm-5.1"], agent: "architect" },
-  artistry: { flag: "opencode-go/minimax-m3", think: "high", fbs: ["opencode-go/qwen3.8-max", "opencode-go/grok-4.6", "zai-coding-cn/glm-5.3", "zai-coding-cn/glm-5.3-flash"], agent: "architect" },
+  artistry: { flag: "opencode-go/minimax-m3", think: "high", fbs: ["opencode-go/qwen3.8-max", "opencode-go/grok-4.7", "zai-coding-cn/glm-5.3", "zai-coding-cn/glm-5.3-flash"], agent: "architect" },
   research: { flag: "zai-coding-cn/glm-5.3-flash", think: "medium", fbs: ["opencode-go/glm-5.3-flash", "opencode/gpt-5.6-luna"], agent: "researcher" },
   "git-commit-message": { flag: "zai-coding-cn/glm-5.3-flash", think: "off", fbs: ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash", "opencode/ling-3.0-flash-fin-free"], agent: "seraph" },
 };
