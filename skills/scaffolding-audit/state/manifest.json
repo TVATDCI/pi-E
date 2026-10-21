@@ -1,13 +1,13 @@
 {
-  "recorded-at": "2026-09-29T16:08:13.157Z",
+  "recorded-at": "2026-10-21T00:44:42.514Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "727861769e5ca5baf6438613bf7ee3b7feb11593"
+    "~/.pi/agent": "f9d9946b47215b0e0e8f23f5609c6b04ab1680f4"
   },
   "model-state": {
     "source": {
       "path": "extensions/orchestration-engine/tier-map.ts",
-      "sha256": "93fc4b6f9d0104f0f7a3c2ab69f058467b3de52307cb91175eba44aa08fa8294"
+      "sha256": "ba0922de00726c85aec096e39ed6aa798f773bbcd080a16886a4c37d254a1f48"
     },
     "assignments": {
       "quick": {
@@ -41,7 +41,7 @@
         ]
       },
       "ultrabrain": {
-        "primary": "opencode-go/grok-4.6",
+        "primary": "opencode-go/grok-4.7",
         "fallbacks": [
           "opencode-go/kimi-k3",
           "opencode-go/qwen3.8-max",
@@ -69,7 +69,7 @@
         "primary": "opencode-go/minimax-m3",
         "fallbacks": [
           "opencode-go/qwen3.8-max",
-          "opencode-go/grok-4.6",
+          "opencode-go/grok-4.7",
           "zai-coding-cn/glm-5.3",
           "zai-coding-cn/glm-5.3-flash"
         ]
