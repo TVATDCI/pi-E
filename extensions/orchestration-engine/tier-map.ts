@@ -299,12 +299,14 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
       "Web/docs/package research; opencode/glm-5.3-flash @medium via the keyless composite search (Wikipedia+DDG+npm+GitHub; general free-text web = known gap). Fallbacks: opencode-go/glm-5.3-flash → opencode/gpt-5.6-luna.",
   },
   "git-commit-message": {
-    provider: "zai-coding-cn",
-    id: "glm-5.3-flash",
+    provider: "opencode",
+    id: "glm-5.3-flash-free",
     fallbackModels: [
+      { provider: "opencode", id: "deepseek-v4.1-flash-free" },
+      { provider: "opencode", id: "minimax-m3.1-flash-free" },
       { provider: "opencode-go", id: "gpt-5.6-luna" },
-      { provider: "opencode", id: "glm-5.3-flash" },
-      { provider: "opencode", id: "ling-3.0-flash-fin-free" },
+      { provider: "opencode", id: "gpt-5.6-luna" },
+      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 6 },
@@ -324,15 +326,15 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
       "Deep read-only security review gate; zai/glm-5.3 @high (audit-class reasoning effort). Fallbacks: deep's chain mirrored at implementation time (2026-09-18) and pruned to glm-family STRONG entries only — opencode-go/glm-5.2 → opencode/glm-5.2. Zero flash, zero non-glm in the per-tier chain (the strong-tier global tail still applies — luna is strong, not cheap). Tools category-pinned to read,grep,find,ls (TOOL_PINNED_CATEGORIES).",
   },
   "local-research": {
-    provider: "zai-coding-cn",
-    id: "glm-5.3-flash",
+    provider: "opencode",
+    id: "glm-5.3-flash-free",
     fallbackModels: [
       { provider: "opencode-go", id: "glm-5.3-flash" },
-      { provider: "opencode", id: "glm-5.3-flash" },
+      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
     ],
     thinkingLevel: "off",
     rationale:
-      "Really-local synthesis + housekeeping — retrieval/collation of EXISTING local text (pattern-matching, not judgment; no verdicts rendered); zai/glm-5.3-flash quick-shaped (@off; no turnBudget — mutation category, conservative budget policy would warn). Fallbacks: glm flash-family ONLY — opencode-go/glm-5.3-flash → opencode/glm-5.3-flash; the global FALLBACK tail is SUPPRESSED (FAMILY_LOCKED_CATEGORIES) and total family exhaustion is a DISTINCT loud error (familyExhaustedMessage) — never a silent strong-for-flash substitution. OPERATOR-ONLY vehicle: dispatch-guard.ts bounces the auto path without the operator dispatch marker; explicit agent=home-keeper stays legal.",
+      "Really-local synthesis + housekeeping — retrieval/collation of EXISTING local text (pattern-matching, not judgment; no verdicts rendered); opencode/glm-5.3-flash-free quick-shaped (@off; no turnBudget — mutation category, conservative budget policy would warn). Fallbacks: glm flash-family ONLY — opencode-go/glm-5.3-flash → zai-coding-cn/glm-5.3-flash; the global FALLBACK tail is SUPPRESSED (FAMILY_LOCKED_CATEGORIES) and total family exhaustion is a DISTINCT loud error (familyExhaustedMessage) — never a silent strong-for-flash substitution. OPERATOR-ONLY vehicle: dispatch-guard.ts bounces the auto path without the operator dispatch marker; explicit agent=home-keeper stays legal.",
   },
 };
 

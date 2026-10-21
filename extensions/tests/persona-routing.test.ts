@@ -67,8 +67,8 @@ const sr = resolveModel("security-review", registry);
 check("security-review primary = zai-coding-cn/glm-5.3 @high", sr.modelFlag === "zai-coding-cn/glm-5.3" && sr.thinkingLevel === "high" && sr.source === "tier-map");
 check("security-review per-tier fallbacks = [opencode-go/glm-5.2, opencode/glm-5.2] (deep chain pruned to glm-family strong)", JSON.stringify(sr.fallbackFlags) === JSON.stringify(["opencode-go/glm-5.2", "opencode/glm-5.2"]));
 const lr = resolveModel("local-research", registry);
-check("local-research primary = zai-coding-cn/glm-5.3-flash @off (quick-shaped)", lr.modelFlag === "zai-coding-cn/glm-5.3-flash" && lr.thinkingLevel === "off");
-check("local-research per-tier fallbacks = [opencode-go/glm-5.3-flash, opencode/glm-5.3-flash] (glm flash-family only)", JSON.stringify(lr.fallbackFlags) === JSON.stringify(["opencode-go/glm-5.3-flash", "opencode/glm-5.3-flash"]));
+check("local-research primary = opencode/glm-5.3-flash-free @off (quick-shaped)", lr.modelFlag === "opencode/glm-5.3-flash-free" && lr.thinkingLevel === "off");
+check("local-research per-tier fallbacks = [opencode-go/glm-5.3-flash, opencode/glm-5.3-flash] (glm flash-family only)", JSON.stringify(lr.fallbackFlags) === JSON.stringify(["opencode-go/glm-5.3-flash", "zai-coding-cn/glm-5.3-flash"]));
 check("default agent security-review → security-reviewer", resolveFunctionalAgent("security-review") === "security-reviewer");
 check("default agent local-research → home-keeper", resolveFunctionalAgent("local-research") === "home-keeper");
 
@@ -84,7 +84,7 @@ const SNAPSHOT: Record<string, { flag: string; think?: string; fbs: string[]; ag
   "visual-engineering": { flag: "zai-coding-cn/glm-5.3-flash", think: "high", fbs: ["opencode-go/minimax-m3", "opencode-go/qwen3.6-plus", "opencode/glm-5.1"], agent: "architect" },
   artistry: { flag: "opencode/minimax-m3.1-flash-free", think: "high", fbs: ["opencode/mimo-v2.6-flash-free", "opencode-go/qwen3.8-flash", "zai-coding-cn/glm-5.3", "zai-coding-cn/glm-5.3-flash"], agent: "architect" },
   research: { flag: "opencode/glm-5.3-flash-free", think: "medium", fbs: ["opencode-go/glm-5.3-flash", "zai-coding-cn/glm-5.3-flash", "opencode/gpt-5.6-luna"], agent: "researcher" },
-  "git-commit-message": { flag: "zai-coding-cn/glm-5.3-flash", think: "off", fbs: ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash", "opencode/ling-3.0-flash-fin-free"], agent: "seraph" },
+  "git-commit-message": { flag: "opencode/glm-5.3-flash-free", think: "off", fbs: ["opencode/deepseek-v4.1-flash-free", "opencode/minimax-m3.1-flash-free", "opencode-go/gpt-5.6-luna", "opencode/gpt-5.6-luna", "zai-coding-cn/glm-5.3-flash"], agent: "seraph" },
 };
 for (const [cat, exp] of Object.entries(SNAPSHOT)) {
   const r = resolveModel(cat, registry);
@@ -143,7 +143,7 @@ check("security-review per-tier chain is strong-only (every id matches STRONG_FL
 const lrEntry = TIERS["local-research"];
 const lrFlag = `${lrEntry.provider}/${lrEntry.id}`;
 const lrChain = [lrFlag, ...(lrEntry.fallbackModels ?? []).map((f) => `${f.provider}/${f.id}`)];
-check("local-research per-tier chain ⊆ glm flash-family (primary + every fallback)", lrChain.length > 0 && lrChain.every((mf) => /^glm-[\w.-]*flash$/.test(mf.split("/")[1])));
+check("local-research per-tier chain ⊆ glm flash-family (primary + every fallback)", lrChain.length > 0 && lrChain.every((mf) => /^glm-[\w.-]*flash(-free)?$/.test(mf.split("/")[1])));
 const GLOBAL_TAIL = `${FALLBACK.provider}/${FALLBACK.id}`;
 const lrWalk = buildFallbackChain("local-research", lrFlag, lrChain.slice(1), GLOBAL_TAIL);
 check("local-research walk SUPPRESSES the global tail (no strong-for-flash substitution surface)", !lrWalk.includes(GLOBAL_TAIL) && orderedFallbacks(lrFlag, lrChain.slice(1), GLOBAL_TAIL).includes(GLOBAL_TAIL));
