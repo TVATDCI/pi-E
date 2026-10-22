@@ -1,21 +1,21 @@
 {
-  "recorded-at": "2026-10-22T00:12:58.996Z",
+  "recorded-at": "2026-10-22T00:48:10.841Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "b805bcc37b0d10b2b425c561fd60042497d8c1a9"
+    "~/.pi/agent": "707fe68085423195ee408416dbba9a7b9be7362d"
   },
   "model-state": {
     "source": {
       "path": "extensions/orchestration-engine/tier-map.ts",
-      "sha256": "d8d5408e28cc8c17330061634ae21ca154adb7d18047ec945eeb9cb6ae8d35cb"
+      "sha256": "f11e0c452e94ef52b326b8d2d6be5e2a5d1463ef32f273f252ac1682988f833d"
     },
     "assignments": {
       "quick": {
         "primary": "zai-coding-cn/glm-5.3-flash",
         "fallbacks": [
           "opencode-go/gpt-5.6-luna",
-          "opencode/glm-5.3-flash",
-          "opencode-go/longcat-2.0"
+          "opencode-go/glm-5.3-flash",
+          "opencode/glm-5.3-flash"
         ]
       },
       "unspecified-low": {
@@ -50,12 +50,12 @@
         ]
       },
       "writing": {
-        "primary": "opencode-go/glm-5.3-flash",
+        "primary": "zai-coding-cn/glm-5.3-flash",
         "fallbacks": [
           "opencode-go/gpt-5.6-luna",
-          "zai-coding-cn/glm-5.3-flash",
-          "opencode/gpt-5.6-luna",
-          "opencode-go/deepseek-v4.1-flash"
+          "opencode-go/deepseek-v4.1-flash",
+          "opencode/glm-5.3-flash",
+          "opencode/gpt-5.6-luna"
         ]
       },
       "visual-engineering": {
@@ -71,39 +71,37 @@
         "fallbacks": [
           "opencode-go/mimo-v2.5",
           "opencode-go/qwen3.8-flash",
-          "zai-coding-cn/glm-5.3",
-          "zai-coding-cn/glm-5.3-flash"
+          "zai-coding-cn/glm-5.3-flash",
+          "opencode/glm-5.3-flash"
         ]
       },
       "research": {
-        "primary": "opencode-go/glm-5.3-flash",
+        "primary": "zai-coding-cn/glm-5.3-flash",
         "fallbacks": [
-          "zai-coding-cn/glm-5.3-flash",
+          "opencode-go/glm-5.3-flash",
           "opencode/gpt-5.6-luna"
         ]
       },
       "git-commit-message": {
-        "primary": "opencode-go/glm-5.3-flash",
+        "primary": "zai-coding-cn/glm-5.3-flash",
         "fallbacks": [
-          "opencode-go/deepseek-v4.1-flash",
-          "opencode-go/minimax-m3",
           "opencode-go/gpt-5.6-luna",
           "opencode/gpt-5.6-luna",
-          "zai-coding-cn/glm-5.3-flash"
+          "opencode/glm-5.3-flash"
         ]
       },
       "security-review": {
         "primary": "zai-coding-cn/glm-5.3",
         "fallbacks": [
-          "opencode-go/glm-5.2",
-          "opencode/glm-5.2"
+          "opencode-go/glm-5.3",
+          "opencode/glm-5.3"
         ]
       },
       "local-research": {
-        "primary": "opencode-go/glm-5.3-flash",
+        "primary": "zai-coding-cn/glm-5.3-flash",
         "fallbacks": [
           "opencode-go/glm-5.3-flash",
-          "zai-coding-cn/glm-5.3-flash"
+          "opencode/glm-5.3-flash"
         ]
       }
     },
@@ -138,7 +136,7 @@
     "01563e41a5fd9ba2",
     "1158b13d2f04f343",
     "c3596877e47ac93a",
-    "8427d8a28597b386",
+    "0f28cee026c24fe4",
     "0f1a8a7d5f537190"
   ]
 }

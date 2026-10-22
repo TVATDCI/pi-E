@@ -35,47 +35,47 @@ import { STRONG_FLAGSHIP_RE } from "../orchestration-engine/tier-map.ts";
 // ── orderedFallbacks: core ordering + tail + exclude ─────────────────────────
 eq(
   "per-tier array + global tail, primary excluded",
-  orderedFallbacks("zai-coding-cn/glm-5.2", ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"], GLOBAL),
-  ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code", GLOBAL],
+  orderedFallbacks("zai-coding-cn/glm-5.3", ["opencode-go/glm-5.3", "opencode-go/kimi-k2.7-code"], GLOBAL),
+  ["opencode-go/glm-5.3", "opencode-go/kimi-k2.7-code", GLOBAL],
 );
 eq(
   "empty tier array → just the global tail",
-  orderedFallbacks("zai-coding-cn/glm-5.2", [], GLOBAL),
+  orderedFallbacks("zai-coding-cn/glm-5.3", [], GLOBAL),
   [GLOBAL],
 );
 eq(
   "primary duplicated in tier array → excluded (not retried)",
-  orderedFallbacks("opencode-go/glm-5.2", ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"], GLOBAL),
+  orderedFallbacks("opencode-go/glm-5.3", ["opencode-go/glm-5.3", "opencode-go/kimi-k2.7-code"], GLOBAL),
   ["opencode-go/kimi-k2.7-code", GLOBAL],
 );
 eq(
   "global == primary → global tail dropped (not retried)",
-  orderedFallbacks(GLOBAL, ["opencode-go/glm-5.2"], GLOBAL),
-  ["opencode-go/glm-5.2"],
+  orderedFallbacks(GLOBAL, ["opencode-go/glm-5.3"], GLOBAL),
+  ["opencode-go/glm-5.3"],
 );
 eq(
   "duplicates within tier array → deduped, order preserved",
-  orderedFallbacks("zai-coding-cn/glm-5.2", ["opencode-go/glm-5.2", "opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"], GLOBAL),
-  ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code", GLOBAL],
+  orderedFallbacks("zai-coding-cn/glm-5.3", ["opencode-go/glm-5.3", "opencode-go/glm-5.3", "opencode-go/kimi-k2.7-code"], GLOBAL),
+  ["opencode-go/glm-5.3", "opencode-go/kimi-k2.7-code", GLOBAL],
 );
 eq(
   "global appears in tier array AND as tail → emitted once (tier position wins)",
-  orderedFallbacks("zai-coding-cn/glm-5.2", ["opencode-go/kimi-k2.7-code", GLOBAL], GLOBAL),
+  orderedFallbacks("zai-coding-cn/glm-5.3", ["opencode-go/kimi-k2.7-code", GLOBAL], GLOBAL),
   ["opencode-go/kimi-k2.7-code", GLOBAL],
 );
 eq(
   "exclude removes additional models (already-tried this walk)",
-  orderedFallbacks("zai-coding-cn/glm-5.2", ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code"], GLOBAL, ["opencode-go/glm-5.2"]),
+  orderedFallbacks("zai-coding-cn/glm-5.3", ["opencode-go/glm-5.3", "opencode-go/kimi-k2.7-code"], GLOBAL, ["opencode-go/glm-5.3"]),
   ["opencode-go/kimi-k2.7-code", GLOBAL],
 );
 eq(
   "exclude can drop the global tail entirely",
-  orderedFallbacks("zai-coding-cn/glm-5.2", ["opencode-go/glm-5.2"], GLOBAL, [GLOBAL]),
-  ["opencode-go/glm-5.2"],
+  orderedFallbacks("zai-coding-cn/glm-5.3", ["opencode-go/glm-5.3"], GLOBAL, [GLOBAL]),
+  ["opencode-go/glm-5.3"],
 );
 eq(
   "everything excluded → empty chain",
-  orderedFallbacks("zai-coding-cn/glm-5.2", [], GLOBAL, [GLOBAL]),
+  orderedFallbacks("zai-coding-cn/glm-5.3", [], GLOBAL, [GLOBAL]),
   [],
 );
 
@@ -107,7 +107,7 @@ const quickResolved = resolveModel("quick", mockRegistry([["zai-coding-cn", "glm
 eq(
   "resolveModel(quick): 3-elem fallbackFlags (external luna → external flash → longcat paid-cheap last; free tier client-gated)",
   quickResolved.fallbackFlags,
-  ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash", "opencode-go/longcat-2.0"],
+  ["opencode-go/gpt-5.6-luna", "opencode-go/glm-5.3-flash", "opencode/glm-5.3-flash"],
 );
 
 // Primary not in registry, global present → source "fallback", fallbackFlags STILL the per-tier array.

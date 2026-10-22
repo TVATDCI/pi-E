@@ -65,26 +65,26 @@ const registry: ModelRegistryLike = {
 console.log("T1 — Category resolution");
 const sr = resolveModel("security-review", registry);
 check("security-review primary = zai-coding-cn/glm-5.3 @high", sr.modelFlag === "zai-coding-cn/glm-5.3" && sr.thinkingLevel === "high" && sr.source === "tier-map");
-check("security-review per-tier fallbacks = [opencode-go/glm-5.2, opencode/glm-5.2] (deep chain pruned to glm-family strong)", JSON.stringify(sr.fallbackFlags) === JSON.stringify(["opencode-go/glm-5.2", "opencode/glm-5.2"]));
+check("security-review per-tier fallbacks = [opencode-go/glm-5.3, opencode/glm-5.3] (deep chain pruned to glm-family strong)", JSON.stringify(sr.fallbackFlags) === JSON.stringify(["opencode-go/glm-5.3", "opencode/glm-5.3"]));
 const lr = resolveModel("local-research", registry);
-check("local-research primary = opencode-go/glm-5.3-flash @off (quick-shaped)", lr.modelFlag === "opencode-go/glm-5.3-flash" && lr.thinkingLevel === "off");
-check("local-research per-tier fallbacks = [opencode-go/glm-5.3-flash, opencode/glm-5.3-flash] (glm flash-family only)", JSON.stringify(lr.fallbackFlags) === JSON.stringify(["opencode-go/glm-5.3-flash", "zai-coding-cn/glm-5.3-flash"]));
+check("local-research primary = zai-coding-cn/glm-5.3-flash @off (quick-shaped)", lr.modelFlag === "zai-coding-cn/glm-5.3-flash" && lr.thinkingLevel === "off");
+check("local-research per-tier fallbacks = [opencode-go/glm-5.3-flash, opencode/glm-5.3-flash] (glm flash-family only)", JSON.stringify(lr.fallbackFlags) === JSON.stringify(["opencode-go/glm-5.3-flash", "opencode/glm-5.3-flash"]));
 check("default agent security-review → security-reviewer", resolveFunctionalAgent("security-review") === "security-reviewer");
 check("default agent local-research → home-keeper", resolveFunctionalAgent("local-research") === "home-keeper");
 
 // Regression snapshot — the 10 pre-existing categories route byte-identically (model, thinking,
 // fallback chain, default persona). Frozen from the pre-change map; any drift is loud.
 const SNAPSHOT: Record<string, { flag: string; think?: string; fbs: string[]; agent: string }> = {
-  quick: { flag: "zai-coding-cn/glm-5.3-flash", think: "off", fbs: ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash", "opencode-go/longcat-2.0"], agent: "keymaker" },
+  quick: { flag: "zai-coding-cn/glm-5.3-flash", think: "off", fbs: ["opencode-go/gpt-5.6-luna", "opencode-go/glm-5.3-flash", "opencode/glm-5.3-flash"], agent: "keymaker" },
   "unspecified-low": { flag: "zai-coding-cn/glm-5.3-flash", think: "off", fbs: ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash"], agent: "trinity" },
   "unspecified-high": { flag: "zai-coding-cn/glm-5.3", think: "high", fbs: ["opencode-go/glm-5.2", "opencode-go/kimi-k2.7-code", "opencode/glm-5.2"], agent: "trinity" },
   deep: { flag: "zai-coding-cn/glm-5.3", think: "max", fbs: ["opencode-go/glm-5.2", "opencode/glm-5.2"], agent: "morpheus" },
   ultrabrain: { flag: "opencode-go/grok-4.7", think: "xhigh", fbs: ["opencode-go/kimi-k3", "opencode-go/qwen3.8-max", "zai-coding-cn/glm-5.3", "opencode/kimi-k2.7-code"], agent: "neo" },
-  writing: { flag: "opencode-go/glm-5.3-flash", think: "medium", fbs: ["opencode-go/gpt-5.6-luna", "zai-coding-cn/glm-5.3-flash", "opencode/gpt-5.6-luna", "opencode-go/deepseek-v4.1-flash"], agent: "mouse" },
+  writing: { flag: "zai-coding-cn/glm-5.3-flash", think: "medium", fbs: ["opencode-go/gpt-5.6-luna", "opencode-go/deepseek-v4.1-flash", "opencode/glm-5.3-flash", "opencode/gpt-5.6-luna"], agent: "mouse" },
   "visual-engineering": { flag: "zai-coding-cn/glm-5.3-flash", think: "high", fbs: ["opencode-go/minimax-m3", "opencode-go/qwen3.6-plus", "opencode/glm-5.1"], agent: "architect" },
-  artistry: { flag: "opencode-go/minimax-m3", think: "high", fbs: ["opencode-go/mimo-v2.5", "opencode-go/qwen3.8-flash", "zai-coding-cn/glm-5.3", "zai-coding-cn/glm-5.3-flash"], agent: "architect" },
-  research: { flag: "opencode-go/glm-5.3-flash", think: "medium", fbs: ["zai-coding-cn/glm-5.3-flash", "opencode/gpt-5.6-luna"], agent: "researcher" },
-  "git-commit-message": { flag: "opencode-go/glm-5.3-flash", think: "off", fbs: ["opencode-go/deepseek-v4.1-flash", "opencode-go/minimax-m3", "opencode-go/gpt-5.6-luna", "opencode/gpt-5.6-luna", "zai-coding-cn/glm-5.3-flash"], agent: "seraph" },
+  artistry: { flag: "opencode-go/minimax-m3", think: "high", fbs: ["opencode-go/mimo-v2.5", "opencode-go/qwen3.8-flash", "zai-coding-cn/glm-5.3-flash", "opencode/glm-5.3-flash"], agent: "architect" },
+  research: { flag: "zai-coding-cn/glm-5.3-flash", think: "medium", fbs: ["opencode-go/glm-5.3-flash", "opencode/gpt-5.6-luna"], agent: "researcher" },
+  "git-commit-message": { flag: "zai-coding-cn/glm-5.3-flash", think: "off", fbs: ["opencode-go/gpt-5.6-luna", "opencode/gpt-5.6-luna", "opencode/glm-5.3-flash"], agent: "seraph" },
 };
 for (const [cat, exp] of Object.entries(SNAPSHOT)) {
   const r = resolveModel(cat, registry);

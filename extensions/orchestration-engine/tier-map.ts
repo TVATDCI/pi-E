@@ -192,13 +192,13 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     id: "glm-5.3-flash",
     fallbackModels: [
       { provider: "opencode-go", id: "gpt-5.6-luna" },
+      { provider: "opencode-go", id: "glm-5.3-flash" },
       { provider: "opencode", id: "glm-5.3-flash" },
-      { provider: "opencode-go", id: "longcat-2.0" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 12 },
     rationale:
-      "Short fast tasks; zai/glm-5.3-flash (3×-quota flash; thinking-off stamp tolerated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode-go/longcat-2.0 (paid-cheap).",
+      "Short fast tasks; zai/glm-5.3-flash (3×-quota flash; thinking-off stamp tolerated). Fallbacks: opencode-go/gpt-5.6-luna  → opencode-go/glm-5.3-flash → opencode/glm-5.3-flash.",
   },
   "unspecified-low": {
     provider: "zai-coding-cn",
@@ -248,17 +248,17 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
       "Hardest logic; opencode-go/grok-4.7 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code (last rung replaced 2026-09-18).",
   },
   writing: {
-    provider: "opencode-go",
+    provider: "zai-coding-cn",
     id: "glm-5.3-flash",
     fallbackModels: [
       { provider: "opencode-go", id: "gpt-5.6-luna" },
-      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
-      { provider: "opencode", id: "gpt-5.6-luna" },
       { provider: "opencode-go", id: "deepseek-v4.1-flash" },
+      { provider: "opencode", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "gpt-5.6-luna" },
     ],
     thinkingLevel: "medium",
     rationale:
-      "Prose/docs; opencode-go/glm-5.3-flash @medium (paid-cheap; free tier is client-gated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/gpt-5.6-luna → opencode-go/deepseek-v4.1-flash.",
+      "Prose/docs; zai-coding-cn/glm-5.3-flash @medium; free tier is client-gated). Fallbacks: opencode-go/gpt-5.6-luna → opencode-go/deepseek-v4.1-flash → opencode/glm-5.3-flash → opencode/gpt-5.6-luna.",
   },
   "visual-engineering": {
     provider: "zai-coding-cn",
@@ -278,58 +278,56 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     fallbackModels: [
       { provider: "opencode-go", id: "mimo-v2.5" },
       { provider: "opencode-go", id: "qwen3.8-flash" },
-      { provider: "zai-coding-cn", id: "glm-5.3" },
       { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "glm-5.3-flash" },
     ],
     thinkingLevel: "high",
     rationale:
-      "Creative/design; opencode-go/minimax-m3 (multimodal judgment, paid-cheap - free tier is client-gated). Fallbacks: opencode-go/mimo-v2.5 → opencode-go/qwen3.8-flash → zai-coding-cn/glm-5.3 → zai-coding-cn/glm-5.3-flash (multimodal).",
+      "Creative/design; opencode-go/minimax-m3 (multimodal judgment. Fallbacks: opencode-go/mimo-v2.5 → opencode-go/qwen3.8-flash → zai-coding-cn/glm-5.3-flash → opencode/glm-5.3-flash (multimodal).",
   },
   research: {
-    provider: "opencode-go",
+    provider: "zai-coding-cn",
     id: "glm-5.3-flash",
     fallbackModels: [
-      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode-go", id: "glm-5.3-flash" },
       { provider: "opencode", id: "gpt-5.6-luna" },
     ],
     thinkingLevel: "medium",
     turnBudget: { maxTurns: 20 },
     rationale:
-      "Web/docs/package research; opencode-go/glm-5.3-flash @medium via the keyless composite search (Wikipedia+DDG+npm+GitHub; general free-text web = known gap). Fallbacks: opencode-go/glm-5.3-flash → opencode/gpt-5.6-luna.",
+      "Web/docs/package research; zai-coding-cn/glm-5.3-flash @medium via the keyless composite search (Wikipedia+DDG+npm+GitHub; general free-text web = known gap). Fallbacks: opencode-go/glm-5.3-flash → opencode/gpt-5.6-luna.",
   },
   "git-commit-message": {
-    provider: "opencode-go",
+    provider: "zai-coding-cn",
     id: "glm-5.3-flash",
     fallbackModels: [
-      { provider: "opencode-go", id: "deepseek-v4.1-flash" },
-      { provider: "opencode-go", id: "minimax-m3" },
       { provider: "opencode-go", id: "gpt-5.6-luna" },
       { provider: "opencode", id: "gpt-5.6-luna" },
-      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "glm-5.3-flash" },
     ],
     thinkingLevel: "off",
     turnBudget: { maxTurns: 6 },
     rationale:
-      "Trivial git ops; zai/glm-5.3-flash @off (cheapest flash stamp; thinking-off tolerated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash → opencode-go/longcat-2.0 (paid-cheap).",
+      "Trivial git ops; zai/glm-5.3-flash @off (cheapest flash stamp; thinking-off tolerated). Fallbacks: opencode-go/gpt-5.6-luna → opencode/glm-5.3-flash ",
   },
   "security-review": {
     provider: "zai-coding-cn",
     id: "glm-5.3",
     fallbackModels: [
-      { provider: "opencode-go", id: "glm-5.2" },
-      { provider: "opencode", id: "glm-5.2" },
+      { provider: "opencode-go", id: "glm-5.3" },
+      { provider: "opencode", id: "glm-5.3" },
     ],
     thinkingLevel: "high",
     turnBudget: { maxTurns: 20 },
     rationale:
-      "Deep read-only security review gate; zai/glm-5.3 @high (audit-class reasoning effort). Fallbacks: deep's chain mirrored at implementation time (2026-09-18) and pruned to glm-family STRONG entries only — opencode-go/glm-5.2 → opencode/glm-5.2. Zero flash, zero non-glm in the per-tier chain (the strong-tier global tail still applies — luna is strong, not cheap). Tools category-pinned to read,grep,find,ls (TOOL_PINNED_CATEGORIES).",
+      "Deep read-only security review gate; zai/glm-5.3 @high (audit-class reasoning effort). Fallbacks: deep's chain mirrored at implementation time (2026-09-18) and pruned to glm-family STRONG entries only — opencode-go/glm-5.3 → opencode/glm-5.3. Zero flash, zero non-glm in the per-tier chain (the strong-tier global tail still applies — luna is strong, not cheap). Tools category-pinned to read,grep,find,ls (TOOL_PINNED_CATEGORIES).",
   },
   "local-research": {
-    provider: "opencode-go",
+    provider: "zai-coding-cn",
     id: "glm-5.3-flash",
     fallbackModels: [
       { provider: "opencode-go", id: "glm-5.3-flash" },
-      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode", id: "glm-5.3-flash" },
     ],
     thinkingLevel: "off",
     rationale:
