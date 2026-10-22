@@ -105,9 +105,9 @@ check("resolveModel(deep): fallbackFlags is an array (not undefined/string)", Ar
 
 const quickResolved = resolveModel("quick", mockRegistry([["zai-coding-cn", "glm-5.3-flash"]]));
 eq(
-  "resolveModel(quick): 3-elem fallbackFlags (external luna → external flash → FREE ling last)",
+  "resolveModel(quick): 3-elem fallbackFlags (external luna → external flash → longcat paid-cheap last; free tier client-gated)",
   quickResolved.fallbackFlags,
-  ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash", "opencode/ling-3.0-flash-fin-free"],
+  ["opencode-go/gpt-5.6-luna", "opencode/glm-5.3-flash", "opencode-go/longcat-2.0"],
 );
 
 // Primary not in registry, global present → source "fallback", fallbackFlags STILL the per-tier array.
