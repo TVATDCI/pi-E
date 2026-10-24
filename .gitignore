@@ -75,5 +75,8 @@ mcp.json
 
 # pi runtime trust store (machine-local, never committed)
 trust.json
+
+# pi crash journal (runtime artifact written by pi's crash reporting)
+crashes.json
 .backpassrc.json
 .backpass/
