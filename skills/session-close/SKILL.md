@@ -123,6 +123,13 @@ reverses a reasoned decision. If any *tracked* file changed during close (a skil
 absorbing a lesson, etc.), that gets its own implementation commit, separate from
 the handoff — the handoff itself never enters git.
 
+### 4b. Pre-close persistence sweep (mandatory — folded from session evidence 2026-10)
+
+The handoff serves sisyphus; this sweep serves the next pi session. Before declaring the close:
+
+1. **Refresh memory.md's Active block** (hotcache contract) — a close over a materially changed arc with a stale Active block is a defect even when the handoff itself is perfect.
+2. **Sweep for transcript-only facts** — exact values, decisions, pending states learned this session — and `memory_remember` them NOW. Deferring persistence to a TODO or to the next session is the measured failure mode, not a plan.
+
 ## Hard rules
 - **pi NEVER writes bd.** Proposed facts live only in the markdown.
 - **One handoff per session**, overwritten. `exports/` stays untracked (step 4) — the

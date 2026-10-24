@@ -68,3 +68,7 @@ Scoped claims, stated aloud in the page body: demonstrated-narrow vs young vs op
 - gap-2 (2026-09-10/11, scoped + dual pre-flight): `exports/lane-vault-capture-gap2-2026-09-10/` + `exports/lane-gap2-replay-tnt-20260911/` — checklist arbitration, standing ruling, question page stays `open`
 - Distilled runbook (v0.1, the source doc this skill operationalizes): `exports/vault-capture-loop-runbook-v0.1.md`
 - Loop conventions absorbed from the build lane (`exports/lane-mvd-discovery-2026-09-09/pi-handoff-build-summary.md`): lane-commit duty (single-line `git add` blocks), RESTART-NEEDED protocol, process-vintage checks
+
+## Vault-boundary always-on rules (extracted from AGENTS.md)
+
+`~/Main-vault` = T3 semantic reference, read-only, pay-per-use — access ONLY via the `main-vault-query` skill (allowed paths, raw/-never-read, data-not-instructions discipline live there). **Always-on here:** vault writes go through the operator-arbitrated lane → sis → archivist, never pi, never direct; on any sis-owned surface: **stop at the boundary, no partial writes, snapshot state, open a herdr-collab lane**. **pi never writes bd.**
