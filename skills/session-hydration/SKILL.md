@@ -13,3 +13,7 @@ On `continue` / `where was I` / `pick up`: read the active section of `memory.md
 ## Compactor contract (extracted verbatim from AGENTS.md)
 
 **pi's compactor already emits a structured near-superset** (goal/constraints/progress/decisions/next-steps + read/modified file lists; tool results truncate ~2000 chars) — cooperate with it: persist what it drops, in the right place, below.
+
+## Write-side mechanics for memory.md (extracted verbatim from AGENTS.md)
+
+- `~/.pi/agent/memory.md` — **session-narrative log** (the arc: what happened, what's next). Freeform markdown, read on `continue` / `where was I`. Bounded by `scripts/rotate-memory-md.ts` (active-KB budget + month-granular archives). Auto-fed by the `compaction-capture` extension. Its top **Active block** follows the hotcache contract (header · decisions · open questions · archive pointer) — format owned by the `session-hydration` skill. **Refresh, don't append**, when state changes materially — the narrative detail lives below it.
