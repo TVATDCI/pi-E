@@ -71,4 +71,5 @@ Last full audit: ~/models-audit.md (2026-09-08, Legacy V2 Max-Quarterly).
   grandfathered until the quarterly cycle ends; new-plan numbers (credits,
   off-peak 50%, MCP 1.2-credits/call) apply only after conversion.
 - pi needs NO model changes while tiers target glm-5.3/glm-5.3-flash.
-- Dead picker ids (cosmetic): glm-4.6v, glm-5v-turbo, glm-5.2/5.3-highspeed.
+- pi's picker lists platform-catalog ids the plan never serves (vision/highspeed) — cosmetic only;
+  plan scope is enforced at call time.

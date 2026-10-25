@@ -6,14 +6,14 @@
  * dispatch vocabulary (prompts, skills, operator muscle memory key on them). Do NOT rename.
  *
  * ─── Z AI GLM Coding Plan (zai-coding-cn) — LEGACY PLAN V2 Max-Quarterly (dashboard-verified 2026-09-11) ──
- * Models: ALL plans run GLM-5.3 + GLM-5.3-Flash only — re-verified 2026-09-08 on BOTH endpoints
- *   (api.z.ai/api/anthropic + open.bigmodel.cn/api/coding/paas/v4, pi's endpoint). glm-5/5.1/5.2
- *   auto-route to 5.3; glm-4.5/4.5-air/4.6/4.7/5-turbo auto-route to 5.3-Flash — legacy ids below
- *   are ALIASES, not distinct pools (dashboard still BOOKS consumption by requested id).
+ * Models: ALL plans run GLM-5.3 + GLM-5.3-Flash only, on BOTH endpoints (api.z.ai/api/anthropic
+ *   + open.bigmodel.cn/api/coding/paas/v4, pi's endpoint). Other glm-* ids are ALIASES, not
+ *   distinct pools: glm-5/5.1/5.2 route to 5.3, glm-4.5/4.5-air/4.6/4.7/5-turbo route to
+ *   5.3-Flash (dashboard books consumption by requested id).
  * glm-5.3-flash: native multimodal, thinking CANNOT be disabled — "off"/"minimal" stamps are
  *   tolerated no-ops (model reasons regardless).
- * glm-*-highspeed variants: unused by operator choice (never planned; no probe needed); store
- *   also carries dead ids glm-4.6v/glm-5v-turbo (vision, outside plan scope) — picker clutter only.
+ * glm-*-highspeed variants: unused by operator choice (never planned). Vision ids are out of
+ *   plan scope — picker clutter only.
  * Quota = V2 PROMPTS (Max-Quarterly: ~1,600/5h · ~8,000/week, 20× Lite; 1 prompt ≈ 15–20 model
  *   invocations). V2 is grandfathered until the QUARTERLY cycle ends, then converts to the new
  *   credits system (Max: 28,000/5h · 140,000/week; usage = (in×mult+cached×mult+out×mult)/10⁴;
@@ -41,8 +41,7 @@
  *   required) — never route there.
  * 2026-09-18 (Captain revision): ultrabrain rerouted zai/glm-5.3 → opencode-go/grok-4.6 @xhigh
  *   (glm-5.3 demoted to rung 3); deep fallbacks are glm-only cross-provider (workhorse models
- *   out of the reasoning floor); unspecified-high's dead zai/glm-5-turbo rung purged (plan
- *   auto-routes turbo→glm-5.3 = duplicate of the primary). 8 of 10 categories zai-primary.
+ *   out of the reasoning floor). 8 of 10 categories zai-primary.
  *
  * ─── STRONG-MODEL-AT-JUDGING INVARIANT ──────────────────────────────────────
  * unspecified-high / deep / ultrabrain / security-review: primaries, per-tier fallbacks AND the
@@ -156,9 +155,8 @@ export interface ModelRegistryLike {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Peak window (UTC). Historical: zai's off-peak discount on glm-5.2/5-turbo ended
-// 2026-09-07 (fully retired from this codebase 2026-09-29) — off-peak zai billing is
-// flat: flagships 2×, flash 1×. Only the PEAK multipliers below remain live.
+// Peak window (UTC). Off-peak zai billing is flat: flagships 2×, flash 1×. Only the PEAK
+// multipliers below remain live.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -362,7 +360,8 @@ export function pinnedToolsFor(category: TaskCategory | string): string | undefi
 
 // R3: last-resort rung — luna is a current strong flagship (header list) from a DIFFERENT model
 // family than the glm rungs immediately above it in most chains (last-rung diversity), and already
-// proven reachable (unspecified-high rung-2). glm-5.1 stays on design-tier rungs (e.g. :272).
+// proven reachable (unspecified-high rung-2). glm-5.1 stays on design-tier rungs
+// (visual-engineering fallback rung; alias → glm-5.3).
 // NOTE (sis R3-review finding 3): luna is the UNIQUELY correct tail — every other strong flagship
 // already sits in deep's or ultrabrain's per-tier chains, so as tail it would self-dedupe
 // (orderedFallbacks: tier position wins) and silently cancel the global tail on the apex judging
