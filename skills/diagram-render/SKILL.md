@@ -9,8 +9,8 @@ description: |
   "flowchart", "architecture diagram", "draw me", "visualize this system",
   "mermaid", "graphviz", "state diagram", "sequence diagram". Do NOT use for
   photorealistic image generation (no local GPU, glm-image API permanently out
-  by constraint), OCR or screenshot reading (local-ocr / zai-vision), or
-  analyzing EXISTING charts (zai-vision analyze_data_visualization).
+  by constraint), OCR or screenshot reading (local-ocr / zai-vision mcp__zai_vision__*), or
+  analyzing EXISTING charts (zai-vision mcp__zai_vision__analyze_data_visualization).
 ---
 
 # Diagram Render — plan-model codegen + local render

@@ -11,7 +11,7 @@ description: |
   shown in". Do NOT use for: OCR-heavy documents and tables (use local-ocr —
   tesseract first, zai-vision escalation), technical-diagram understanding or
   data-visualization analysis (zai-vision MCP has specialized tools), or video
-  (zai-vision analyze_video).
+  (zai-vision mcp__zai_vision__analyze_video).
 ---
 
 # Image Inspector — prime-pi vision via glm-5.3-flash
@@ -43,7 +43,7 @@ Pass a focused question for targeted answers ("list the nodes and arrows",
   call.
 - **Escalation ladder for images**: quick "what is this" → this skill;
   OCR/documents/tables → `local-ocr`; diagrams/charts/deep analysis →
-  zai-vision MCP (`understand_technical_diagram`, `analyze_data_visualization`);
+  zai-vision MCP (`mcp__zai_vision__understand_technical_diagram`, `mcp__zai_vision__analyze_data_visualization`);
   video → zai-vision `analyze_video`.
 - Requires `python3` + `requests` (both already on the desk).
 - Errors go to stderr with HTTP status; stdout carries only the answer, so
