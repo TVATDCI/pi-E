@@ -51,7 +51,7 @@ Last full audit: ~/models-audit.md (2026-09-08, Legacy V2 Max-Quarterly).
 4. **Cross-check.** Table: id | live | in pi store | tier-map usage | verdict.
    Flag: configured-but-dead ids, live-but-unconfigured (usually harmless
    aliases), renames.
-5. **Plan docs.** Fetch (zai web-reader MCP or fetch_content):
+5. **Plan docs.** Fetch (zai web-reader MCP `mcp__web_reader__webReader` or fetch_content):
    `docs.z.ai/devpack/overview`, `/devpack/notice/usage-revision`,
    `/devpack/faq`, `/release-notes/new-released`. Extract quotas, MCP billing,
    releases/renames. **Ask the operator for their dashboard readout** (plan tier,

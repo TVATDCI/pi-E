@@ -39,13 +39,13 @@ permanently off the table on this desk (operator constraint 2026-09-08).
    Page-splits first: `pdfimages -png in.pdf pg` then tesseract each.
    PSM hints: default 3 (auto); `--psm 6` single text block; `--psm 11` sparse
    text; `--psm 4` column layouts.
-4. **Escalate to zai-vision MCP** (plan-covered) when the case is: table →
+4. **Escalate to zai-vision MCP** (plan-covered; pi 1.x native naming, dash→underscore) when the case is: table →
    Markdown, math formulas, handwriting, screenshots/UI, low-quality scans, or
    tesseract output came back garbled (<80% sensible alnum, wrong-language
-   gibberish). Tool: `zai-vision_extract_text_from_screenshot` (verified
-   2026-09-08 — code/terminal/docs/tables; pass the LOCAL file path + a goal in
-   the prompt, e.g. "extract as a Markdown table"); `analyze_image` for general
-   cases; `understand_technical_diagram` for diagrams; `analyze_data_visualization`
+   gibberish). Tool: `mcp__zai_vision__extract_text_from_screenshot` (verified
+   2026-09-08, re-anchored to native naming 2026-10-29 — code/terminal/docs/tables; pass the LOCAL file path + a goal in
+   the prompt, e.g. "extract as a Markdown table"); `mcp__zai_vision__analyze_image` for general
+   cases; `mcp__zai_vision__understand_technical_diagram` for diagrams; `mcp__zai_vision__analyze_data_visualization`
    for charts. One call per doc.
 
 ## Quality heuristics
