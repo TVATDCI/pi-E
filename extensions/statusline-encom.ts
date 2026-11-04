@@ -4,9 +4,9 @@
 // Render: <dir> <git> <ctx %> <tokens> <model · thinking> <tps> <cost> <HH:MM:SS>
 //   Segments joined by a thin powerline separator (U+E0B1 with a Nerd Font, ›
 //   otherwise); dir / branch / clock / model gain icons in Nerd-font mode.
-// Example: "pi-agent › main *2 +1 ?3 › 16.0% › 160K › zai-coding-cn/glm-5.2 · high › 42.3 tps › $0.04 › 14:32:07"
+// Example: "pi-agent › main *2 +1 ?3 › 16.0% › 160K › zai-coding-cn/glm-5.3 · high › 42.3 tps › $0.04 › 14:32:07"
 //
-// ── Canonical API (verified against Pi 0.80.3) ──────────────────────────────
+// ── Canonical API (verified against Pi 0.80.3; re-verified on pi 1.4.0) ───────
 //   ctx.ui.setFooter(factory)              — extensions.md:2303-2310
 //     factory: (tui, theme, footerData) => Component & { dispose?() }
 //                                            — types.d.ts:106-108

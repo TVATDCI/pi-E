@@ -58,11 +58,11 @@ run("indicator: working → spinner frame glyph", () => {
 run("indicator: done → ✓", () => {
   assertEq(statusIndicator("done", 0), "✓", "done");
 });
-run("indicator: error → ✗", () => {
-  assertEq(statusIndicator("error", 0), "✗", "error");
-});
 run("indicator: idle/unknown → ○", () => {
   assertEq(statusIndicator("idle", 0), "○", "idle");
+  // "error" is no longer a statusIndicator state (dead branch removed — setStatus only ever
+  // receives idle/working/done); unknown statuses fall through to the idle glyph.
+  assertEq(statusIndicator("error", 0), "○", "error falls through to ○ (branch removed)");
 });
 
 // ── formatTitle ──

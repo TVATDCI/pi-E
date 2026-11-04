@@ -16,7 +16,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIPv4, isIPv6 } from "node:net";
 import { URL } from "node:url";
@@ -33,21 +33,60 @@ export function clampMaxChars(req: unknown): number {
   return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_FETCH) : FETCH_MAX_CHARS;
 }
 
+interface ProcResult {
+  /** Exit code; null on spawn failure or kill-timeout. */
+  status: number | null;
+  stdout: string;
+  /** True when the process could not be spawned (e.g. ENOENT — mirrors spawnSync's `error`). */
+  spawnError: boolean;
+}
+
+/** Async spawn with stdout capture + hard kill timer (statusline-encom's runGit model) — the
+ *  former spawnSync calls blocked pi's ENTIRE event loop (transcript, widgets, streaming) for
+ *  the curl/w3m duration; async keeps the UI live. Optional `input` is written to stdin. */
+function runProc(cmd: string, args: string[], opts: { timeoutMs: number; input?: string }): Promise<ProcResult> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let settled = false;
+    let result: ProcResult = { status: null, stdout: "", spawnError: true };
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      resolve({ ...result, stdout });
+    };
+    const proc = spawn(cmd, args, {
+      stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+    const timer = setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+      // Grace past SIGKILL: force-settle so an unkillable child cannot wedge the caller.
+      graceTimer = setTimeout(finish, 500);
+    }, opts.timeoutMs);
+    proc.on("error", () => { result = { status: null, stdout: "", spawnError: true }; finish(); });
+    proc.stdout?.setEncoding("utf8");
+    proc.stdout?.on("data", (d: string) => { stdout += d; });
+    proc.on("close", (code) => { result = { status: code, stdout: "", spawnError: false }; finish(); });
+    if (opts.input !== undefined) {
+      proc.stdin?.on("error", () => { /* EPIPE if the child died early; close settles */ });
+      proc.stdin?.end(opts.input);
+    }
+  });
+}
+
 /** GET a URL, return body string ("" on any failure). Plain curl, no shell. */
-export function httpGet(url: string, timeoutSec = 12): string {
-  try {
-    const r = spawnSync("curl", [
-      "-sL",
-      "-A", UA,
-      "--max-time", String(timeoutSec),
-      "-H", "Accept: application/json,text/html,*/*",
-      url,
-    ], { encoding: "utf8", timeout: (timeoutSec + 4) * 1000, maxBuffer: 8 * 1024 * 1024 });
-    if (r.status !== 0 || r.error || !r.stdout) return "";
-    return r.stdout;
-  } catch {
-    return "";
-  }
+export async function httpGet(url: string, timeoutSec = 12): Promise<string> {
+  const r = await runProc("curl", [
+    "-sL",
+    "-A", UA,
+    "--max-time", String(timeoutSec),
+    "-H", "Accept: application/json,text/html,*/*",
+    url,
+  ], { timeoutMs: (timeoutSec + 4) * 1000 });
+  if (r.status !== 0 || r.spawnError || !r.stdout) return "";
+  return r.stdout;
 }
 
 /** Validate a URL for safe fetching. http/https only; block private/loopback/link-local. */
@@ -167,7 +206,7 @@ export function isBlockedAddr(addr: string): boolean {
   return false;
 }
 
-/** Fetch a URL → clean text (curl | w3m -dump), no shell (two spawnSync steps). Hard-truncate. */
+/** Fetch a URL → clean text (curl | w3m -dump), no shell (two async spawn steps). Hard-truncate. */
 export async function fetchText(rawUrl: string, maxChars = FETCH_MAX_CHARS): Promise<string> {
   const href = safeUrl(rawUrl); // defense-in-depth: scheme + string-host check even if called directly (not only via the tool)
   const u = new URL(href);
@@ -179,26 +218,17 @@ export async function fetchText(rawUrl: string, maxChars = FETCH_MAX_CHARS): Pro
   const fmtHost = isIPv6(bareHost) ? `[${bareHost}]` : bareHost;
   const fmtIp = isIPv6(ip) ? `[${ip}]` : ip;
   const resolveArgs = [...ports].flatMap(p => ["--resolve", `${fmtHost}:${p}:${fmtIp}`]);
-  const curl = spawnSync("curl", [
+  const curl = await runProc("curl", [
     "-s", "-A", UA, "--max-time", "12",
     ...resolveArgs,
     "--", rawUrl,
-  ], {
-    encoding: "utf8",
-    timeout: 16000,
-    maxBuffer: 16 * 1024 * 1024,
-  });
+  ], { timeoutMs: 16000 });
   if (curl.status !== 0 || !curl.stdout) return `(fetch failed: curl status ${curl.status})`;
-  const w3m = spawnSync("w3m", ["-dump", "-T", "text/html"], {
-    input: curl.stdout,
-    encoding: "utf8",
-    timeout: 15000,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  // W17: `w3m` is an undeclared system dependency for HTML→text. If it's missing, spawnSync returns
-  // status:null + error:ENOENT and stdout is empty — without this guard fetchText silently returns
+  const w3m = await runProc("w3m", ["-dump", "-T", "text/html"], { timeoutMs: 15000, input: curl.stdout });
+  // W17: `w3m` is an undeclared system dependency for HTML→text. If it's missing, the spawn errors
+  // (ENOENT → spawnError) and stdout is empty — without this guard fetchText silently returns
   // "" for EVERY url (the test suite's 1 failure + a production diagnosability gap). Surface it.
-  if (w3m.error || (w3m.status === null && !w3m.stdout)) {
+  if (w3m.spawnError || (w3m.status === null && !w3m.stdout)) {
     return "(fetch unavailable: `w3m` is not installed — HTML→text conversion needs it. Install: apt-get install w3m)";
   }
   let txt = (w3m.stdout ?? "").replace(/\n{3,}/g, "\n\n").trim();
@@ -207,7 +237,7 @@ export async function fetchText(rawUrl: string, maxChars = FETCH_MAX_CHARS): Pro
 }
 
 /** Composite keyless search. Each source is independent — one failing omits its section, never kills the whole call. */
-export function searchAll(query: string): string {
+export async function searchAll(query: string): Promise<string> {
   const q = (query ?? "").trim();
   if (!q) return "(empty query)";
   const enc = encodeURIComponent(q);
@@ -215,7 +245,7 @@ export function searchAll(query: string): string {
 
   // 1. Wikipedia
   try {
-    const d = JSON.parse(httpGet(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${enc}&format=json&srlimit=3`));
+    const d = JSON.parse(await httpGet(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${enc}&format=json&srlimit=3`));
     const hits: { title?: string; snippet?: string }[] = d?.query?.search ?? [];
     if (hits.length) {
       parts.push("## Wikipedia");
@@ -228,7 +258,7 @@ export function searchAll(query: string): string {
 
   // 2. DuckDuckGo instant answer (curated; often thin for technical queries)
   try {
-    const d = JSON.parse(httpGet(`https://api.duckduckgo.com/?q=${enc}&format=json&no_html=1`));
+    const d = JSON.parse(await httpGet(`https://api.duckduckgo.com/?q=${enc}&format=json&no_html=1`));
     const abs = (d?.AbstractText ?? "").trim();
     if (abs) parts.push("## DuckDuckGo (instant answer)", abs.slice(0, 400));
     const rel: { Text?: string }[] = (d?.RelatedTopics ?? []).slice(0, 4);
@@ -238,7 +268,7 @@ export function searchAll(query: string): string {
 
   // 3. npm registry (packages)
   try {
-    const d = JSON.parse(httpGet(`https://registry.npmjs.org/-/v1/search?text=${enc}&size=3`));
+    const d = JSON.parse(await httpGet(`https://registry.npmjs.org/-/v1/search?text=${enc}&size=3`));
     const objs: { package: { name?: string; version?: string; description?: string; links?: { npm?: string } } }[] = d?.objects ?? [];
     if (objs.length) {
       parts.push("## npm");
@@ -251,7 +281,7 @@ export function searchAll(query: string): string {
 
   // 4. GitHub repos (unauthenticated: rate-limited ~10/min; UA header required)
   try {
-    const d = JSON.parse(httpGet(`https://api.github.com/search/repositories?q=${enc}&per_page=3`));
+    const d = JSON.parse(await httpGet(`https://api.github.com/search/repositories?q=${enc}&per_page=3`));
     const items: { full_name?: string; stargazers_count?: number; description?: string; html_url?: string }[] = d?.items ?? [];
     if (items.length) {
       parts.push("## GitHub");
@@ -276,7 +306,7 @@ export default function (pi: ExtensionAPI) {
       query: Type.String({ description: "Search query" }),
     }),
     async execute(_id, params) {
-      const out = searchAll(String(params?.query ?? ""));
+      const out = await searchAll(String(params?.query ?? ""));
       return { content: [{ type: "text", text: out }], details: { source: "keyless-composite" } };
     },
   });

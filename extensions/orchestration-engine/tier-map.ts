@@ -1,54 +1,46 @@
 /**
  * Layer 2 — category → {provider, id, thinkingLevel} tier map for the Orchestration Engine.
- * Model assignments: operator 2026-09-07, revised 2026-09-08 (V2 Max reroutes); probe evidence in PROBE-RESULTS.md.
+ * Probe evidence: PROBE-RESULTS.md. Dated reroute/demotion history lives in the root CHANGELOG.md
+ * — this file carries live constraints only (tier-map-comment-hygiene test enforces).
  *
- * Category names/semantics ported verbatim from oh-my-openagent.json — they are the
- * dispatch vocabulary (prompts, skills, operator muscle memory key on them). Do NOT rename.
+ * Category names/semantics are the dispatch vocabulary (prompts, skills, operator muscle memory
+ * key on them; oh-my-openagent port lineage in CHANGELOG.md). Do NOT rename.
  *
- * ─── Z AI GLM Coding Plan (zai-coding-cn) — LEGACY PLAN V2 Max-Quarterly (dashboard-verified 2026-09-11) ──
+ * ─── Z AI GLM Coding Plan (zai-coding-cn) — LEGACY PLAN V2 Max-Quarterly ─────────────
  * Models: ALL plans run GLM-5.3 + GLM-5.3-Flash only, on BOTH endpoints (api.z.ai/api/anthropic
  *   + open.bigmodel.cn/api/coding/paas/v4, pi's endpoint). Other glm-* ids are ALIASES, not
  *   distinct pools: glm-5/5.1/5.2 route to 5.3, glm-4.5/4.5-air/4.6/4.7/5-turbo route to
- *   5.3-Flash (dashboard books consumption by requested id).
+ *   5.3-Flash (consumption is booked by requested id).
  * glm-5.3-flash: native multimodal, thinking CANNOT be disabled — "off"/"minimal" stamps are
  *   tolerated no-ops (model reasons regardless).
  * glm-*-highspeed variants: unused by operator choice (never planned). Vision ids are out of
  *   plan scope — picker clutter only.
- * Quota = V2 PROMPTS (Max-Quarterly: ~1,600/5h · ~8,000/week, 20× Lite; 1 prompt ≈ 15–20 model
- *   invocations). V2 is grandfathered until the QUARTERLY cycle ends, then converts to the new
- *   credits system (Max: 28,000/5h · 140,000/week; usage = (in×mult+cached×mult+out×mult)/10⁴;
- *   5.3 = 6.9/1.7/24 · flash = 2.3/0.56/8; off-peak 50%). MCP servers (Web Search / Web Reader /
- *   Zread — wired at ~/.config/mcp/mcp.json, pi-only) run on a DEDICATED monthly quota on V2
- *   (dashboard-confirmed 2026-09-08: "MCP Quota 1% Used, Reset 2026-10-07") — NOT the prompt
- *   quota; the FAQ's ×1.2-credits-per-call MCP billing applies to NEW-plan credits accounts only.
+ * Quota = V2 PROMPTS (Max-Quarterly: ~1,600/5h · ~8,000/week; 1 prompt ≈ 15–20 model
+ *   invocations) with hard 5h/weekly windows. MCP servers (Web Search / Web Reader /
+ *   Zread — wired at ~/.config/mcp/mcp.json, pi-only) run on a DEDICATED monthly quota — NOT the
+ *   prompt quota.
  * ⚠ NO balance fallback: exhausted quota = hard fail until the 5h window resets.
- * PEAK WINDOW (dashboard 2026-09-11): Mon–Fri 14:00–18:00 SGT = 08:00–12:00 CEST — GLM-5.3 consumes
- *   3× inside it, flash 1.2×; off-peak flash is 0.4× (the floor). Dedicated peak resources ≠ free
- *   peak usage → schedule 5.3-class BULK work (sweeps, batch dispatches) outside the window;
- *   evening/night sessions are optimal. (Supersedes the old 'peak-downshift moot' note.)
- * FLASH-FIRST DOCTRINE (2026-09-11, operator-endorsed): mechanical/execution categories
+ * PEAK WINDOW: Mon–Fri 14:00–18:00 SGT = 06:00–10:00 UTC (PEAK_UTC_* below) — GLM-5.3 bills
+ *   3× inside it, flash 1.2×; off-peak flash is 0.4× (the floor). Schedule 5.3-class BULK work
+ *   (sweeps, batch dispatches) outside the window; evening/night sessions are optimal.
+ * FLASH-FIRST DOCTRINE: mechanical/execution categories
  *   (quick, unspecified-low=DEFAULT, writing, visual-engineering, research, git-commit-message)
  *   are flash-primary — the loop's verification machinery converts quality risk into a cheap
- *   retry, so flagship adds ~nothing at execution nodes (production-proven: the archivist ran
- *   flash for 3 captures + 2 micro-passes, zero deviations). Flagships stay LOCKED at judging
+ *   retry, so flagship adds ~nothing at execution nodes. Flagships stay LOCKED at judging
  *   nodes (unspecified-high, deep, ultrabrain) per STRONG-MODEL-AT-JUDGING.
- *   (helpers kept for a possible post-conversion future).
  * ⚠ SELECTOR ≠ SUBSCRIPTION: pi's picker lists the full platform catalog; plan scope is
  *   enforced at CALL TIME. Never add unverified models here.
  * ⚠ FOOTGUN: pi's built-in zai provider default is glm-5.1 — an alias now; still avoid
  *   bare-provider fallbacks; scoped-models + this map are safe.
  * ⚠ opencode-go/deepseek-v4-flash & -pro: 403 region-blocked (China-hosted, workspace opt-in
  *   required) — never route there.
- * 2026-09-18 (Captain revision): ultrabrain rerouted zai/glm-5.3 → opencode-go/grok-4.6 @xhigh
- *   (glm-5.3 demoted to rung 3); deep fallbacks are glm-only cross-provider (workhorse models
- *   out of the reasoning floor). 8 of 10 categories zai-primary.
  *
  * ─── STRONG-MODEL-AT-JUDGING INVARIANT ──────────────────────────────────────
  * unspecified-high / deep / ultrabrain / security-review: primaries, per-tier fallbacks AND the
  * global FALLBACK tail land ONLY on strong-tier flagships (glm-5.x · kimi · grok-4.7 ·
  * qwen3.8-max · gpt-5.6-luna) — never FREE/cheap (deepseek-v4-flash-free, ling-*-flash-free,
- * minimax-m2.7). security-review's per-tier chain is additionally glm-family-ONLY (sis plan
- * 2026-09-18 C2). One cheap-model review in a fan-out cascades untraceably. AGENTS.md "Model
+ * minimax-m2.7). security-review's per-tier chain is additionally glm-family-ONLY. One
+ * cheap-model review in a fan-out cascades untraceably. AGENTS.md "Model
  * selection" mirrors this — update both files when touching judging chains.
  *
  * ─── ROUTING GUARDRAIL ──────────────────────────────────────────────────────
@@ -66,7 +58,7 @@ import type { ToolBudgetConfig, TurnBudgetConfig } from "../budgets/types.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Category names — ported verbatim from oh-my-openagent.json "categories" block.
+ * Category names — the dispatch vocabulary (oh-my-openagent port lineage: CHANGELOG.md).
  * Do NOT rename without updating the persona prompts/skills that key on these.
  */
 export type TaskCategory =
@@ -80,12 +72,12 @@ export type TaskCategory =
   | "artistry" // creative/design (multimodal judgment)
   | "research" // web/docs/package research (keyless composite search; general free-text web = known gap)
   | "git-commit-message" // trivial git ops
-  | "security-review" // deep read-only security gate (strong glm-only chain; operator seat 2026-09-18)
+  | "security-review" // deep read-only security gate (strong glm-only chain; operator seat)
   | "local-research"; // really-local synthesis + housekeeping — OPERATOR-ONLY flash vehicle
 
 /** Pi thinking levels. null-able per model via thinkingLevelMap. "max" per pi-ai
  *  types.d.ts (accepted by --thinking; z.ai glm-5.3: reasoning_effort max = default +
- *  recommended for coding — probe-verified 2026-09-03). */
+ *  recommended for coding). */
 export type ThinkingLevel =
   | "off"
   | "minimal"
@@ -106,7 +98,6 @@ export interface TierEntry {
   /**
    * Recommended thinking level for this category. L3 (the dispatch tool) decides
    * whether to honor it — the verified spawn pattern currently hardcodes `--thinking off`.
-   * Preserved here from the oh-my-openagent `variant` field so the port doesn't lose info.
    * OPEN L3 DECISION: honor per-category thinking, or stay `off` everywhere? See HANDOFF.
    */
   thinkingLevel?: ThinkingLevel;
@@ -119,8 +110,8 @@ export interface TierEntry {
    * single provider's outage/quota drain. The global FALLBACK const is always appended as the final
    * tail by orderedFallbacks(), so every category has at least one retry. Strong-model-at-judging
    * invariant: the judging categories (deep/ultrabrain/unspecified-high/security-review) carry
-   * arrays that land ONLY on glm-5.x/kimi — never cheap/FREE tiers (see MODEL TIERING + header
-   * comment). */
+   * arrays that land ONLY on strong-tier flagships (STRONG_FLAGSHIP_RE) — never cheap/FREE
+   * tiers (see header comment). */
   fallbackModels?: FallbackModel[];
   /**
    * Per-dispatch turn/tool budget DEFAULTS (PORT-PLAN-v0.40.md ①). Read-only categories carry
@@ -155,17 +146,15 @@ export interface ModelRegistryLike {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Peak window (UTC). Off-peak zai billing is flat: flagships 2×, flash 1×. Only the PEAK
-// multipliers below remain live.
+// Peak window (UTC): GLM-5.3 bills 3×, flash 1.2× inside it; off-peak flash 0.4× (the floor).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Peak window in UTC hours. 14:00–18:00 UTC+8 → 06:00–10:00 UTC.
  * Berlin operator works outside 08:00–12:00 local (= peak), so this is usually moot,
- * but L3 may consult it to downshift to a flash tier if a dispatch lands in peak.
- * REVISED 2026-09-11 (dashboard): the 3×-flagship/1.2×-flash peak multipliers DO apply on
- * V2 Max (usage-reference table) — keep this helper live; prefer flash tiers inside the
- * window for bulk work regardless of the old 'dedicated resources' assumption.
+ * but L3 may consult it to downshift to a flash tier if a dispatch lands in peak —
+ * prefer flash tiers inside the window for bulk work. Peak multipliers DO apply —
+ * keep this helper live.
  */
 export const PEAK_UTC_HOUR_START = 6;
 export const PEAK_UTC_HOUR_END = 10; // exclusive
@@ -177,12 +166,9 @@ export function isPeakHours(now = new Date()): boolean {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The map — 10 of 12 categories zai-plan-primary (glm-5.3 / glm-5.3-flash); ultrabrain and
-// artistry remain opencode-go-primary. unspecified-low moved to zai/glm-5.3-flash
-// 2026-09-08 (operator go): V2 Max 20×-Lite volume removed the Pro-era plan-credit-preservation
-// rationale; direct call drops the opencode-go router hop/dependency. gpt-5.6-luna demoted to
-// first fallback (external diversity preserved).
-// Fallback chains are ordered + cross-provider; spawn.ts appends the global FALLBACK tail via
-// orderedFallbacks() and walks it on unavailable-primary and empty-output (quota exhaustion).
+// artistry are opencode-go-primary. Fallback chains are ordered + cross-provider; spawn.ts
+// appends the global FALLBACK tail via orderedFallbacks() and walks it on unavailable-primary
+// and empty-output (quota exhaustion).
 // ─────────────────────────────────────────────────────────────────────────────
 export const TIERS: Record<TaskCategory, TierEntry> = {
   quick: {
@@ -234,8 +220,9 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   },
   ultrabrain: {
     provider: "opencode-go",
-    id: "grok-4.7",
+    id: "kimi-k3.1-pro",
     fallbackModels: [
+      { provider: "opencode-go", id: "grok-4.7" },
       { provider: "opencode-go", id: "kimi-k3" },
       { provider: "opencode-go", id: "qwen3.8-max" },
       { provider: "zai-coding-cn", id: "glm-5.3" },
@@ -243,7 +230,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     ],
     thinkingLevel: "xhigh",
     rationale:
-      "Hardest logic; opencode-go/grok-4.7 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code (last rung replaced 2026-09-18).",
+      "Hardest logic; opencode-go/kimi-k3.1-pro @xhigh (captain-worded trial 2026-11-04: new primary, live-proven by the oracle consults 2026-10-31 + 2026-11-03; union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/grok-4.7 (demoted ex-primary) → opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code.",
   },
   writing: {
     provider: "zai-coding-cn",
@@ -345,8 +332,7 @@ export const READ_ONLY_CATEGORIES: ReadonlySet<TaskCategory> =
 /** Category-level TOOL PIN — distinct from READ_ONLY_CATEGORIES (which gates the conservative
  * budget policy): a pinned category strips EVERY seated persona's tool list down to the pin,
  * overriding persona frontmatter AND caller toolsOverride alike. Today: security-review — a
- * review gate that can modify what it reviews is a conflict of interest (sis plan §1.1, C3/T2;
- * chain-runner's F1 reviewer toolsOverride hoisted to category level). */
+ * review gate that can modify what it reviews is a conflict of interest. */
 export const TOOL_PINNED_CATEGORIES: ReadonlyMap<TaskCategory, string> = new Map([
   ["security-review", "read,grep,find,ls"],
 ]);
@@ -358,28 +344,28 @@ export function pinnedToolsFor(category: TaskCategory | string): string | undefi
     : undefined;
 }
 
-// R3: last-resort rung — luna is a current strong flagship (header list) from a DIFFERENT model
-// family than the glm rungs immediately above it in most chains (last-rung diversity), and already
-// proven reachable (unspecified-high rung-2). glm-5.1 stays on design-tier rungs
+// Last-resort global tail — luna: a current strong flagship (header list) from a DIFFERENT model
+// family than the glm rungs immediately above it in most chains (last-rung diversity), and
+// already reachable in live chains. glm-5.1 stays on design-tier rungs
 // (visual-engineering fallback rung; alias → glm-5.3).
-// NOTE (sis R3-review finding 3): luna is the UNIQUELY correct tail — every other strong flagship
-// already sits in deep's or ultrabrain's per-tier chains, so as tail it would self-dedupe
-// (orderedFallbacks: tier position wins) and silently cancel the global tail on the apex judging
-// categories. Chains already containing opencode-go/gpt-5.6-luna exactly dedupe the tail away
-// (finding 4, accepted — their walk ends at their own last rung; invariant intact everywhere).
+// Luna is the UNIQUELY correct tail — every other strong flagship already sits in deep's or
+// ultrabrain's per-tier chains, so as tail it would self-dedupe (orderedFallbacks: tier position
+// wins) and silently cancel the global tail on the apex judging categories. Chains already
+// containing opencode-go/gpt-5.6-luna exactly dedupe the tail away (their walk ends at their own
+// last rung; invariant intact everywhere).
 export const FALLBACK = { provider: "opencode-go", id: "gpt-5.6-luna" } as const;
 
-/** R3 (sis review condition 2b): the SINGLE source of the strong-flagship doctrine — a model id
- * is strong-tier iff it matches. Exported so tests (fallback-resolver, both invariant sites) and
- * future surfaces consume ONE regex instead of re-stating the header list. Anchored per
- * alternative: `kimi-` requires a suffix; fixed ids are $-anchored — rejects `-free`/`-mini`
- * variants. Keep in sync with the header comment's prose list (:45-47). */
-export const STRONG_FLAGSHIP_RE = /^(?:glm-5[\w.-]*|kimi-(?!free)[\w.-]+|grok-4\.6|qwen3\.8-max|gpt-5\.6-luna)$/;
+/** The SINGLE source of the strong-flagship doctrine — a model id is strong-tier iff it matches.
+ * Exported so tests (fallback-resolver, both invariant sites) and future surfaces consume ONE
+ * regex instead of re-stating the header list. Anchored per alternative: `kimi-` requires a
+ * suffix; fixed ids are $-anchored — rejects `-free`/`-mini` variants. Keep in sync with the
+ * header comment's prose list. */
+export const STRONG_FLAGSHIP_RE = /^(?:glm-5[\w.-]*|kimi-(?!free)[\w.-]+|grok-4\.[67]|qwen3\.8-max|gpt-5\.6-luna)$/;
 
 /** Tier entry for a category, GUARDED: an unknown/invalid category (e.g. an unvalidated teams.yaml
  *  member.category / default_category, or a typo) falls back to DEFAULT_CATEGORY instead of
  *  returning undefined and crashing the caller. Closes the unguarded `TIERS[category]` path
- *  (review-loop S1) at BOTH the dispatch site (index.ts) and the chain site (chain-runner.ts).
+ *  at BOTH the dispatch site (index.ts) and the chain site (chain-runner.ts).
  *  Mirrors the guard `resolveModel` already applies. */
 export function tierEntryFor(category: TaskCategory | string): TierEntry {
   return category in TIERS
@@ -472,6 +458,22 @@ export function resolveModel(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Retry-hop thinking level (F1 mechanism fix) — PURE, pinned in fallback-resolver.test.ts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The thinking level for a RETRY hop — the downshift-unavailable pick and every rung of the
+ *  exhausted-walk — so a retry carries the tier's own level instead of silently dropping to
+ *  "high": an ultrabrain walk stays @xhigh, a deep walk @max (the union-max discipline the
+ *  ultrabrain rationale claims). A caller thinkingOverride always wins; "high" is only the
+ *  floor when neither is set (e.g. a registry-fallback resolution carries no tier level). */
+export function hopThinkingLevel(
+  thinkingOverride: string | undefined,
+  tierThinkingLevel: ThinkingLevel | undefined,
+): ThinkingLevel {
+  return (thinkingOverride as ThinkingLevel | undefined) ?? tierThinkingLevel ?? "high";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Fallback chain resolver (PORT-PLAN-v0.40.md ③) — PURE, unit-testable (no registry/spawn).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -505,7 +507,7 @@ export function orderedFallbacks(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Family-locked categories (sis plan §1.2 / C2, [ORACLE CONDITION 3])
+// Family-locked categories
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Family-locked categories: the fallback walk is LOCKED to the tier's declared model family —

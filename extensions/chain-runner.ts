@@ -151,8 +151,8 @@ export function loadChains(ctx: ExtensionContext): Map<string, Chain> {
 }
 
 // ②b reviewer orchestration. The independent reviewer is spawned ONLY on an explicit review.required
-// (Q2.1); auto-inferred/risky review stays a badge. Model: category "deep" (glm-5.2 @high) — engineering-
-// standards judgment (see memory reviewer_orchestration_model_glm52). The reviewer agent is read-only;
+// (Q2.1); auto-inferred/risky review stays a badge. Model: category "deep" — the tier-map deep entry
+// (zai/glm-5.3 @max) supplies it — engineering-standards judgment. The reviewer agent is read-only;
 // reuses the trusted resolveAndSpawn (inherits the ① budget nudge + dispatch-log). Failure / no structured
 // block ⇒ returns undefined ⇒ the caller leaves a review-required badge + warns (Q-2b-3, non-terminal).
 const REVIEW_CATEGORY: TaskCategory = "deep";

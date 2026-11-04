@@ -36,7 +36,7 @@ function makeHarness(mode: "tui" | "rpc" | "json" | "print", command: string): H
   const pi = {
     on: (ev: string, fn: (event: unknown, ctx: unknown) => Promise<unknown>) => { handlers[ev] = fn; },
     registerCommand: () => {},
-    appendEntry: (customType: string, data: unknown) => { h.entries.push({ customType, data: h.entries.length >= 0 ? data : data }); },
+    appendEntry: (customType: string, data: unknown) => { h.entries.push({ customType, data }); },
   };
   const ctx = {
     cwd: dir,

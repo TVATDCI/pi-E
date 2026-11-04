@@ -45,7 +45,7 @@ function statusIndicator(status, spinnerFrame) {
   }
 
   if (status === "done") return "✓";
-  if (status === "error") return "✗";
+  // "error" is not a live status: setStatus is only ever called with idle/working/done.
   return "○";
 }
 

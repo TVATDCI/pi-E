@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync, statSync, renameSync } from "node:
 import { join, resolve, dirname } from "node:path";
 import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resolveModel, buildFallbackChain, pinnedToolsFor, FAMILY_LOCKED_CATEGORIES, familyExhaustedMessage, FALLBACK, type TaskCategory } from "./tier-map.ts";
+import { resolveModel, buildFallbackChain, pinnedToolsFor, hopThinkingLevel, FAMILY_LOCKED_CATEGORIES, familyExhaustedMessage, FALLBACK, type TaskCategory } from "./tier-map.ts";
 import { appendBudgetNudges, type ResolvedBudgets } from "../budgets/index.ts";
 import { classifySpawnOutcome, isMinidcRefusal, shouldWalkAfterFailure, spawnFailedForFallback, type SpawnOutcome } from "./spawn-outcome.ts";
 // Edit 7: re-export the outcome type so consumers keep importing from spawn.ts (the canonical spawn
@@ -229,10 +229,10 @@ export function spawnSub(
     let killed = false;
     let escalateTimer: ReturnType<typeof setTimeout> | undefined;
     // SIGTERM → SIGKILL escalation: a child that traps/ignores SIGTERM must not defeat the kill.
-    // NOTE: intentionally DIVERGES from acceptance.ts runVerify — there, finish() clears the escalate
-    // timer synchronously after kill, so its SIGKILL never fires (latent dead code on the verify path;
-    // separate issue). Here the escalateTimer persists until the close handler clears it, so the SIGKILL
-    // ACTUALLY fires. Do NOT "align" the two — that would silently break this escalation.
+    // acceptance.ts runVerify carries the same discipline (escalate, then resolve on close) —
+    // NEVER finish() synchronously after a kill: that clears the escalate timer and silently
+    // disarms the SIGKILL (runVerify's former synchronous finish was removed as exactly that
+    // dead-escalation bug). Here the escalateTimer persists until the close handler clears it.
     // Lives in killProc so EVERY kill path (abort, timeout, ①'s future turn-kill) inherits robust termination.
     const killProc = () => {
       if (killed) return;
@@ -408,7 +408,9 @@ export async function resolveAndSpawn(
     const pick = candidates.find(isAvail);
     if (pick) {
       modelFlag = pick;
-      thinkingLevel = "high";
+      // F1: the hop carries the tier's thinking level (override wins; "high" floor) — a retry
+      // must not silently drop an apex category to @high.
+      thinkingLevel = hopThinkingLevel(thinkingOverride, tierDefault.thinkingLevel);
       source = "downshift-unavailable";
       rationale = `${downshiftedFrom} unavailable (no configured key) → fell back to ${pick}`;
       if (ctx.hasUI) ctx.ui.notify(`⚠ ${downshiftedFrom} unavailable → downshifted to ${pick}`, "info");
@@ -478,7 +480,9 @@ export async function resolveAndSpawn(
       for (const cand of candidates) {
         retriedWith.push(cand);
         modelFlag = cand;
-        thinkingLevel = "high";
+        // F1: every exhausted-walk rung carries the tier's thinking level (override wins; "high"
+        // floor) — union max across the chain, as the tier rationales claim.
+        thinkingLevel = hopThinkingLevel(thinkingOverride, tierDefault.thinkingLevel);
         const fbResult = await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }, persona, cwd, progressWithModel, signal, context, budgets, toolsOverride, skill, timeoutMs);
         elapsedMs += fbResult.elapsedMs;
         toolCount += fbResult.toolCount;
