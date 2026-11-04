@@ -4,6 +4,7 @@
 // of the suite.
 
 import { basename, formatTitle, statusIndicator, truncateTitle } from "../terminal-status-title.js";
+import terminalStatusTitle from "../terminal-status-title.js";
 
 let passed = 0;
 function assertEq(actual: unknown, expected: unknown, label: string): void {
@@ -81,6 +82,50 @@ run("format: default title collapses duplicate π", () => {
   const ctx = { cwd: "/nowhere" };
   assertEq(formatTitle(pi, ctx, "idle", 0), "○ | π", "collapse");
 });
+
+// ── stale-runtime writes (the captain's live-eyed find: deferred writes + spinner
+// ticks can fire through a ctx replaced/reloaded between schedule and fire; the
+// asserting getters throw — writeTitle must no-op, never crash) ──
+//
+// Drives the REAL default export with mock ctx objects whose getters mirror
+// pi's assertActive contract (throw once marked stale). Real timers: the
+// deferred write (0ms) and spinner ticks (120ms) must both survive a stale flip.
+function makeCtx(onTitle: (t: string) => void): { ctx: object; stale: () => void; titles: () => string[] } {
+  const titles: string[] = [];
+  let stale = false;
+  const ui = { setTitle: (t: string) => { if (stale) throw new Error("stale ui"); titles.push(t); } };
+  const ctx = {
+    cwd: "/home/vladi/projects/pi",
+    get hasUI() { if (stale) throw new Error("This extension ctx is stale after session replacement or reload."); return true; },
+    get ui() { if (stale) throw new Error("stale"); return ui; },
+  };
+  return { ctx, stale: () => { stale = true; }, titles: () => titles };
+}
+
+await (async () => {
+  const handlers: Record<string, (e: unknown, ctx: object) => Promise<void> | void> = {};
+  const pi = {
+    on: (event: string, handler: (e: unknown, ctx: object) => Promise<void> | void) => { handlers[event] = handler; },
+    getSessionName: () => "sess",
+  };
+  terminalStatusTitle(pi as never);
+  const a = makeCtx(() => {});
+  await handlers["session_start"]!(undefined, a.ctx);
+  await handlers["agent_start"]!(undefined, a.ctx); // spinner running on ctx A
+  const aTitlesBefore = a.titles().length;
+  a.stale(); // session replaced between schedule and fire — A now throws on every getter
+  await new Promise((r) => setTimeout(r, 300)); // deferred write (0ms) + spinner ticks (120ms) fire stale
+  run("stale-ctx: deferred write + spinner ticks through a replaced ctx never crash", () => {
+    assertEq(a.titles().length, aTitlesBefore, "no write landed through the stale ctx");
+  });
+  const b = makeCtx(() => {});
+  await handlers["agent_settled"]!(undefined, b.ctx); // the replacement session's own event — fresh ctx B
+  run("stale-ctx: the replacement session's fresh event re-titles normally", () => {
+    assertEq(b.titles().length > 0, true, "fresh ctx written");
+    assertEq(b.titles().at(-1)!.startsWith("✓ | π | sess"), true, "done glyph through fresh ctx");
+  });
+  await handlers["session_shutdown"]!(undefined, {} as object); // stop the spinner before exit
+})();
 
 if (failures.length > 0) {
   console.error(`terminal-status-title: ${failures.length}/${passed + failures.length} FAILED`);

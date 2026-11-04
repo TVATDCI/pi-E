@@ -23,7 +23,11 @@ import {
   inferLevelFromRoleAndTask,
   normalizeCriterionStatus,
   normalizeCommandResult,
+  runVerify,
 } from "../acceptance.ts";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let pass = 0;
 let fail = 0;
@@ -262,6 +266,50 @@ async function main(): Promise<void> {
   const wf = parseAcceptanceReport(wellFormed).report;
   check("additive: canonical 'satisfied' status unchanged", wf?.criteriaSatisfied?.[0]?.status === "satisfied");
   check("additive: canonical 'passed' result unchanged", wf?.commandsRun?.[0]?.result === "passed");
+
+  // --- 5. GRANDCHILD REAPING (live; verify workloads run as process trees) ---
+  // `npm test` spawns node → fixtures as grandchildren; a direct-child-only kill
+  // orphans the subtree. The pin drives the REAL runVerify against a scratch
+  // npm-test workload whose grandchild TRAPS SIGTERM — only the group-scoped
+  // SIGKILL rung can reap it. Pre-fix, the grandchild survives and the pin fails.
+  const reapDir = mkdtempSync(join(tmpdir(), "verify-reap-"));
+  try {
+    writeFileSync(join(reapDir, "package.json"), JSON.stringify({
+      name: "reap-fixture",
+      private: true,
+      scripts: { test: "node parent.js" },
+    }));
+    writeFileSync(join(reapDir, "parent.js"), [
+      "const { spawn } = require('node:child_process');",
+      "const g = spawn(process.execPath, ['grandchild.js'], { stdio: 'inherit' });",
+      "g.on('exit', () => process.exit(0));",
+      "setInterval(() => {}, 1 << 30); // stay alive until the grandchild goes",
+    ].join("\n") + "\n");
+    writeFileSync(join(reapDir, "grandchild.js"), [
+      "const fs = require('node:fs');",
+      "process.on('SIGTERM', () => { /* trap: only the SIGKILL rung may reap this one */ });",
+      "fs.writeFileSync('grandchild.pid', String(process.pid));",
+      "setInterval(() => {}, 1 << 30);",
+    ].join("\n") + "\n");
+    const reapResult = await runVerify({ id: "reap", kind: "test", timeoutMs: 1500 }, reapDir);
+    check("reaping: timed-out verify settles with status timed-out", reapResult.status === "timed-out");
+    let grandchildPid = 0;
+    try {
+      grandchildPid = Number(readFileSync(join(reapDir, "grandchild.pid"), "utf8").trim());
+    } catch { /* fixture never started */ }
+    check("reaping: fixture started (grandchild wrote its pid before the kill)", Number.isInteger(grandchildPid) && grandchildPid > 1);
+    if (grandchildPid > 1) {
+      // ESRCH = reaped; allow a short window for the reparented zombie to clear.
+      let reaped = false;
+      for (let i = 0; i < 20 && !reaped; i++) {
+        try { process.kill(grandchildPid, 0); } catch { reaped = true; }
+        if (!reaped) await new Promise((r) => setTimeout(r, 50));
+      }
+      check("reaping: SIGTERM-trapping grandchild is dead after the run (group kill reached the tree)", reaped);
+    }
+  } finally {
+    rmSync(reapDir, { recursive: true, force: true });
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);

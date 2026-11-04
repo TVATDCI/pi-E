@@ -205,5 +205,39 @@ check("F1: thinkingOverride WINS over the tier default on a retry hop", hopThink
 check("F1: no override + no tier level → the \"high\" floor (registry-fallback resolution)", hopThinkingLevel(undefined, undefined) === "high");
 check("F1: every current tier level round-trips through hopThinkingLevel unchanged", allCategories.every((c) => hopThinkingLevel(undefined, TIERS[c].thinkingLevel) === TIERS[c].thinkingLevel));
 
+// ── F1 spawn-args source lock (the two retry-hop call sites in spawn.ts) ──────
+// The checks above pin hopThinkingLevel's OUTCOME; these pin the ARGS actually
+// constructed at both call sites — the hop assignment must sit between the
+// downshift trigger and the spawnSub call at each site, so the spawned argv's
+// --thinking level can never fall back to the fallen model's default.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+const spawnSrc = readFileSync(join(import.meta.dirname, "..", "orchestration-engine", "spawn.ts"), "utf8");
+check(
+  "F1 args: spawnSub constructs --thinking from resolved.thinkingLevel (the args carry the hop)",
+  spawnSrc.includes('args.push("--thinking", resolved.thinkingLevel ?? "off");'),
+);
+// Site 1 — downshift-unavailable: hop assignment precedes source = "downshift-unavailable".
+const downshiftSite = spawnSrc.indexOf('source = "downshift-unavailable"');
+const hopBeforeDownshift = spawnSrc.lastIndexOf("thinkingLevel = hopThinkingLevel(", downshiftSite);
+check(
+  "F1 args: downshift-unavailable site assigns hopThinkingLevel BEFORE the site's source marker",
+  downshiftSite > 0 && hopBeforeDownshift > 0 && hopBeforeDownshift < downshiftSite,
+);
+// Site 2 — exhausted-walk: inside the candidate loop, hop assignment precedes the fallback spawn.
+const walkLoop = spawnSrc.indexOf("for (const cand of candidates)");
+const walkSpawn = spawnSrc.indexOf("await spawnSub(", walkLoop);
+const hopInWalk = spawnSrc.indexOf("thinkingLevel = hopThinkingLevel(", walkLoop);
+check(
+  "F1 args: exhausted-walk loop assigns hopThinkingLevel BEFORE the fallback spawnSub call",
+  walkLoop > 0 && hopInWalk > walkLoop && walkSpawn > hopInWalk,
+);
+// Both sites pass the live thinkingLevel INTO the spawn (the resolved object carries it).
+const resolvedSpawnIdx = spawnSrc.indexOf("await spawnSub(category, task, agent, ctx, { modelFlag, thinkingLevel, rationale }", hopInWalk);
+check(
+  "F1 args: the exhausted-walk spawn receives { modelFlag, thinkingLevel, rationale } — the hopped level is the spawned level",
+  hopInWalk > 0 && resolvedSpawnIdx > hopInWalk,
+);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

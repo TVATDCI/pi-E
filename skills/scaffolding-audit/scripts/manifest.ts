@@ -19,6 +19,7 @@ import { runScan, renderReport } from "./lib/scan-core.ts";
 import type { ManifestAnchor } from "./lib/scan-core.ts";
 import { piSurfaces } from "./lib/surfaces.ts";
 import { extractModelState, TIER_MAP_REL } from "./lib/model-state.ts";
+import { resolveManifestPaths, seedSuffixedFromLegacy, readManifestText } from "./lib/manifest-path.ts";
 
 const SCRIPT_DIR = fileURLToPath(new URL(".", import.meta.url));
 const SKILL_DIR = join(SCRIPT_DIR, "..");
@@ -36,7 +37,10 @@ const SPEC_TWIN = join(
   "spec-shared.md",
 );
 const STATE_DIR = join(SKILL_DIR, "state");
-const MANIFEST_PATH = join(STATE_DIR, "manifest.json");
+// Desk-suffixed manifest: hostname-resolved (state/manifest.<ddd|tnt>.json); the
+// legacy shared manifest.json seeds the suffixed file one-time and stays inert.
+const MANIFEST_PATHS = resolveManifestPaths(STATE_DIR);
+const MANIFEST_PATH = MANIFEST_PATHS.activePath;
 const TIER_MAP_ABS = join(AGENT_ROOT, TIER_MAP_REL);
 
 function usage(): never {
@@ -81,7 +85,7 @@ function main(): void {
   const twinText = readIfExists(SPEC_TWIN);
 
   let anchor: ManifestAnchor = {};
-  const priorText = readIfExists(MANIFEST_PATH);
+  const priorText = readManifestText(MANIFEST_PATHS)?.text;
   if (priorText !== undefined) {
     try {
       const prior: unknown = JSON.parse(priorText);
@@ -134,10 +138,18 @@ function main(): void {
     "finding-hashes": result.flags.map((f) => f.hash),
   };
   mkdirSync(STATE_DIR, { recursive: true });
-  // INV-1 exception (a): the skill's own state-dir manifest, explicit non-dry
-  // run only — the single permitted write in this entire skill.
+  // One-time legacy-seed migration: suffixed absent + legacy present → seed the
+  // suffixed file from the legacy bytes; legacy stays in place, inert (removal
+  // is a follow-up per-desk captain commit — never a code delete).
+  const seeded = seedSuffixedFromLegacy(MANIFEST_PATHS);
+  // INV-1 exception (a): the skill's own state-dir manifest (this desk's
+  // suffixed file), explicit non-dry run only — the single permitted write in
+  // this entire skill.
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n", "utf8");
-  process.stdout.write(`\nmanifest recorded: ${MANIFEST_PATH}\n`);
+  if (seeded) {
+    process.stdout.write(`legacy seed written: ${MANIFEST_PATH} (from ${MANIFEST_PATHS.legacyPath})\n`);
+  }
+  process.stdout.write(`manifest recorded: ${MANIFEST_PATH}\n`);
 }
 
 main();

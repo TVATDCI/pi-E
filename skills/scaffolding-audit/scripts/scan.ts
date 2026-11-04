@@ -14,6 +14,7 @@ import { parseRuleTable } from "./lib/spec.ts";
 import type { ManifestAnchor } from "./lib/scan-core.ts";
 import { runScan, renderReport } from "./lib/scan-core.ts";
 import { piSurfaces } from "./lib/surfaces.ts";
+import { readManifestText, resolveManifestPaths } from "./lib/manifest-path.ts";
 
 const SCRIPT_DIR = fileURLToPath(new URL(".", import.meta.url));
 const SKILL_DIR = join(SCRIPT_DIR, "..");
@@ -30,7 +31,10 @@ const SPEC_TWIN = join(
   "spec",
   "spec-shared.md",
 );
-const MANIFEST_PATH = join(SKILL_DIR, "state", "manifest.json");
+// Desk-suffixed manifest: hostname-resolved (state/manifest.<ddd|tnt>.json); the
+// legacy shared manifest.json is a migration-seed read only while the suffixed
+// file is absent.
+const MANIFEST_PATHS = resolveManifestPaths(join(SKILL_DIR, "state"));
 
 function usage(): never {
   console.error(
@@ -63,7 +67,7 @@ function readIfExists(path: string): string | undefined {
 }
 
 function readAnchor(): ManifestAnchor {
-  const text = readIfExists(MANIFEST_PATH);
+  const text = readManifestText(MANIFEST_PATHS)?.text;
   if (text === undefined) return {};
   let parsed: unknown;
   try {
