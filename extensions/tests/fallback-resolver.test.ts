@@ -177,7 +177,7 @@ for (const cat of JUDGING) {
     }
   }
 }
-check("INVARIANT: all judging-category fallbacks are strong-tier (glm-5.x/kimi/grok-4.6/deepseek-v4-pro — doctrine: no cheap models at judging nodes)", allJudgingStrong);
+check("INVARIANT: all judging-category fallbacks are strong-tier (STRONG_FLAGSHIP_RE: glm-5.x/kimi/grok-4.[67]/qwen3.8-max/gpt-5.6-luna — doctrine: no cheap models at judging nodes)", allJudgingStrong);
 check("INVARIANT: all judging categories have ≥1 per-tier fallback", allJudgingNonEmpty);
 
 // Global FALLBACK itself must be strong (it's the tail for judging categories too).
