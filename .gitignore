@@ -80,3 +80,6 @@ trust.json
 crashes.json
 .backpassrc.json
 .backpass/
+
+# pi-web-access local version-stamp artifact (desk-local; the package itself is not vendored here)
+pi-web-access/
