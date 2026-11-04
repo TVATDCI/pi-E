@@ -42,6 +42,8 @@
  * 2026-09-18 (Captain revision): ultrabrain rerouted zai/glm-5.3 → opencode-go/grok-4.6 @xhigh
  *   (glm-5.3 demoted to rung 3); deep fallbacks are glm-only cross-provider (workhorse models
  *   out of the reasoning floor). 8 of 10 categories zai-primary.
+ * 2026-11-04 (Captain trial): ultrabrain grok-4.7 → opencode-go/kimi-k3.1-pro @xhigh
+ *   (grok-4.7 demoted to first fallback; live-proven by the oracle consults 10-31 + 11-03).
  *
  * ─── STRONG-MODEL-AT-JUDGING INVARIANT ──────────────────────────────────────
  * unspecified-high / deep / ultrabrain / security-review: primaries, per-tier fallbacks AND the
@@ -234,8 +236,9 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
   },
   ultrabrain: {
     provider: "opencode-go",
-    id: "grok-4.7",
+    id: "kimi-k3.1-pro",
     fallbackModels: [
+      { provider: "opencode-go", id: "grok-4.7" },
       { provider: "opencode-go", id: "kimi-k3" },
       { provider: "opencode-go", id: "qwen3.8-max" },
       { provider: "zai-coding-cn", id: "glm-5.3" },
@@ -243,7 +246,7 @@ export const TIERS: Record<TaskCategory, TierEntry> = {
     ],
     thinkingLevel: "xhigh",
     rationale:
-      "Hardest logic; opencode-go/grok-4.7 @xhigh (union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code (last rung replaced 2026-09-18).",
+      "Hardest logic; opencode-go/kimi-k3.1-pro @xhigh (captain-worded trial 2026-11-04: new primary, live-proven by the oracle consults 2026-10-31 + 2026-11-03; union max across the chain; spawn passes the level verbatim). Fallbacks: opencode-go/grok-4.7 (demoted ex-primary) → opencode-go/kimi-k3 → opencode-go/qwen3.8-max → zai-coding-cn/glm-5.3 → opencode/kimi-k2.7-code.",
   },
   writing: {
     provider: "zai-coding-cn",
@@ -374,7 +377,7 @@ export const FALLBACK = { provider: "opencode-go", id: "gpt-5.6-luna" } as const
  * future surfaces consume ONE regex instead of re-stating the header list. Anchored per
  * alternative: `kimi-` requires a suffix; fixed ids are $-anchored — rejects `-free`/`-mini`
  * variants. Keep in sync with the header comment's prose list (:45-47). */
-export const STRONG_FLAGSHIP_RE = /^(?:glm-5[\w.-]*|kimi-(?!free)[\w.-]+|grok-4\.6|qwen3\.8-max|gpt-5\.6-luna)$/;
+export const STRONG_FLAGSHIP_RE = /^(?:glm-5[\w.-]*|kimi-(?!free)[\w.-]+|grok-4\.[67]|qwen3\.8-max|gpt-5\.6-luna)$/;
 
 /** Tier entry for a category, GUARDED: an unknown/invalid category (e.g. an unvalidated teams.yaml
  *  member.category / default_category, or a typo) falls back to DEFAULT_CATEGORY instead of
