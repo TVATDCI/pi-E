@@ -1,13 +1,13 @@
 {
-  "recorded-at": "2026-10-25T00:21:28.913Z",
+  "recorded-at": "2026-11-04T15:25:47.689Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "452e9b220eebb6a59e450c3e582beee739067531"
+    "~/.pi/agent": "96849ccb45d0a0fc292bcdc662ec170372139e41"
   },
   "model-state": {
     "source": {
       "path": "extensions/orchestration-engine/tier-map.ts",
-      "sha256": "93b4b1201c9e11ef88f45f1256158f14e93e4aa7c3b3e387dc50a05c425a5945"
+      "sha256": "c11544509540d6114803c722b051684ff91f5059a91a5dcd37aa34b7252ac18f"
     },
     "assignments": {
       "quick": {
@@ -41,8 +41,9 @@
         ]
       },
       "ultrabrain": {
-        "primary": "opencode-go/grok-4.7",
+        "primary": "opencode-go/kimi-k3.1-pro",
         "fallbacks": [
+          "opencode-go/grok-4.7",
           "opencode-go/kimi-k3",
           "opencode-go/qwen3.8-max",
           "zai-coding-cn/glm-5.3",
@@ -122,6 +123,7 @@
           "opencode/glm-5.2"
         ],
         "ultrabrain": [
+          "opencode-go/grok-4.7",
           "opencode-go/kimi-k3",
           "opencode-go/qwen3.8-max",
           "zai-coding-cn/glm-5.3",
@@ -131,7 +133,7 @@
     }
   },
   "finding-hashes": [
-    "5b50af825d20df7c",
-    "1517dbce9d075446"
+    "ef2adb121c372afe",
+    "f4d079f8a55df4b4"
   ]
 }
