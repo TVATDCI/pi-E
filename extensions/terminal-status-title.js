@@ -2,7 +2,7 @@
 // Source: kunchenguid/dotfiles (MIT-0, Khunchen), absorbed 2026-09-25
 // (absorption round, plan item C). Adaptations: this provenance header +
 // named exports of the pure helpers for unit testing — otherwise identical.
-// Title: "<spinner|✓|✗|○> | π | <session-name-or-cwd>" — herdr pane titles
+// Title: "<spinner|✓|○> | π | <session-name-or-cwd>" — herdr pane titles
 // pick this up per-pane: fleet-wide at-a-glance agent state.
 
 const DEFAULT_TITLE = "π";
@@ -73,10 +73,17 @@ export default function terminalStatusTitle(pi) {
   }
 
   function writeTitle(ctx = lastCtx) {
-    if (!ctx?.hasUI) return;
-
-    lastCtx = ctx;
-    ctx.ui.setTitle(formatTitle(pi, ctx, status, spinnerFrame));
+    // Stale-runtime guard: after session replacement/reload, a captured ctx/pi's
+    // asserting getters (hasUI, ui, getSessionName) throw — a timer-scheduled
+    // write through them must be a no-op, never a crash. The replacement
+    // session's own session_start re-titles through its fresh ctx/pi.
+    try {
+      if (!ctx?.hasUI) return;
+      lastCtx = ctx;
+      ctx.ui.setTitle(formatTitle(pi, ctx, status, spinnerFrame));
+    } catch {
+      return; // stale runtime — cosmetic write dropped, never a crash
+    }
   }
 
   function stopSpinner() {

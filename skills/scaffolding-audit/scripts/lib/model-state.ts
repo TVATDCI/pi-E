@@ -10,6 +10,9 @@
  */
 
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
+import { readFileSync } from "node:fs";
+import process from "node:process";
 
 export type ModelState = {
   source: { path: string; sha256: string };
@@ -18,6 +21,30 @@ export type ModelState = {
 };
 
 export const TIER_MAP_REL = "extensions/orchestration-engine/tier-map.ts";
+
+/** Desk hostname for the desk-suffixed manifest table (lib/manifest-path.ts).
+ * SCAFFOLD_DESK_HOST env override > os.hostname > /etc/hostname — lowercased.
+ * Never throws: an empty/unknown host fails closed at the suffix-table lookup. */
+export function resolveDeskHostname(): string {
+  let env: string | undefined;
+  try {
+    env = process.env.SCAFFOLD_DESK_HOST;
+  } catch {
+    env = undefined; // env permission not granted — override simply unavailable
+  }
+  if (env !== undefined && env !== "") {
+    return env.trim().toLowerCase();
+  }
+  try {
+    return hostname().trim().toLowerCase();
+  } catch {
+    try {
+      return readFileSync("/etc/hostname", "utf8").trim().toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+}
 
 export const JUDGING_CATEGORIES: readonly string[] = [
   "unspecified-high",

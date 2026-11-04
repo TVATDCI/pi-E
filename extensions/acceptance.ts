@@ -693,7 +693,9 @@ async function noStagedFilesOk(cwd: string): Promise<boolean> {
 
 // --- enum verify runner (SECURITY-CRITICAL) ---
 
-function runVerify(cmd: VerifySpec, cwd: string, signal?: AbortSignal): Promise<VerifyResult> {
+// Exported for unit testing (the live grandchild-reaping pin drives it against a
+// scratch npm-test workload; the enum-argv sandbox itself is unchanged).
+export function runVerify(cmd: VerifySpec, cwd: string, signal?: AbortSignal): Promise<VerifyResult> {
   return new Promise((resolve) => {
     const argv = VERIFY_ARGV[cmd.kind];
     const timeoutMs = cmd.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS;
@@ -709,7 +711,17 @@ function runVerify(cmd: VerifySpec, cwd: string, signal?: AbortSignal): Promise<
       env: process.env, // parent env only — NO YAML env. Required for npm/tsc to function.
       shell: false, // fixed argv — never shell interpolation
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true, // own process group: the group kill below reaches grandchildren
     });
+    // Group kill, scoped to THIS verify child's process group only (never a
+    // blanket killer): `npm test` spawns node → test runners → workers as
+    // grandchildren; a direct-child kill alone orphans the whole subtree. The
+    // negative pid signals the group (POSIX); the direct-child kill rides along
+    // as fallback where group signaling is unavailable.
+    const killTree = (sig: "SIGTERM" | "SIGKILL"): void => {
+      try { process.kill(-child.pid!, sig); } catch { /* group already gone */ }
+      try { child.kill(sig); } catch { /* already exited */ }
+    };
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
     let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -725,9 +737,9 @@ function runVerify(cmd: VerifySpec, cwd: string, signal?: AbortSignal): Promise<
     const escalate = (status: "timed-out" | "failed"): void => {
       if (killedStatus !== undefined) return;
       killedStatus = status;
-      try { child.kill("SIGTERM"); } catch { /* already gone */ }
+      killTree("SIGTERM");
       killTimer = setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        killTree("SIGKILL");
         // Grace past SIGKILL: force-settle so an unkillable child cannot wedge the gate.
         graceTimer = setTimeout(() => finish(killedStatus!), 500);
       }, 1000);

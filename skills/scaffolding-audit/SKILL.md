@@ -25,7 +25,8 @@ audited it on change. This skill is that audit. Posture first, always:
 
 - **Propose-only (INV-1).** Every flag is a suggestion with evidence. This skill never
   deletes, edits, or applies anything — the only permitted writes are its own state-dir
-  manifest (only via the explicit non-dry `manifest.ts` run) and stdout.
+  manifest (desk-suffixed, hostname-resolved — `state/manifest.<ddd|tnt>.json`; only via
+  the explicit non-dry `manifest.ts` run) and stdout.
 - **Read-only by default.** `scan.ts` and `drift-check.ts` never write. Run the
   pure-read legs with `deno run --allow-read` — the permission grant itself proves
   the read-only posture (the scan's git-anchor and record legs add non-write spawn
@@ -35,6 +36,19 @@ audited it on change. This skill is that audit. Posture first, always:
   error. No code path guesses model-change days from ambient state.
 - **Never read, print, or write anything from `~/.pi/agent/auth.json`.** The
   live-endpoint leg belongs to `model-audit`; this skill only invokes that skill.
+- **Desk-suffixed manifests.** The state manifest is per-desk —
+  `state/manifest.ddd.json` on dropdeaddev, `state/manifest.tnt.json` on tnt —
+  resolved through the same hostname mechanism as the oc-sisyphus twin
+  (`SCAFFOLD_DESK_HOST` env override; unknown host = fail-closed throw, never a
+  shared-file fallback). This kills the two-desk ping-pong where each desk's
+  re-anchor of the single shared `state/manifest.json` invalidated the other's
+  drift check on pull. Both suffixed files are git-tracked per-desk audit
+  records: each desk commits ONLY its own file, pulls never conflict. The legacy
+  shared `state/manifest.json` is a ONE-TIME migration seed (read-only for
+  drift; a written seed-copy only in the recording path) and is never read once
+  the desk owns its suffixed file — a stale shared file can neither alarm nor
+  silence anyone. Its removal is a follow-up per-desk captain commit, never part
+  of a code change.
 - **Vocabulary authority is the vendored spec** at `spec/spec-shared.md` (shared with
   the sis twin, hash-pinned per OPEN-1). Never re-define or re-word the five classes
   locally. Every audit starts with the audit-time hash-identity check (§ Vendoring).
@@ -51,8 +65,9 @@ audited it on change. This skill is that audit. Posture first, always:
 1. **Hash-identity check** (OPEN-1): `spec.ts` hashes the vendored spec; when the twin
    copy is reachable, hashes must match — mismatch = hard stop (divergence, AC-13).
 2. **Drift check** (cheap leg, manifest-diff only — INV-2):
-   `deno run --allow-read scripts/drift-check.ts` — opens ONLY the state manifest +
-   tier-map assignments; prints the single reminder flag
+   `deno run --allow-read scripts/drift-check.ts` — opens ONLY the desk-suffixed
+   state manifest (or, while it is absent, the legacy shared `state/manifest.json`
+   as a one-time migration seed) + tier-map assignments; prints the single reminder flag
    `routing state drifted since last audit — run scaffolding-audit` when stale or
    never-audited; silent when fresh; never writes.
 3. **Scan** (invoked leg):
@@ -70,9 +85,10 @@ audited it on change. This skill is that audit. Posture first, always:
 6. **Record (explicit non-dry only).**
    `deno run --allow-read --allow-run=git --allow-env --allow-write=<state-dir>
    scripts/manifest.ts --scope=full` — runs the scan and writes
-   `state/manifest.json` (recorded-at, surface-scope, last-audit-commit, model-state,
-   finding-hashes per the vendored spec §3). Never at session start; superseded by
-   each new audit; no cleanup job.
+   `state/manifest.<ddd|tnt>.json` (recorded-at, surface-scope, last-audit-commit,
+   model-state, finding-hashes per the vendored spec §3; one-time legacy-seed
+   migration on the first post-suffix recording). Never at session start;
+   superseded by each new audit; no cleanup job.
 
 > **Flag provenance.** `--allow-env` must be **unscoped** on both spawn legs — deno's
 > node-compat `child_process` copies the whole env table while normalizing the spawn
