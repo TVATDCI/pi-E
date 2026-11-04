@@ -193,5 +193,17 @@ const allCategories = Object.keys(TIERS) as Array<keyof typeof TIERS>;
 const allNonEmpty = allCategories.every((c) => (TIERS[c].fallbackModels ?? []).length > 0);
 check("FLOOR: every category has ≥1 per-tier fallback entry", allNonEmpty);
 
+// ── Retry-hop thinking level (F1 mechanism fix) ───────────────────────────────
+// A retry hop (downshift-unavailable pick + every exhausted-walk rung) carries the TIER's
+// thinking level, not a hardcoded "high" — union max across the chain, as the tier rationales
+// claim. A caller thinkingOverride always wins; "high" is only the floor when neither is set
+// (e.g. a registry-fallback resolution carries no tier thinkingLevel).
+import { hopThinkingLevel } from "../orchestration-engine/tier-map.ts";
+check("F1: ultrabrain retry hops walk @xhigh (tier default carried, union max)", hopThinkingLevel(undefined, TIERS.ultrabrain.thinkingLevel) === "xhigh");
+check("F1: deep retry hops walk @max (tier default carried)", hopThinkingLevel(undefined, TIERS.deep.thinkingLevel) === "max");
+check("F1: thinkingOverride WINS over the tier default on a retry hop", hopThinkingLevel("low", TIERS.deep.thinkingLevel) === "low");
+check("F1: no override + no tier level → the \"high\" floor (registry-fallback resolution)", hopThinkingLevel(undefined, undefined) === "high");
+check("F1: every current tier level round-trips through hopThinkingLevel unchanged", allCategories.every((c) => hopThinkingLevel(undefined, TIERS[c].thinkingLevel) === TIERS[c].thinkingLevel));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

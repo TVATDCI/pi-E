@@ -26,7 +26,7 @@ if (!isMain) {
 
     if (NETWORK) {
       console.log("=== searchAll: composite keyless search ===");
-      const s = searchAll("typescript type guards");
+      const s = await searchAll("typescript type guards");
       console.log(s.slice(0, 400) + (s.length > 400 ? "\n…" : ""));
       ok("search returns non-empty", s.length > 0 && !s.startsWith("(no keyless"));
       ok("search bounded to SEARCH_MAX_CHARS", s.length <= 6000);

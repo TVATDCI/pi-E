@@ -24,7 +24,7 @@
 // continues. `acceptanceRole` in ②a influenced REVIEW inference only; ②b added level-override parity
 // (read-only⇒attested, writer⇒checked via inferLevelFromRoleAndTask + a slimmed task-intent
 // classifier) and enum synonym normalization in canonicalizeReport.
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export type AcceptanceLevel = "none" | "attested" | "checked" | "verified";
@@ -671,16 +671,24 @@ export function stripAcceptanceReport(output: string): string {
 
 // --- structural checks ---
 
-/** True if no staged files exist in `cwd` (untracked/modified-unstaged are fine). Non-repo ⇒ pass. */
-function noStagedFilesOk(cwd: string): boolean {
-  try {
-    const r = spawnSync("git", ["status", "--short"], { cwd, encoding: "utf-8" });
-    if (r.status !== 0) return true;
-    // git status --short XY format: staged iff col 0 is non-space and not '?'
-    return !r.stdout.split("\n").some((l) => l.length > 0 && l[0] !== " " && l[0] !== "?");
-  } catch {
-    return true;
-  }
+/** True if no staged files exist in `cwd` (untracked/modified-unstaged are fine). Non-repo ⇒ pass.
+ *  Async spawn (runGit model) — the former spawnSync blocked pi's whole event loop on the git
+ *  call. Fail-open on any failure, mirroring the sync original. */
+async function noStagedFilesOk(cwd: string): Promise<boolean> {
+  const out = await new Promise<string | null>((resolve) => {
+    let stdout = "";
+    let settled = false;
+    const finish = (r: string | null): void => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
+    const proc = spawn("git", ["status", "--short"], { cwd, stdio: ["ignore", "pipe", "ignore"] });
+    const timer = setTimeout(() => { try { proc.kill(); } catch { /* already gone */ } finish(null); }, 10_000);
+    proc.on("error", () => finish(null));
+    proc.stdout?.setEncoding("utf8");
+    proc.stdout?.on("data", (d: string) => { stdout += d; });
+    proc.on("close", (code) => finish(code === 0 ? stdout : null));
+  });
+  if (out === null) return true;
+  // git status --short XY format: staged iff col 0 is non-space and not '?'
+  return !out.split("\n").some((l) => l.length > 0 && l[0] !== " " && l[0] !== "?");
 }
 
 // --- enum verify runner (SECURITY-CRITICAL) ---
@@ -705,12 +713,23 @@ function runVerify(cmd: VerifySpec, cwd: string, signal?: AbortSignal): Promise<
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    // Terminal status once we have KILLED the child ("timed-out" | "failed"). Recorded, not
+    // resolved: resolution waits for `close` so the escalation below gets its window.
+    let killedStatus: VerifyResult["status"] | undefined;
     // SIGTERM → SIGKILL escalation: a child that traps/ignores SIGTERM (watch-mode test runner,
-    // trapped signal) must not be orphaned indefinitely on the security-critical path.
-    const escalate = (): void => {
+    // trapped signal) must not be orphaned indefinitely on the security-critical path. The gate
+    // resolves on `close` (or the post-SIGKILL grace below for an unkillable D-state child) —
+    // NEVER synchronously after the kill: that clears killTimer and silently disarms the SIGKILL,
+    // which is the dead-escalation bug this closes (a verify child could outlive its own timeout).
+    const escalate = (status: "timed-out" | "failed"): void => {
+      if (killedStatus !== undefined) return;
+      killedStatus = status;
       try { child.kill("SIGTERM"); } catch { /* already gone */ }
       killTimer = setTimeout(() => {
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        // Grace past SIGKILL: force-settle so an unkillable child cannot wedge the gate.
+        graceTimer = setTimeout(() => finish(killedStatus!), 500);
       }, 1000);
     };
     const finish = (status: VerifyResult["status"]): void => {
@@ -718,23 +737,18 @@ function runVerify(cmd: VerifySpec, cwd: string, signal?: AbortSignal): Promise<
       settled = true;
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      if (graceTimer) clearTimeout(graceTimer);
       signal?.removeEventListener("abort", onAbort);
       resolve({ id: cmd.id, kind: cmd.kind, status, durationMs: Date.now() - started, output: out.slice(0, 1024) || undefined });
     };
-    const timer = setTimeout(() => {
-      escalate();
-      finish("timed-out");
-    }, timeoutMs);
-    const onAbort = (): void => {
-      escalate();
-      finish("failed");
-    };
+    const timer = setTimeout(() => escalate("timed-out"), timeoutMs);
+    const onAbort = (): void => escalate("failed");
     if (signal) {
       if (signal.aborted) onAbort();
       else signal.addEventListener("abort", onAbort, { once: true });
     }
     child.on("error", () => finish("failed"));
-    child.on("close", (code) => finish(code === 0 ? "passed" : "failed"));
+    child.on("close", (code) => finish(killedStatus ?? (code === 0 ? "passed" : "failed")));
   });
 }
 
@@ -775,7 +789,7 @@ export async function evaluateAcceptance(
   // checked/verified: structural (no-staged-files) when evidence requires it
   if (a.level === "checked" || a.level === "verified") {
     const needStructural = a.evidence.includes("no-staged-files");
-    const structuralOk = !needStructural || noStagedFilesOk(cwd);
+    const structuralOk = !needStructural || (await noStagedFilesOk(cwd));
     if (report && structuralOk) achieved = "checked";
   }
 

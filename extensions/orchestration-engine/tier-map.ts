@@ -458,6 +458,22 @@ export function resolveModel(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Retry-hop thinking level (F1 mechanism fix) — PURE, pinned in fallback-resolver.test.ts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The thinking level for a RETRY hop — the downshift-unavailable pick and every rung of the
+ *  exhausted-walk — so a retry carries the tier's own level instead of silently dropping to
+ *  "high": an ultrabrain walk stays @xhigh, a deep walk @max (the union-max discipline the
+ *  ultrabrain rationale claims). A caller thinkingOverride always wins; "high" is only the
+ *  floor when neither is set (e.g. a registry-fallback resolution carries no tier level). */
+export function hopThinkingLevel(
+  thinkingOverride: string | undefined,
+  tierThinkingLevel: ThinkingLevel | undefined,
+): ThinkingLevel {
+  return (thinkingOverride as ThinkingLevel | undefined) ?? tierThinkingLevel ?? "high";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Fallback chain resolver (PORT-PLAN-v0.40.md ③) — PURE, unit-testable (no registry/spawn).
 // ─────────────────────────────────────────────────────────────────────────────
 

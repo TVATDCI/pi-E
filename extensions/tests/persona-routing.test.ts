@@ -34,6 +34,7 @@ import {
   FALLBACK,
   type ModelRegistryLike,
 } from "../orchestration-engine/tier-map.ts";
+import { dispatchDescription } from "../orchestration-engine/description.ts";
 import { resolveFunctionalAgent } from "../orchestration-engine/agent-map.ts";
 import {
   guardOperatorOnlyAutoPath,
@@ -245,14 +246,45 @@ const readme = readFileSync(join(ROOT, "README.md"), "utf-8");
 const agentsMd = readFileSync(join(ROOT, "AGENTS.md"), "utf-8");
 const modelTiersSkill = readFileSync(join(ROOT, "skills", "model-tiers", "SKILL.md"), "utf-8");
 const indexTs = readFileSync(join(ROOT, "extensions/orchestration-engine/index.ts"), "utf-8");
-check("README category table carries the security-review row with the tier-map model", readme.includes("| `security-review`    | zai-coding-cn/glm-5.3"));
-check("README category table carries the local-research row with the tier-map model", readme.includes("| `local-research`     | zai-coding-cn/glm-5.3-flash"));
-check("README rows name the new default seats (security-reviewer / home-keeper)", readme.includes("| security-reviewer |") && readme.includes("| home-keeper"));
+check("README category table: EVERY row matches TIERS cell-exact (model/thinking/quota/agent/fallbacks)", (() => {
+  // F3 pin: the README table is a derived surface — every cell is checked against TIERS +
+  // agent-map (the former 2-row pin left 10 rows of free text that drifted several revisions).
+  const quotaCell = (provider: string, id: string): string =>
+    provider === "zai-coding-cn" ? (id.includes("flash") ? "zai plan · 1.2× peak" : "zai plan · 3× peak") : "external";
+  let ok = true;
+  for (const [cat, e] of Object.entries(TIERS)) {
+    const row = readme.split("\n").find((l) => l.startsWith(`| \`${cat}\``));
+    const cells = row?.split("|").map((c) => c.trim()) ?? [];
+    const fbs = (e.fallbackModels ?? []).map((f) => `${f.provider}/${f.id}`).join(" → ");
+    const rowOk = cells[1] === `\`${cat}\`` && cells[2] === `${e.provider}/${e.id}` && cells[3] === (e.thinkingLevel ?? "off") && cells[4] === quotaCell(e.provider, e.id) && cells[5] === resolveFunctionalAgent(cat as never) && cells[6] === fbs;
+    if (!rowOk) {
+      ok = false;
+      console.log(`    ✗ README row ${cat}: got [${cells.slice(1, 7).join(" | ")}] want [\`${cat}\` | ${e.provider}/${e.id} | ${e.thinkingLevel ?? "off"} | ${quotaCell(e.provider, e.id)} | ${resolveFunctionalAgent(cat as never)} | ${fbs}]`);
+    }
+  }
+  return ok;
+})());
+// F2 pin: the dispatch tool description is DERIVED from TIERS at registration (description.ts)
+// — every category's provider/id must appear, and the operator-seat prose stays pinned.
+{
+  const desc = dispatchDescription();
+  let descOk = true;
+  for (const [cat, e] of Object.entries(TIERS)) {
+    if (!desc.includes(`${cat} (${e.provider}/${e.id})`)) {
+      descOk = false;
+      console.log(`    ✗ description missing derived row: ${cat} (${e.provider}/${e.id})`);
+    }
+  }
+  check("dispatch description: EVERY category row derived from TIERS", descOk);
+  check("dispatch description keeps the security-review read-only seat prose", desc.includes("security-review: deep read-only security gate"));
+  check("dispatch description keeps the local-research OPERATOR-ONLY seat prose", desc.includes("local-research: OPERATOR-ONLY vehicle"));
+}
+check("index.ts registers the DERIVED description (no hand-maintained category→model copy)", indexTs.includes("dispatchDescription()"));
+check("index.ts derives the agent model-pin sentence at registration (hardcoded count gone)", !indexTs.includes("of 14 agents pin a model") && indexTs.includes("agents pin a model"));
 check("AGENTS.md strong-model line swapped to security-review→security-reviewer (AGENTS.md or model-tiers skill)", (agentsMd.includes("`security-review`\u2192security-reviewer") || modelTiersSkill.includes("`security-review`\u2192security-reviewer")) && !agentsMd.includes("reviewer-security"));
 check("AGENTS.md notes the glm-family-only security-review chain (AGENTS.md or model-tiers skill)", agentsMd.includes("glm-family-only") || modelTiersSkill.includes("glm-family-only"));
-check("dispatch description lists both categories, local-research marked OPERATOR-ONLY", indexTs.includes("security-review: deep read-only security gate") && indexTs.includes("local-research: OPERATOR-ONLY vehicle"));
-check("dispatch tool schema accepts the new categories (CategoryEnum literals)", indexTs.includes('Type.Literal("security-review")') && indexTs.includes('Type.Literal("local-research")'));
-check("dispatch description's default-operative line includes the new seats", indexTs.includes("security-review\u2192security-reviewer, local-research\u2192home-keeper"));
+check("dispatch description tool schema accepts the new categories (CategoryEnum literals)", indexTs.includes('Type.Literal("security-review")') && indexTs.includes('Type.Literal("local-research")'));
+check("dispatch description's default-operative line includes the new seats (derived)", dispatchDescription().includes("security-review\u2192security-reviewer, local-research\u2192home-keeper"));
 check("/tiers surfaces 12 categories (count drift is loud in docs too)", !indexTs.includes("10 categories") && !readme.includes("10 categories"));
 
 console.log(`\n${pass} passed, ${fail} failed`);

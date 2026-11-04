@@ -5,11 +5,12 @@
 import { SessionManager, parseSessionEntries, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import { parse as yamlParse } from "yaml";
 import { isPeakHours, TIERS, READ_ONLY_CATEGORIES, tierEntryFor, type TaskCategory } from "./tier-map.ts";
+import { dispatchDescription } from "./description.ts";
 import { aggregateDispatchLog, quotaMarker, type DispatchLogEntry } from "./routing-stats.ts";
 import { resolveAndSpawn, loadPersona, sessionKey } from "./spawn.ts";
 import { OPERATOR_ONLY_MARKER, guardOperatorOnlyAutoPath } from "./dispatch-guard.ts";
@@ -25,6 +26,24 @@ export const COST_DISCIPLINE_TEXT =
   "Delegate grunt work to dispatch(category) — cheaper sub-agents do the work, you synthesize results. " +
   "Codebase search, implementation, investigation, writing, UI work — all have dedicated operatives. " +
   "Reserve your tokens for decisions and synthesis. The cheapest model that does the job is the right model.";
+
+/** Agent model-pin sentence, DERIVED from the live agents dir at registration (the former
+ *  hardcoded "0 of 14" count rotted silently as personas came and went). Counts .md personas
+ *  whose frontmatter carries a `model:` line — the same field loadPersona honors. */
+function agentModelPinSentence(): string {
+  try {
+    const dir = join(os.homedir(), ".pi", "agent", "agents");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+    let pinned = 0;
+    for (const f of files) {
+      const m = readFileSync(join(dir, f), "utf-8").match(/^---\n([\s\S]*?)\n---/);
+      if (m && /^model:\s*\S+/m.test(m[1])) pinned++;
+    }
+    return `${pinned} of ${files.length} agents pin a model — category is the sole model authority. `;
+  } catch {
+    return "Category is the sole model authority (an agent pins a model only via explicit frontmatter). ";
+  }
+}
 
 /** Defensive text extraction for the input event (C10): the docs type event.text, but this
  *  module must not depend on the exact runtime shape across pi bumps — unknown-safe narrow. */
@@ -310,17 +329,8 @@ export default function (pi: ExtensionAPI) {
     name: "dispatch",
     label: "Dispatch",
     description:
-      "Delegate a sub-task to an isolated sub-agent. BLOCKS until finished. " +
-      "Pick the category that matches the task's weight — this chooses the model via tier-map AND auto-resolves a functional agent (Matrix operative). " +
-      "When agent is omitted AND no team is specified, the category's default operative is used: " +
-      "quick→keymaker, unspecified→trinity, deep→morpheus, ultrabrain→neo, writing→mouse, visual-engineering/artistry→architect, research→researcher, git-commit-message→seraph, security-review→security-reviewer, local-research→home-keeper. " +
-      "Explicit agent= overrides the default (e.g. agent='momus' for a PRD gate, agent='oracle' for architecture reasoning). " +
-      "Categories (tier-map.ts is authoritative): quick (zai/glm-5.3-flash), unspecified-low (zai/glm-5.3-flash), unspecified-high (zai/glm-5.3), " +
-      "deep (zai/glm-5.3), ultrabrain (opencode-go/grok-4.7), writing (zai-coding-cn/glm-5.3-flash), visual-engineering (zai/glm-5.3-flash), artistry (opencode-go/minimax-m3), research (zai-coding-cn/glm-5.3-flash), git-commit-message (zai-coding-cn/glm-5.3-flash). " +
-      "security-review: deep read-only security gate (zai/glm-5.3 @high; glm-only strong chain; tools pinned to read,grep,find,ls — the seat never writes). " +
-      "local-research: OPERATOR-ONLY vehicle (zai/glm-5.3-flash, flash-family fallbacks only) — local synthesis + housekeeping for the operator's own dispatches; auto-routing into it BOUNCES unless the operator named home-keeper in their typed message this turn; explicit agent=home-keeper stays legal. " +
-      "Routing: for vague/ambiguous work (UX, product, planning, 'scoping IS the task') prefer writing/unspecified-low (reads intent) — reserve deep/ultrabrain for well-scoped hard tasks; they loop on open-ended goals (tier-map.ts ROUTING GUARDRAIL). " +
-      "0 of 14 agents pin a model — category is the sole model authority. " +
+      dispatchDescription() +
+      agentModelPinSentence() +
       "One focused objective per dispatch.",
     parameters: Type.Object({
       task: Type.String({ description: "The complete, self-contained sub-task" }),
