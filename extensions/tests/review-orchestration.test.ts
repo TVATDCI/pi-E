@@ -68,5 +68,22 @@ check("gate: reviewed + explicit ⇒ no spawn (already done)", shouldOrchestrate
 check("gate: undefined provenance + explicit ⇒ no spawn", shouldOrchestrateReview(undefined, true) === false);
 check("gate: rejected + explicit ⇒ no spawn (evidence failed)", shouldOrchestrateReview("rejected", true) === false);
 
+// ── reviewer seat @high pin (source lock on the ②b review spawn site) ────────────
+// The reviewer seat is pinned to @high (captain ruling: review is evidence-breadth work on the
+// affordable deep category — @max rent buys the least there; @max stays reserved for ultrabrain-class
+// synthesis, with per-task escalation available). Source-locked in the fast-follow F1 pin shape: the
+// review spawn line in chain-runner must carry thinkingOverride "high" (which beats the deep tier's
+// @max at the primary AND on every fallback hop via hopThinkingLevel), no @max thinking override may
+// appear anywhere in chain-runner, and REVIEW_CATEGORY must stay "deep" (other consumers keep @max).
+// A regression to @max at the review site fails here.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+const chainRunnerSrc = readFileSync(join(import.meta.dirname, "..", "chain-runner.ts"), "utf8");
+const reviewSpawnLine = chainRunnerSrc.split("\n").find((l) => l.includes('"review-orchestration"') && l.includes("resolveAndSpawn"));
+check("seat pin: the ②b review spawn site exists in chain-runner", reviewSpawnLine !== undefined);
+check("seat pin: review spawn passes thinkingOverride \"high\" (the seat runs @high)", reviewSpawnLine?.includes('thinkingOverride: "high"') === true);
+check("seat pin: no @max thinking override anywhere in chain-runner (regression guard)", !chainRunnerSrc.includes('thinkingOverride: "max"'));
+check("seat pin: REVIEW_CATEGORY stays \"deep\" (other deep consumers keep the tier @max default)", chainRunnerSrc.includes('const REVIEW_CATEGORY: TaskCategory = "deep"'));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

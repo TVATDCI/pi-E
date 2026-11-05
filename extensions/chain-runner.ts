@@ -152,9 +152,12 @@ export function loadChains(ctx: ExtensionContext): Map<string, Chain> {
 
 // ②b reviewer orchestration. The independent reviewer is spawned ONLY on an explicit review.required
 // (Q2.1); auto-inferred/risky review stays a badge. Model: category "deep" — the tier-map deep entry
-// (zai/glm-5.3 @max) supplies it — engineering-standards judgment. The reviewer agent is read-only;
-// reuses the trusted resolveAndSpawn (inherits the ① budget nudge + dispatch-log). Failure / no structured
-// block ⇒ returns undefined ⇒ the caller leaves a review-required badge + warns (Q-2b-3, non-terminal).
+// (zai/glm-5.3) supplies it — engineering-standards judgment. The seat runs @high via the
+// thinkingOverride pin below (caller override beats the deep tier's @max at the primary AND on every
+// fallback hop): review is evidence-breadth work, @max stays reserved for ultrabrain-class synthesis.
+// The reviewer agent is read-only; reuses the trusted resolveAndSpawn (inherits the ① budget nudge +
+// dispatch-log). Failure / no structured block ⇒ returns undefined ⇒ the caller leaves a review-required
+// badge + warns (Q-2b-3, non-terminal).
 const REVIEW_CATEGORY: TaskCategory = "deep";
 
 async function runReviewer(
@@ -172,7 +175,7 @@ async function runReviewer(
   // F2: resolve the reviewer's own budgets (category "deep" has no turn/tool default ⇒ no nudge today, but
   // the spawn is budget-aware) and accumulate its usage into the shared session total.
   const reviewerBudgets = resolveBudgets({ category: REVIEW_CATEGORY, readOnlyCategories: READ_ONLY_CATEGORIES });
-  const result = await resolveAndSpawn(pi, task, REVIEW_CATEGORY, agent, cwd, ctx, undefined, signal, "review-orchestration", { budgets: reviewerBudgets, toolsOverride: "read,grep,find,ls" });
+  const result = await resolveAndSpawn(pi, task, REVIEW_CATEGORY, agent, cwd, ctx, undefined, signal, "review-orchestration", { budgets: reviewerBudgets, toolsOverride: "read,grep,find,ls", thinkingOverride: "high" });
   accumulateUsage(result.usage); // F2: count reviewer spend toward the (dormant) usageBudget gate
   if (result.code !== 0 || !result.output.trim()) return undefined; // reviewer failed ⇒ caller leaves review-required badge
   return parseReviewerResult(result.output);
