@@ -4,6 +4,10 @@ Dated era/provenance record for the routing tier map (`extensions/orchestration-
 
 **Convention** (captain ruling 2026-11-04, enforced by `extensions/tests/tier-map-comment-hygiene.test.ts`): the tier-map file carries LIVE CONSTRAINTS only, tightened to their minimal true statement. Every dated reroute story, demotion history, dashboard-verification note, and provenance cite lands HERE as a dated entry — knowledge moves, never evaporates. Future model changes: update the map, then append the story below.
 
+## Reviewer seat pin — ②b @high (2026-11-05)
+
+- **Reviewer seat pinned @high** — captain ruling (2026-11-05, resolving the audit's F10 held call): the ②b independent reviewer spawned by review-orchestration (`chain-runner.ts` `runReviewer`, category "deep") now passes `thinkingOverride: "high"` at the spawn site, so the seat runs @high while the deep category keeps its @max default for every other consumer. The caller override wins through the fallback ladder too (`hopThinkingLevel`), so a downshifted reviewer never silently climbs back to @max. Rationale: review is evidence-breadth work on the affordable deep category (glm-5.3); @max rent buys the least there; @max stays reserved for ultrabrain-class synthesis, with per-task escalation available when a review genuinely needs it. Pinned source-lock style in `extensions/tests/review-orchestration.test.ts` (the ext-fast-follow F1 pin shape): the review spawn line must carry the @high override, no `thinkingOverride: "max"` may appear anywhere in chain-runner, and `REVIEW_CATEGORY` must stay "deep" — a regression to @max at the review site fails the suite.
+
 ## Extension fixes — arc `ext-fast-follow` (2026-11-04)
 
 Fast-follow to `ext-fix-round-1` (four scoped items; the chore PR re-anchor + gitignore rides separately, open at the time of this round):
