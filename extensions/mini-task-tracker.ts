@@ -9,13 +9,18 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { Container, SelectList, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { SelectItem } from "@earendil-works/pi-tui";
-import { isHumanTurn } from "./lib/upstream-adapter.ts";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 
 type Status = "idle" | "inprogress" | "done";
 interface Task { id: number; text: string; status: Status; }
 interface TaskDetails { action: string; tasks: Task[]; nextId: number; error?: string; }
 
-const NEXT: Record<Status, Status> = { idle: "inprogress", inprogress: "done", done: "idle" };
+// Toggle semantics (task-ui-toggle-spin fix, 2026-11-06): done is ABSORBING.
+// The old cycle (done -> idle) let the agent's own "mark done" click spin a task
+// straight back to idle, which re-triggered the guard banner forever.
+const NEXT: Record<Status, Status> = { idle: "inprogress", inprogress: "done", done: "done" };
 const ICON: Record<Status, string> = { idle: "○", inprogress: "●", done: "✓" };
 // Max pending rows shown in the always-on widget (done is collapsed into the
 // count). Keeps the widget bounded; browse the full stack via the /tasks overlay.
@@ -32,10 +37,59 @@ const Params = Type.Object({
   id: Type.Optional(Type.Number({ description: "Task ID (for toggle)" })),
 });
 
+// Durable sidecar state (the restart leg of the toggle-spin fix): the session
+// branch replay time-travels with the branch pointer, so a resumed or forked
+// session could resurrect done tasks as incomplete. The sidecar holds the
+// session's LAST mutation state on disk and wins over branch replay; a missing
+// or unparsable sidecar falls back to the branch as before.
+const SIDECAR_DIR = () => path.join(homedir(), ".pi", "agent", ".task-state");
+const SIDECAR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface Sidecar {
+  tasks: Task[];
+  nextId: number;
+  savedAt: number;
+}
+
+function sidecarPath(sessionId: string): string {
+  return path.join(SIDECAR_DIR(), `${sessionId}.json`);
+}
+
+function persistKernel(sessionId: string, state: Sidecar): boolean {
+  try {
+    mkdirSync(SIDECAR_DIR(), { recursive: true });
+    writeFileSync(sidecarPath(sessionId), JSON.stringify(state));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function loadSidecar(sessionId: string): Sidecar | undefined {
+  try {
+    const file = sidecarPath(sessionId);
+    if (!existsSync(file)) return undefined;
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Sidecar;
+    if (!Array.isArray(raw?.tasks)) return undefined;
+    return raw;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   let tasks: Task[] = [];
   let nextId = 1;
-  let nudgedThisCycle = false;
+  let currentSessionId: string | undefined;
+  // Nudge-once-per-task (the nag leg of the toggle-spin fix): a parked task must
+  // not re-fire the incomplete banner on every turn - one nudge per task id,
+  // cleared only when the list changes identity (reconstruct/clear).
+  const nudgedTaskIds = new Set<number>();
+
+  function persist(): void {
+    if (!currentSessionId) return;
+    persistKernel(currentSessionId, { tasks, nextId, savedAt: Date.now() });
+  }
 
   const snapshot = (action: string, error?: string): TaskDetails => ({
     action,
@@ -81,7 +135,8 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus("tasks", `📋 ${tasks.length} task(s)`);
   };
 
-  // Replay state from the session branch on startup (covers new session + /resume)
+  // Replay state from the session branch on startup (covers new session + /resume),
+  // then prefer the durable sidecar for this session id when one exists.
   const reconstruct = (ctx: ExtensionContext) => {
     tasks = [];
     nextId = 1;
@@ -91,17 +146,44 @@ export default function (pi: ExtensionAPI) {
       if (msg.role !== "toolResult" || msg.toolName !== "task") continue;
       const d = msg.details as TaskDetails | undefined;
       if (d) {
-        tasks = d.tasks;
+        tasks = d.tasks.map((t) => ({ ...t }));
         nextId = d.nextId;
       }
     }
+    const sid = currentSessionId ?? ctx.sessionManager?.getSessionId?.();
+    if (sid) {
+      const sidecar = loadSidecar(sid);
+      if (sidecar) {
+        tasks = sidecar.tasks.map((t) => ({ ...t }));
+        nextId = sidecar.nextId;
+      }
+    }
+    nudgedTaskIds.clear();
     render(ctx);
   };
 
   let lastSessionId: string | undefined;
 
   pi.on("session_start", async (_e, ctx) => {
-    lastSessionId = ctx.sessionManager.getSessionId();
+    currentSessionId = ctx.sessionManager.getSessionId();
+    lastSessionId = currentSessionId;
+    // Prune week-old sidecars: best-effort hygiene, never blocks the start.
+    try {
+      const dir = SIDECAR_DIR();
+      if (existsSync(dir)) {
+        const cutoff = Date.now() - SIDECAR_MAX_AGE_MS;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith(".json")) continue;
+          const full = path.join(dir, f);
+          try {
+            const st = JSON.parse(readFileSync(full, "utf8")) as Sidecar;
+            if (typeof st?.savedAt === "number" && st.savedAt < cutoff) {
+              try { unlinkSync(full); } catch {}
+            }
+          } catch {}
+        }
+      }
+    } catch {}
     reconstruct(ctx);
   });
 
@@ -110,6 +192,7 @@ export default function (pi: ExtensionAPI) {
     const sid = ctx.sessionManager.getSessionId();
     if (sid !== lastSessionId) {
       lastSessionId = sid;
+      currentSessionId = sid;
       reconstruct(ctx);
     }
   });
@@ -142,10 +225,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (_event, _ctx) => {
-    const incomplete = tasks.filter((t) => t.status !== "done");
-    if (incomplete.length === 0 || nudgedThisCycle) return;
-    nudgedThisCycle = true;
-    const list = incomplete
+    const incomplete = tasks.filter(
+      (t) => t.status !== "done" && !nudgedTaskIds.has(t.id),
+    );
+    if (incomplete.length === 0) return;
+    for (const t of incomplete) nudgedTaskIds.add(t.id);
+    const list = tasks
+      .filter((t) => t.status !== "done")
       .map((t) => `  ${ICON[t.status]} #${t.id} [${t.status}]: ${t.text}`)
       .join("\n");
     pi.sendMessage(
@@ -158,14 +244,10 @@ export default function (pi: ExtensionAPI) {
     );
   });
 
-  // Only a genuine human (interactive) prompt starts a new nudge cycle.
-  // The nudge's own sendMessage({triggerTurn}) fires `input` with source="extension"
-  // on pi 0.80.x — resetting here would defeat the guard and loop forever.
-  // (Regression from 0.79.9, where `input` only fired for human prompts — LR-0009.)
-  pi.on("input", async (event) => {
-    if (isHumanTurn(event)) nudgedThisCycle = false; // D6: the 0.79.9→0.80.x seam lives in lib/upstream-adapter.ts
-    return { action: "continue" as const };
-  });
+  // Nudge cadence is per-task-id (nudgedTaskIds) rather than per human turn:
+  // the old per-turn reset (isHumanTurn in lib/upstream-adapter.ts, D6 seam)
+  // re-fired the incomplete banner after every human message while a lawfully
+  // parked task stayed open, feeding the toggle-spin loop.
 
   pi.registerTool({
     name: "task",
@@ -186,6 +268,7 @@ export default function (pi: ExtensionAPI) {
             };
           const t: Task = { id: nextId++, text: params.text, status: "idle" };
           tasks.push(t);
+          persist();
           const r = {
             content: [{ type: "text" as const, text: `Added #${t.id}: ${t.text}` }],
             details: snapshot("add"),
@@ -207,10 +290,20 @@ export default function (pi: ExtensionAPI) {
             };
           const prev = t.status;
           t.status = NEXT[t.status];
+          if (t.status === prev && t.status === "done") {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `#${t.id} is already done — done is terminal under the toggle-spin fix; use clear to reset the list.`,
+              }],
+              details: snapshot("toggle"),
+            };
+          }
           // Single-inprogress enforcement: demote any other inprogress task
           if (t.status === "inprogress")
             for (const x of tasks)
               if (x.id !== t.id && x.status === "inprogress") x.status = "idle";
+          persist();
           const r = {
             content: [{ type: "text" as const, text: `#${t.id}: ${prev} → ${t.status}` }],
             details: snapshot("toggle"),
@@ -233,6 +326,8 @@ export default function (pi: ExtensionAPI) {
           const n = tasks.length;
           tasks = [];
           nextId = 1;
+          nudgedTaskIds.clear();
+          persist();
           const r = {
             content: [{ type: "text" as const, text: `Cleared ${n} task(s)` }],
             details: snapshot("clear"),
