@@ -83,3 +83,4 @@ crashes.json
 
 # pi-web-access local version-stamp artifact (desk-local; the package itself is not vendored here)
 pi-web-access/
+.task-state/
