@@ -59,3 +59,7 @@ Open questions back: <bounded, or "none">
 ## What this convention deliberately does NOT build
 
 No courier service, scheduler, registry, or new scripts; no auto-escalation; no model pins; no cross-desk meter scraping. The convention is the template pair + state rules above, applied to the existing lane files both desks already exchange.
+
+## Clarification (2026-11-08, TNT twin-green ee437de8, accepted as the operative reading)
+
+Routine twin-leg green lines and round-closing acks are lane **sync traffic**, not consult courier packages — the manifest/receipt pair governs consult rounds only. Manifest-formatting sync acks would be ceremony without a decision served (Gate 2).
