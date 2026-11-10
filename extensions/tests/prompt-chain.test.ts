@@ -131,14 +131,14 @@ observe({ messageType: "user" }, outA!.systemPrompt);
 check("observer registered exactly one agent_start handler", obsHandlers["agent_start"].length === 1);
 check("user turn on composed prompt ⇒ prompt-composition entry logged", entries.length === 1 && entries[0].type === "prompt-composition");
 check(
-  "entry carries the scoped hash, known=false, drift=true (empty known-good set at landing)",
-  entries[0].data.hash === hashNoInbox && entries[0].data.known === false && entries[0].data.drift === true,
+  "entry carries the scoped hash, known=true, drift=false (seeded known-good set — re-seed follow-through)",
+  entries[0].data.hash === hashNoInbox && entries[0].data.known === true && entries[0].data.drift === false,
 );
-check("drift warned once via ui.notify", uiMsgs.length === 1);
+check("no drift warning on the seeded known-good hash", uiMsgs.length === 0);
 observe({ messageType: "user" }, outA!.systemPrompt);
 check("identical hash within the session ⇒ deduped (no second entry)", entries.length === 1);
 observe({ messageType: "triggerTurn" }, outA!.systemPrompt);
-check("machine turn skipped entirely (no entry, no notify — audit F3b)", entries.length === 1 && uiMsgs.length === 1);
+check("machine turn skipped entirely (no entry, no notify — audit F3b)", entries.length === 1 && uiMsgs.length === 0);
 observe({ messageType: "user" }, BASE); // wrapper-less prompt
 check("wrapper-less prompt ⇒ new drift entry with hash-of-empty", entries.length === 2 && entries[1].data.hash === HASH_OF_EMPTY && entries[1].data.drift === true);
 observe({}, outA!.systemPrompt); // 1.1.0 shape: no messageType field ⇒ guard no-ops, treated as user
