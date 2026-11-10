@@ -586,10 +586,11 @@ export default function (pi: ExtensionAPI) {
       }
       const stats = aggregateDispatchLog(entries, { peak: isPeakHours() });
       const scope = `${sessionCount} session${sessionCount === 1 ? "" : "s"} scanned (cwd-scoped)`;
-      // D1 observer (partial-revert v1.3): surface prompt-composition drift hashes.
+      // D1 observer v2 (ext-drift-tripwire 2026-11-10): surface prompt-composition drift hashes
+      // (extension-owned sections changed — pi-side/per-project content never enters the hash).
       const uniqueDrift = [...new Set(driftHashes)];
       const driftSection = uniqueDrift.length > 0
-        ? `\n\n▌ prompt drift (${uniqueDrift.length} unknown hash${uniqueDrift.length === 1 ? "" : "es"}) — composed prompt changed:\n` +
+        ? `\n\n▌ prompt drift (${uniqueDrift.length} unknown hash${uniqueDrift.length === 1 ? "" : "es"}) — extension-owned sections changed:\n` +
           uniqueDrift.map((h) => `  ⚠ ${h}`).join("\n") +
           `\n  intended? add to KNOWN_GOOD_HASHES in extensions/lib/prompt-hash.ts; otherwise investigate.`
         : "";
