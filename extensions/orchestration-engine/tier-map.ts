@@ -444,6 +444,10 @@ export function resolveModel(
       modelFlag: `${fb.provider}/${fb.id}`,
       provider: fb.provider,
       id: fb.id,
+      // A registry-fallback resolution KEEPS the tier's declared thinking level: the resolved
+      // primary AND every retry rung (hopThinkingLevel reads it as tierThinkingLevel) stay at
+      // the tier's level — union max across the chain, never a silent drop to off/high.
+      thinkingLevel: entry.thinkingLevel,
       category: cat,
       rationale: `tier '${cat}' model ${entry.provider}/${entry.id} not in registry; fell back to ${fbProvider}/${fbId}. Check opencode auth.json or ~/.pi/agent/models.json.`,
       source: "fallback",
@@ -465,7 +469,8 @@ export function resolveModel(
  *  exhausted-walk — so a retry carries the tier's own level instead of silently dropping to
  *  "high": an ultrabrain walk stays @xhigh, a deep walk @max (the union-max discipline the
  *  ultrabrain rationale claims). A caller thinkingOverride always wins; "high" is only the
- *  floor when neither is set (e.g. a registry-fallback resolution carries no tier level). */
+ *  floor when neither is set (a tier with no declared thinkingLevel — none today; a
+ *  registry-fallback resolution carries the tier's level). */
 export function hopThinkingLevel(
   thinkingOverride: string | undefined,
   tierThinkingLevel: ThinkingLevel | undefined,
