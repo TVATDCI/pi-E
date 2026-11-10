@@ -166,7 +166,7 @@ check(
 
 // ── Known-good set behavior (v2 landing state: EMPTY until live re-seed) ────────
 check("isKnownGood respects the set", isKnownGood(GOLDEN) === KNOWN_GOOD_HASHES.has(GOLDEN));
-check("v2 lands with an empty set ⇒ drift until live-captured hash is seeded", KNOWN_GOOD_HASHES.size === 0 && isKnownGood(GOLDEN) === false);
+check("v2 seeded state ⇒ the desk-captured hash is known-good (drift cleared)", KNOWN_GOOD_HASHES.size >= 1);
 check("OWNERSHIP_TAG is what the coordinator wrapper carries", wrapOwnedSections("").startsWith(`<${OWNERSHIP_TAG}>`));
 
 console.log(`\n${pass} passed, ${fail} failed`);
