@@ -15,14 +15,18 @@
 //     handler when a hazard is active (state-bearing, but extension-owned).
 //
 // Everything else is out of the hash BY CONSTRUCTION — never stripped, never extracted:
-// pi's base prompt, `<project_instructions path="…">` blocks (per-project AGENTS.md /
-// CLAUDE.md content, wrapped that way by pi core), cwd blocks, future pi-owned sections.
-// New extension sections are hashed only if their emitter lands them inside an owned tag;
-// the default for untagged content is OUT, so pi-side additions can never false-trip.
+// pi's base prompt, cwd blocks, future pi-owned sections, and <project_instructions> blocks
+// (per-project AGENTS.md / CLAUDE.md content, wrapped that way by pi core) — the latter are
+// stripped BEFORE owned-tag matching (audit F2), so per-project text can never enter the
+// hash even when a project literally embeds ownership tags (accidental paste or hostile
+// noise). New extension sections are hashed only if their emitter lands them inside an
+// owned tag; the default for untagged content is OUT, so pi-side additions can never
+// false-trip.
 //
 // Volatility stripping (v1) survives INSIDE the extracted regions: <memory-context>,
-// <bridge-context>, <purpose> content changes by design (memory growth, bridge re-exports,
-// per-session purpose) — not drift.
+// <bridge-context>, <purpose>, and <lane-inbox-sentinel> content changes by design
+// (memory growth, bridge re-exports, per-session purpose, routine lane traffic — audit F1:
+// every lane-message arrival/consumption would otherwise re-trip drift) — not drift.
 //
 // Lost-scaffolding signal preserved: if prompt-coordinator fails to load (or its shell
 // throws → base prompt returned without the wrapper), no owned region is extracted and
@@ -47,6 +51,14 @@ export const EXTENSION_OWNED_TAGS: readonly string[] = [OWNERSHIP_TAG, "hazard-t
 
 const OWNED_REGION_RE = new RegExp(`<(${EXTENSION_OWNED_TAGS.join("|")})>([\\s\\S]*?)</\\1>`, "g");
 
+/** Pi-owned tagged region: <project_instructions path="…">…</project_instructions> wraps ALL
+ * per-project AGENTS.md/CLAUDE.md content (pi core's context-file discovery). Stripped
+ * BEFORE owned-tag matching so per-project text can never enter the hash — including a
+ * project that literally embeds <extension-owned> tags, paired (extracted+hashed) or
+ * unpaired (would swallow the project tail through the real wrapper's close tag).
+ * Audit F2; the exclusion is as structural as the ownership tags themselves. */
+const PROJECT_INSTRUCTIONS_RE = /<project_instructions[^>]*>[\s\S]*?<\/project_instructions>/g;
+
 /** Compose the extension-owned region the coordinator emits: the composed tail wrapped in
  * the ownership tag. The EMITTER (prompt-coordinator.ts) calls this directly, so what is
  * emitted and what extractExtensionOwned() extracts are one protocol, not two copies.
@@ -57,22 +69,30 @@ export function wrapOwnedSections(tail: string): string {
 }
 
 /** Extract extension-owned regions, concatenated in document (composition) order.
- * Untagged content — pi base prompt, <project_instructions>, cwd blocks — is never
- * returned. No owned region at all ⇒ "" (hash-of-empty ⇒ drift: lost scaffolding). */
+ * <project_instructions> blocks are removed FIRST (audit F2): their content is per-project
+ * data, never ownership, whatever tags it embeds. Untagged content — pi base prompt, cwd
+ * blocks — is never returned. No owned region at all ⇒ "" (hash-of-empty ⇒ drift: lost
+ * scaffolding). */
 export function extractExtensionOwned(prompt: string): string {
   const regions: string[] = [];
-  for (const m of prompt.matchAll(OWNED_REGION_RE)) regions.push(m[2]);
+  for (const m of prompt.replace(PROJECT_INSTRUCTIONS_RE, "").matchAll(OWNED_REGION_RE)) regions.push(m[2]);
   return regions.join("\n\n");
 }
 
 /** Strip volatile, by-design-changing blocks INSIDE the extracted owned regions, so
  * drift fires on structural composition changes — not memory growth, bridge re-exports,
- * or per-session purpose. Absent tags ⇒ no-op (safe). Non-greedy + multiline. */
+ * per-session purpose, or routine lane-inbox traffic (audit F1: sentinel presence/content
+ * changes with every lane message arrival or consumption — not drift). Each strip also
+ * consumes the block's LEADING separator newlines (\n*): a removed block takes its own
+ * "\n\n" separator with it, so a section present vs ABSENT normalizes to the same bytes
+ * (otherwise residual separators differ and present-vs-absent would still move the hash).
+ * Absent tags ⇒ no-op (safe). Non-greedy + multiline. */
 export function stripVolatile(owned: string): string {
   return owned
-    .replace(/<memory-context>[\s\S]*?<\/memory-context>/g, "")
-    .replace(/<bridge-context>[\s\S]*?<\/bridge-context>/g, "")
-    .replace(/<purpose>[\s\S]*?<\/purpose>/g, "");
+    .replace(/\n*<memory-context>[\s\S]*?<\/memory-context>/g, "")
+    .replace(/\n*<bridge-context>[\s\S]*?<\/bridge-context>/g, "")
+    .replace(/\n*<purpose>[\s\S]*?<\/purpose>/g, "")
+    .replace(/\n*<lane-inbox-sentinel>[\s\S]*?<\/lane-inbox-sentinel>/g, "");
 }
 
 /** STABLE parts of a composed prompt = extension-owned regions minus volatile blocks.
@@ -95,9 +115,9 @@ export function hashPrompt(prompt: string): string {
  * v1 hash is DEAD — kept below as commented historical markers. The set is EMPTY at
  * landing by design, mirroring the v1.3 landing flow: the first live boot after this
  * lands trips the drift warning ONCE — capture the hash from the prompt-composition entry
- * (or /routing-stats) and seed it here. States that legitimately differ (unread
- * lane-inbox sentinel present, hazard block active) have their own hashes: either capture
- * those variants too, or accept a one-time warning on them.
+ * (or /routing-stats) and seed it here, in a QUIESCENT state: no hazard active (the hazard
+ * block is registry-tagged and state-bearing — audit F4). Lane-inbox state no longer
+ * matters (sentinel stripped as volatile, audit F1).
  */
 export const KNOWN_GOOD_HASHES: Set<string> = new Set<string>([
   // v1 hashes (FULL-prompt stable parts) — DEAD under v2, history only:

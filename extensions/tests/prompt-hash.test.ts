@@ -5,9 +5,12 @@
 //   (i)  per-project AGENTS.md/CLAUDE.md variation (<project_instructions>) and pi
 //        base-prompt changes do NOT move the hash — opening the agent in a different
 //        project must not trip the drift signal (the live false positive behind the ruling);
+//        this includes projects that literally embed ownership tags (audit F2) and routine
+//        lane-inbox traffic (audit F1);
 //   (ii) changes to extension-owned sections DO move the hash (and therefore trip it).
 // Plus the emitter↔extractor protocol: wrapOwnedSections() emits the exact region
 // extractExtensionOwned() extracts — single-sourced via OWNERSHIP_TAG.
+// Handler-level (end-to-end) pins live in tests/prompt-chain.test.ts (audit F3).
 import {
   hashPrompt,
   isKnownGood,
@@ -49,6 +52,16 @@ const TAIL =
 
 const FULL_A = BASE + "\n\n" + PROJECT_A + "\n\n" + wrapOwnedSections(TAIL);
 const GOLDEN = hashPrompt(FULL_A);
+// Same TAIL minus the sentinel block — sentinel presence/absence is routine lane state.
+const TAIL_NO_SENTINEL =
+  "\n\n## Cost Discipline\nDelegate grunt work." +
+  "\n\n<purpose>\nShip the scoped hash.\n</purpose>" +
+  "\n\n## Session notes\nYou have add_note." +
+  "\n\n<bridge-context>\n[FROM bridge, exported T1]\n- constraint:x\n</bridge-context>" +
+  "\n\n<memory-context>\n[constraint] foo: bar\n</memory-context>";
+// A project that literally embeds ownership tags inside its AGENTS.md (audit F2).
+const PROJECT_EMBEDS_TAGS =
+  '<project_instructions path="/home/z/projZ/AGENTS.md">\n# Project Z docs paste\n<extension-owned>note</extension-owned>\nalso an unpaired <extension-owned> open tag\n</project_instructions>';
 
 // ── Direction (i): per-project / pi-side variation must NOT move the hash ───────
 check("hashPrompt deterministic", hashPrompt(FULL_A) === GOLDEN);
@@ -95,8 +108,21 @@ check(
     hashPrompt(FULL_A + "\n\n" + HAZARD_BLOCK.replace("scaffolding", "other wording")),
 );
 check(
-  "lane-inbox sentinel content change DOES move the hash (owned, non-volatile section)",
-  hashPrompt(BASE + "\n\n" + PROJECT_A + "\n\n" + wrapOwnedSections(TAIL.replace("unread.md", "other-message.md"))) !== GOLDEN,
+  "lane-inbox sentinel content change does NOT move the hash (audit F1: routine lane traffic is not drift)",
+  hashPrompt(BASE + "\n\n" + PROJECT_A + "\n\n" + wrapOwnedSections(TAIL.replace("unread.md", "other-message.md"))) === GOLDEN,
+);
+check(
+  "lane-inbox sentinel present vs absent does NOT move the hash (audit F1)",
+  hashPrompt(BASE + "\n\n" + PROJECT_A + "\n\n" + wrapOwnedSections(TAIL_NO_SENTINEL)) === GOLDEN,
+);
+check(
+  "project text embedding literal owned tags (paired + unpaired) does NOT enter the hash (audit F2)",
+  hashPrompt(BASE + "\n\n" + PROJECT_EMBEDS_TAGS + "\n\n" + wrapOwnedSections(TAIL)) === GOLDEN,
+);
+check(
+  "unpaired owned tag in project text does not swallow the project tail (audit F2: extraction equals the clean-project extraction)",
+  extractExtensionOwned(BASE + "\n\n" + PROJECT_EMBEDS_TAGS + "\n\n" + wrapOwnedSections(TAIL)) ===
+    extractExtensionOwned(FULL_A),
 );
 
 // ── v1 guarantee preserved: volatile content INSIDE the wrapper stays free ──────
@@ -134,8 +160,8 @@ check(
 );
 check("untagged prompt extracts nothing (hash-of-empty baseline)", extractExtensionOwned(BASE) === "");
 check(
-  "stableParts = extension-owned regions minus volatile blocks (composition of the two)",
-  stableParts(FULL_A) === extractExtensionOwned(FULL_A).replace(/<purpose>[\s\S]*?<\/purpose>/g, "").replace(/<bridge-context>[\s\S]*?<\/bridge-context>/g, "").replace(/<memory-context>[\s\S]*?<\/memory-context>/g, ""),
+  "stableParts is byte-precise: owned regions minus all four volatile blocks (cost+notes remain, trailing wrapper newline)",
+  stableParts(FULL_A) === "\n\n## Cost Discipline\nDelegate grunt work." + "\n\n## Session notes\nYou have add_note." + "\n",
 );
 
 // ── Known-good set behavior (v2 landing state: EMPTY until live re-seed) ────────
