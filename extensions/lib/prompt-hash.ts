@@ -120,6 +120,9 @@ export function hashPrompt(prompt: string): string {
  * matters (sentinel stripped as volatile, audit F1).
  */
 export const KNOWN_GOOD_HASHES: Set<string> = new Set<string>([
+  // v2 seed (2026-11-10, ddd quiescent capture, stable across three session boots):
+  "f1bd85a220347ff2",
+
   // v1 hashes (FULL-prompt stable parts) — DEAD under v2, history only:
   // "c2bfe1b57f74616f" — v1 stable-parts, pi 0.82.1, captured 2026-07-30 [pre-<purpose>-strip]
   // "7f21df25f4181676" — v1 stable-parts, pi 0.83.0, captured 2026-07-30 [pre-<purpose>-strip]
