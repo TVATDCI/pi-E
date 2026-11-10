@@ -122,6 +122,22 @@ eq(
   deepFallback.fallbackFlags,
   ["opencode-go/glm-5.2", "opencode/glm-5.2"],
 );
+// F1 2026-11-10 (fallback-carry-thinking): a registry-fallback resolution KEEPS the tier's
+// declared thinking level — previously this branch returned no thinkingLevel, so the resolved
+// primary spawned @off and every retry rung fell to the "high" floor (a deep walk silently
+// dropped from @max, an ultrabrain walk from @xhigh — union-max violation). Pinned end-to-end
+// (launch argv per rung) in fallback-carry-thinking.test.ts; this is the pure resolution pin.
+eq(
+  "F1: resolveModel(deep) primary-missing STILL carries the tier's max level",
+  deepFallback.thinkingLevel,
+  "max",
+);
+const ultrabrainFallback = resolveModel("ultrabrain", mockRegistry([[FALLBACK.provider, FALLBACK.id]]));
+eq(
+  "F1: resolveModel(ultrabrain) primary-missing STILL carries the tier's xhigh level",
+  ultrabrainFallback.thinkingLevel,
+  "xhigh",
+);
 
 // Unknown category → DEFAULT_CATEGORY (unspecified-low), primary zai-coding-cn/glm-5.3-flash
 // (rerouted 2026-09-08, operator go — V2 Max volume removed the credit-preservation rationale).
@@ -197,12 +213,13 @@ check("FLOOR: every category has ≥1 per-tier fallback entry", allNonEmpty);
 // A retry hop (downshift-unavailable pick + every exhausted-walk rung) carries the TIER's
 // thinking level, not a hardcoded "high" — union max across the chain, as the tier rationales
 // claim. A caller thinkingOverride always wins; "high" is only the floor when neither is set
-// (e.g. a registry-fallback resolution carries no tier thinkingLevel).
+// (a tier with no declared thinkingLevel — none today; a registry-fallback resolution carries
+// the tier's level since F1 2026-11-10).
 import { hopThinkingLevel } from "../orchestration-engine/tier-map.ts";
 check("F1: ultrabrain retry hops walk @xhigh (tier default carried, union max)", hopThinkingLevel(undefined, TIERS.ultrabrain.thinkingLevel) === "xhigh");
 check("F1: deep retry hops walk @max (tier default carried)", hopThinkingLevel(undefined, TIERS.deep.thinkingLevel) === "max");
 check("F1: thinkingOverride WINS over the tier default on a retry hop", hopThinkingLevel("low", TIERS.deep.thinkingLevel) === "low");
-check("F1: no override + no tier level → the \"high\" floor (registry-fallback resolution)", hopThinkingLevel(undefined, undefined) === "high");
+check("F1: no override + no tier level → the \"high\" floor (a level-less tier; registry-fallback resolutions carry the tier level since F1 2026-11-10)", hopThinkingLevel(undefined, undefined) === "high");
 check("F1: every current tier level round-trips through hopThinkingLevel unchanged", allCategories.every((c) => hopThinkingLevel(undefined, TIERS[c].thinkingLevel) === TIERS[c].thinkingLevel));
 
 // ── F1 spawn-args source lock (the two retry-hop call sites in spawn.ts) ──────
