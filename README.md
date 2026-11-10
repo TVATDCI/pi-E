@@ -114,7 +114,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
     ├── session-notes.ts       # add_note + /note widget
     ├── mini-purpose-gate.ts   # boot intent gate
     ├── prompt-coordinator.ts  # SOLE before_agent_start registrant — composes system-prompt sections in fixed order, dedups memory+bridge overlap
-    ├── prompt-observer.ts     # prompt-hash drift detector (agent_start; strips volatile blocks)
+    ├── prompt-observer.ts     # prompt-hash drift detector (agent_start; hashes extension-owned sections only)
     ├── compaction-capture.ts  # hooks session_compact → appends summary to memory.md before discard (narrative)
     ├── compaction-extract.ts  # hooks session_compact → extracts structured facts → store.jsonl (inferred provenance)
     ├── web-research.ts        # keyless search + fetch tools (Wikipedia/DDG-IA/npm/GitHub + w3m text)
@@ -318,7 +318,7 @@ Sequential agent pipelines from `agent-chain.yaml` (deny-additive: projects ADD 
 
 - **`/tiers`** — the 12 categories × model / thinking / quota× / **REAL availability** (key configured). Run before switching models.
 - **`/routing-stats`** — aggregates `dispatch-log` **cross-session / cwd-scoped**: per-category, per-model (with quota×), per-agent, routing-source views + threshold flags (fail-rate, override-rate, downshifts). Plus a **`▌ usage`** section (Tier 1): total/avg cost, turns, avg context-tokens — global and per-category. The tuning loop.
-- **Prompt-drift detector** (`prompt-observer.ts` + `lib/prompt-hash.ts`) — hashes the composed system prompt on `agent_start`, warns if the hash leaves the known-good set (catches composition corruption — a rogue extension rewriting the prompt, `AGENTS.md` tampering — _not_ injection, which lands in messages/tool output). `hashPrompt()` **strips the volatile blocks first** (`<memory-context>` + `<bridge-context>`) so memory growth / bridge re-exports don't false-fire — only real base-prompt changes do.
+- **Prompt-drift detector** (`prompt-observer.ts` + `lib/prompt-hash.ts`) — hashes **only the extension-owned sections** of the composed system prompt on `agent_start` (captain's 2026-11-10 ext-drift-tripwire ruling: per-project `AGENTS.md` variation is intended, not drift). Ownership is declared in-band: `prompt-coordinator.ts` wraps everything it composes in `<extension-owned>` (via `wrapOwnedSections()`, single-sourced in `lib/prompt-hash.ts`), and `<hazard-tripwire>` is registry-tagged; pi's base prompt and `<project_instructions>` blocks (per-project `AGENTS.md`/`CLAUDE.md`) are out of the hash by construction. Inside the owned regions the volatile blocks (`<memory-context>`/`<bridge-context>`/`<purpose>`) are stripped so memory growth / bridge re-exports / per-session purpose don't false-fire. Warns when the hash leaves the known-good set — a lost or broken coordinator collapses the hash to empty and trips it (composition corruption made loud; _not_ injection, which lands in messages/tool output).
 - **Cost reads `$0` until provider pricing is configured** (`zai-coding-cn` isn't priced yet); tokens are tracked regardless. Oracle Q7 caveat: summed `input` over-counts across turns — rely on `cost` + `contextTokens`.
 
 ---

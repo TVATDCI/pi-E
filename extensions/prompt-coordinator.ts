@@ -23,9 +23,14 @@
 // Failure model (MUST-FIX-4): each producer is wrapped so one failure skips only that section;
 // an outer try/catch returns the base prompt if the composition shell itself throws.
 //
-// POST-LANDING: prompt-hash.ts KNOWN_GOOD_HASHES must be re-seeded once (imposing a defined
-// order changes the stable-parts hash vs the prior readdir order). stableParts() needs NO edit
-// (both fact-block tags unchanged).
+// POST-LANDING: prompt-hash.ts KNOWN_GOOD_HASHES must be re-seeded once (v2 changed the
+// hash input — extension-owned sections only; every v1 hash is dead). Since 2026-11-10
+// (captain's ext-drift-tripwire ruling, pick (b)) this coordinator wraps everything it
+// composes in <extension-owned> via wrapOwnedSections() — single-sourced in lib/prompt-hash.ts —
+// so the drift tripwire hashes extension-owned sections ONLY: pi's base prompt and per-project
+// AGENTS.md/CLAUDE.md <project_instructions> content stay outside the hash by construction.
+// Both fact blocks keep their existing tags so volatility stripping INSIDE the wrapper needs
+// zero regex changes.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendFileSync } from "node:fs";
@@ -39,6 +44,7 @@ import { applyBudget, estimateTokens } from "./memory/budget.ts";
 import { formatMemoryBlock } from "./memory/formatter.ts";
 import type { MemoryRecord } from "./memory/schema.ts";
 import { readBridgeExport, formatBridgeLines, checkStale, bridgeStatus, type BridgeEntry } from "./bd-bridge.ts";
+import { wrapOwnedSections } from "./lib/prompt-hash.ts";
 import { composeInboxSection } from "./lib/inbox-sentinel.ts";
 import { readPurpose } from "./mini-purpose-gate.ts";
 import { COST_DISCIPLINE_TEXT } from "./orchestration-engine/index.ts";
@@ -200,10 +206,14 @@ export default function (pi: ExtensionAPI) {
     const messageType = (event as { messageType?: string }).messageType;
     if (messageType && messageType !== "user") return;
     try {
-      let prompt = event.systemPrompt;
+      // The composed tail = everything the EXTENSIONS own. Wrapped in the ownership tag
+      // (wrapOwnedSections, single-sourced in lib/prompt-hash.ts) so the drift tripwire
+      // hashes exactly this and nothing pi-side. Base prompt + <project_instructions> stay
+      // outside the wrapper — per-project AGENTS.md variation must not trip the signal.
+      let tail = "";
 
       // 1. Cost Discipline (behavioral framing first — LLMs weight early tokens; Oracle #1)
-      prompt += "\n\n" + COST_DISCIPLINE_TEXT;
+      tail += "\n\n" + COST_DISCIPLINE_TEXT;
 
       // 2. Purpose (dynamic, session-scoped)
       const purpose = await tryProduce("purpose", async () => {
@@ -212,18 +222,21 @@ export default function (pi: ExtensionAPI) {
           ? `\n\n<purpose>\nYour singular purpose this session: ${p}\nStay focused. If a request drifts, remind the user.\n</purpose>`
           : "";
       });
-      prompt += purpose;
+      tail += purpose;
 
       // 3. Session notes (behavioral)
-      prompt += "\n\n" + SESSION_NOTES_TEXT;
+      tail += "\n\n" + SESSION_NOTES_TEXT;
 
       // 3b. Lane-inbox sentinel (forced attention: unread lane messages — standing discipline, structuralized)
-      prompt += await tryProduce("lane-inbox", () => composeInboxSection());
+      tail += await tryProduce("lane-inbox", () => composeInboxSection());
 
       // 4+5. Facts: memory + bridge, coordinated (dedup + per-injector rank/budget)
-      prompt += await tryProduce("facts", () => composeFacts());
+      tail += await tryProduce("facts", () => composeFacts());
 
-      return { systemPrompt: prompt };
+      // Ownership wrapper: the drift-tripwire boundary (ext-drift-tripwire ruling 2026-11-10).
+      // If the shell above throws, the catch below returns the bare base prompt — no wrapper,
+      // hash collapses to hash-of-empty, drift trips: composition failure IS drift.
+      return { systemPrompt: event.systemPrompt + "\n\n" + wrapOwnedSections(tail) };
     } catch (e) {
       // MUST-FIX-4 outer guard: if the composition shell itself throws, return the base prompt.
       const msg = e instanceof Error ? e.message : String(e);
