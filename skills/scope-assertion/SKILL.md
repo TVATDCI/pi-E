@@ -49,7 +49,10 @@ violation — surface it, never absorb it.
 
 ## Worked example (runnable end-to-end)
 
-In a clean git checkout, fix a typo in one file with a one-file declaration:
+In a clean git checkout of a repo whose README contains the typo `Recieve`
+(the string is scoped to the example — if your README lacks it, the sed no-ops
+and you get an EMPTY realized set for a declared file: per Protocol step 3 that
+mismatch is worth explaining, not silently committing):
 
 ```bash
 # 1. Declare (before any edit):
@@ -60,7 +63,7 @@ sed -i 's/Recieve/Receive/' README.md
 
 # 3. Verify — realized vs declared:
 git status --porcelain
-# expected: exactly " M README.md" and nothing else
+# expected when the typo exists: exactly " M README.md" and nothing else
 git diff --name-only
 # expected: README.md
 
