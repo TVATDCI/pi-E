@@ -86,7 +86,7 @@ let resolveFirstWidget: (() => void) | undefined;
 async function loadExtension(): Promise<void> {
   // Minimal structural fake of the ExtensionAPI surface index.ts uses at registration.
   interface FakePi {
-    on(): void;
+    on(type: string, handler: unknown): void;
     registerCommand(): void;
     registerTool(tool: { name: string; execute: unknown }): void;
     appendEntry(type: string, data: unknown): void;
