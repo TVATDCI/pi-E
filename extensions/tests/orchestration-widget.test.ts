@@ -24,8 +24,11 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 // ── isolated environment: temp HOME + stub `pi` on PATH ─────────────────────
 // Must be installed BEFORE importing the extension (index.ts captures GLOBAL_TEAMS_PATH
 // from homedir at module load).
-const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 const realTempDirs: string[] = [];
+// Original env + global identities captured BEFORE any mutation, so teardown restores
+// exactly what was there (an originally absent variable is deleted, not set undefined).
+const originalEnv = { HOME: process.env.HOME, PATH: process.env.PATH, ORCH_TEST_ARGV_FILE: process.env.ORCH_TEST_ARGV_FILE, ORCH_TEST_DELAY_MS: process.env.ORCH_TEST_DELAY_MS };
+const originalSetInterval = globalThis.setInterval; // unbound original identity
 const trackedMkdtemp = (prefix: string): string => {
   const d = mkdtempSync(prefix);
   realTempDirs.push(d);
@@ -49,7 +52,7 @@ const stubPi = [
   'if [ -n "$ORCH_TEST_ARGV_FILE" ]; then',
   '  for a in "$@"; do printf \'%s\\n\' "$(printf \'%s\' "$a" | base64)" >> "$ORCH_TEST_ARGV_FILE"; done',
   "fi",
-  'if [ -n "$ORCH_TEST_DELAY_MS" ]; then sleep "$ORCH_TEST_DELAY_MS"; fi',
+  'if [ -n "$ORCH_TEST_DELAY_MS" ]; then sleep "$ORCH_TEST_DELAY_MS"; fi', // kept for manual debugging only; tests are deterministic (see in-flight test)
   'printf \'%s\\n\' \'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"working"}}\'',
   'printf \'%s\\n\' \'{"type":"tool_execution_start"}\'',
   'printf \'%s\\n\' \'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" done"}}\'',
@@ -71,6 +74,10 @@ interface CapturedCtx {
 let dispatchExecute: ((id: unknown, params: { task: string; category?: string }, signal: unknown, onUpdate: unknown, ctx: CapturedCtx) => Promise<unknown>) | undefined;
 let lastWidgetFactory: WidgetFactory | undefined;
 let capturedCtx: CapturedCtx;
+// One-shot latch: resolved by the fake ui.setWidget on the FIRST widget installation —
+// deterministic in-flight observation, no timing/polling.
+let firstWidgetInstalled: Promise<void> | undefined;
+let resolveFirstWidget: (() => void) | undefined;
 
 /** Fresh extension instance per call: index.ts keeps per-instance closure state (the subs
  *  map), and each test must start from an empty roster rather than accumulate prior subs. */
@@ -107,7 +114,10 @@ function ensureCtx(): CapturedCtx {
         getAvailable() { return [{ provider: "zai-coding-cn", id: "glm-5.3-flash" }]; },
       },
       ui: {
-        setWidget(_name: string, factory: WidgetFactory | undefined) { lastWidgetFactory = factory; },
+        setWidget(_name: string, factory: WidgetFactory | undefined) {
+          lastWidgetFactory = factory;
+          if (factory && resolveFirstWidget) { const r = resolveFirstWidget; resolveFirstWidget = undefined; r(); }
+        },
         notify() {},
       },
     };
@@ -143,11 +153,9 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 // throws unexpectedly the tick would leak and keep the test process alive. Track every
 // setInterval the extension creates and clear the new ones in each dispatch's finally.
 const liveIntervals = new Set<ReturnType<typeof setInterval>>();
-const realSetInterval = globalThis.setInterval.bind(globalThis);
-const realHome = process.env.HOME;
-const realPath = process.env.PATH;
+const boundSetInterval = originalSetInterval.bind(globalThis);
 globalThis.setInterval = ((fn: () => void, ms?: number, ...args: unknown[]) => {
-  const t = realSetInterval(fn as () => void, ms, ...args as []);
+  const t = boundSetInterval(fn as () => void, ms, ...args as []);
   liveIntervals.add(t);
   return t;
 }) as typeof setInterval;
@@ -223,19 +231,21 @@ test("original task bytes reach the agent child byte-for-byte", async () => {
 });
 
 test("in-flight progress render stays a single newline-free row (simulated child progress)", async () => {
-  // In-flight snapshot: start execute WITHOUT awaiting; the extension renders as soon as the
-  // sub is registered (before the stub child completes). Assert the mid-flight rows, then let
-  // the dispatch finish. Still no real agent spawn / provider request — the stub child runs.
+  // Deterministic in-flight snapshot: start execute WITHOUT awaiting; the one-shot latch
+  // resolves when the fake ui.setWidget receives the FIRST widget installation (which the
+  // extension performs as soon as the sub is registered, before the stub child completes).
+  // Assert the mid-flight rows, then always settle the dispatch. No sleep, no polling, no
+  // real agent spawn / provider request.
   await loadExtension();
   const ctx = ensureCtx();
   const intervalSnapshot = new Set(liveIntervals);
   lastWidgetFactory = undefined; // only this dispatch's render may install the factory
-  process.env.ORCH_TEST_DELAY_MS = "0.3"; // hold the stub child in flight for the snapshot
+  firstWidgetInstalled = new Promise<void>((r) => { resolveFirstWidget = r; });
   process.env.ORCH_TEST_ARGV_FILE = join(fakeHome, `argv-${++argvCounter}.b64`);
+  let pending: Promise<unknown> | undefined;
   try {
-    const pending = dispatchExecute!("test-id", { task: "in-flight\nmultiline progress", category: "quick" }, undefined, undefined, ctx);
-    // Poll (event-loop friendly) until the widget factory is installed by the first render().
-    for (let i = 0; !lastWidgetFactory && i < 200; i++) await new Promise((r) => realSetTimeout(r, 5));
+    pending = dispatchExecute!("test-id", { task: "in-flight\nmultiline progress", category: "quick" }, undefined, undefined, ctx);
+    await firstWidgetInstalled; // resolved by ui.setWidget on first install — no timing race
     assert.ok(lastWidgetFactory, "widget must render while the sub is in flight");
     const widget = lastWidgetFactory!({}, { fg: (_t: string, s: string) => s });
     const mid = widget.render(120);
@@ -244,11 +254,10 @@ test("in-flight progress render stays a single newline-free row (simulated child
       assert.ok(!row.includes("\n") && !row.includes("\r"), "in-flight row must be newline-free");
     }
     assert.ok(stripAnsi(mid[0]).includes("●"), "in-flight sub must show the running icon");
-    await pending;
   } finally {
     delete process.env.ORCH_TEST_ARGV_FILE;
-    delete process.env.ORCH_TEST_DELAY_MS;
     clearIntervalsCreatedSince(intervalSnapshot);
+    if (pending) await pending; // always settle the dispatch, even after a failed assertion
   }
 });
 
@@ -274,9 +283,11 @@ test("repeated progress redraws stay structurally stable (no row-count growth)",
 // clear any tracked interval, and remove every temp dir created by the fixture.
 after(() => {
   for (const t of [...liveIntervals]) { clearInterval(t); liveIntervals.delete(t); }
-  globalThis.setInterval = realSetInterval;
-  process.env.HOME = realHome;
-  process.env.PATH = realPath;
-  delete process.env.ORCH_TEST_ARGV_FILE;
-  if (realTempDirs) for (const d of realTempDirs) rmSync(d, { recursive: true, force: true });
+  globalThis.setInterval = originalSetInterval; // exact original identity
+  if (originalEnv.HOME === undefined) delete process.env.HOME; else process.env.HOME = originalEnv.HOME;
+  if (originalEnv.PATH === undefined) delete process.env.PATH; else process.env.PATH = originalEnv.PATH;
+  for (const k of ["ORCH_TEST_ARGV_FILE", "ORCH_TEST_DELAY_MS"] as const) {
+    if (originalEnv[k] === undefined) delete process.env[k]; else process.env[k] = originalEnv[k];
+  }
+  for (const d of realTempDirs) rmSync(d, { recursive: true, force: true });
 });
