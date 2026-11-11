@@ -68,10 +68,12 @@ type WidgetFactory = (tui: unknown, theme: unknown) => { render(width: number): 
 interface CapturedCtx {
   hasUI: boolean;
   cwd: string;
+  sessionManager: { getSessionId(): string; getEntries(): unknown[] };
   modelRegistry: { find(p: string, id: string): { provider: string; id: string }; getAvailable(): Array<{ provider: string; id: string }> };
   ui: { setWidget(name: string, factory: WidgetFactory | undefined): void; notify(): void };
 }
-let dispatchExecute: ((id: unknown, params: { task: string; category?: string }, signal: unknown, onUpdate: unknown, ctx: CapturedCtx) => Promise<unknown>) | undefined;
+let dispatchExecute: ((id: unknown, params: { task: string; category?: string; agent?: string; team?: string }, signal: unknown, onUpdate: unknown, ctx: CapturedCtx) => Promise<unknown>) | undefined;
+let sessionStartHandler: ((event: unknown, ctx: CapturedCtx) => Promise<unknown>) | undefined;
 let lastWidgetFactory: WidgetFactory | undefined;
 let capturedCtx: CapturedCtx;
 // One-shot latch: resolved by the fake ui.setWidget on the FIRST widget installation —
@@ -90,7 +92,9 @@ async function loadExtension(): Promise<void> {
     appendEntry(type: string, data: unknown): void;
   }
   const pi: FakePi = {
-    on() {},
+    on(type: string, handler: unknown) {
+      if (type === "session_start") sessionStartHandler = handler as typeof sessionStartHandler;
+    },
     registerCommand() {},
     appendEntry() {},
     registerTool(tool) {
@@ -108,6 +112,7 @@ function ensureCtx(): CapturedCtx {
     capturedCtx = {
       hasUI: true,
       cwd: trackedMkdtemp(join(tmpdir(), "orch-widget-test-cwd-")),
+      sessionManager: { getSessionId: () => "orch-widget-test-session", getEntries: () => [] },
       // Every tier model "exists": no downshift walk, stub child is spawned for the tier primary.
       modelRegistry: {
         find(p: string, id: string) { return { provider: p, id }; },
@@ -126,16 +131,30 @@ function ensureCtx(): CapturedCtx {
 }
 
 /** Drive the production render path: run a real dispatch execute() against the stub child,
- *  then render the captured widget factory (the exact rows setWidget hands the TUI). */
-async function dispatchAndRender(task: string, width: number, category = "quick"): Promise<string[]> {
+ *  then render the captured widget factory (the exact rows setWidget hands the TUI).
+ *  session_start fires first (production startup) so file-controlled team config loads. */
+async function dispatchAndRender(
+  task: string,
+  width: number,
+  opts: { category?: string; agent?: string; team?: string } = {},
+): Promise<string[]> {
   await loadExtension(); // fresh instance ⇒ empty subs roster for this dispatch
   const ctx = await ensureCtx();
+  if (sessionStartHandler) await sessionStartHandler({}, ctx);
   const file = join(fakeHome, `argv-${++argvCounter}.b64`);
   const intervalSnapshot = new Set(liveIntervals);
   process.env.ORCH_TEST_ARGV_FILE = file;
+  const { category, agent, team } = opts;
+  // category default applies ONLY on the plain auto path; with agent/team given, the
+  // production precedence (caller > member > team default) must run unmodified.
+  const params: Record<string, unknown> = { task };
+  if (category !== undefined) params.category = category;
+  if (agent !== undefined) params.agent = agent;
+  if (team !== undefined) params.team = team;
+  if (category === undefined && agent === undefined && team === undefined) params.category = "quick";
   try {
     return await (async () => {
-      await dispatchExecute!("test-id", { task, category }, undefined, undefined, ctx);
+      await dispatchExecute!("test-id", params as unknown as Parameters<NonNullable<typeof dispatchExecute>>[1], undefined, undefined, ctx);
       assert.ok(lastWidgetFactory, "render() must install the orchestrator widget");
       const widget = lastWidgetFactory!({}, { fg: (_t: string, s: string) => s });
       return widget.render(width);
@@ -277,6 +296,102 @@ test("repeated progress redraws stay structurally stable (no row-count growth)",
     for (const row of again) assert.ok(!row.includes("\n") && !row.includes("\r"));
     assert.equal(stripAnsi(again[0]).split("·")[0], headingPrefix, `redraw ${i}: heading identity must persist`);
   }
+});
+
+// F1: pre-spawn agent (persona) with an embedded newline cannot escape the HEADING row.
+// The heading renders BEFORE any spawn, so this pins the model-emitted agent-string path.
+test("F1: pre-spawn agent string with embedded newline cannot escape the heading row", async () => {
+  const rows = await dispatchAndRender("f1 heading task", 160, { agent: "bad\nINJECTED", category: "quick" });
+  assert.equal(rows.length, 2);
+  for (const row of rows) assert.ok(!row.includes("\n") && !row.includes("\r"), "heading/preview rows must be newline-free");
+  assert.ok(!stripAnsi(rows[0]).includes("INJECTED\n"), "no raw newline in heading");
+  assert.ok(stripAnsi(rows[0]).includes("bad INJECTED"), "persona display normalized (collapsed to one row)");
+});
+
+// F2: file-controlled category (teams.yaml cast) with an embedded newline is display-
+// normalized, not enum-validated — routing/config semantics unchanged.
+test("F2: file-controlled category text is normalized in the heading row", async () => {
+  const ctx = ensureCtx();
+  mkdirSync(join(ctx.cwd, ".pi"), { recursive: true });
+  writeFileSync(join(ctx.cwd, ".pi", "teams.yaml"),
+    "version: \"1.0\"\nteams:\n  fold-t:\n    description: fold test team\n    default_category: \"quick\\nINJ\"\n    members:\n      - id: m1\n");
+  const rows = await dispatchAndRender("f2 category task", 160, { team: "fold-t" });
+  assert.equal(rows.length, 2);
+  for (const row of rows) assert.ok(!row.includes("\n") && !row.includes("\r"), "rows must be newline-free");
+  assert.ok(stripAnsi(rows[0]).includes("quick INJ"), "file-controlled category display normalized");
+});
+
+// F3: NEL / ESC / DEL / C1 / C0 controls (beyond \s) cannot survive into a returned row.
+test("F3: NEL, ESC, DEL, C1 and representative C0 controls are normalized in the preview", async () => {
+  const rows = await dispatchAndRender("nel\u0085esc\u001b[31mdel\u007fc1\u009bbs\u0008us\u001fend", 200);
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    for (const ch of ["\u0085", "\u001b", "\u007f", "\u009b", "\u0008", "\u001f", "\n", "\r", "\u0000"]) {
+      assert.ok(!row.includes(ch), `row must not contain raw ${JSON.stringify(ch)}`);
+    }
+  }
+});
+
+// F3 (NUL): OS argv cannot contain NUL, so this is display-only — no spawn-arg assertion.
+test("F3: NUL in task is normalized in the display row (display-only; no NUL argv claim)", async () => {
+  await loadExtension();
+  const ctx = ensureCtx();
+  if (sessionStartHandler) await sessionStartHandler({}, ctx);
+  const intervalSnapshot = new Set(liveIntervals);
+  lastWidgetFactory = undefined;
+  firstWidgetInstalled = new Promise<void>((r) => { resolveFirstWidget = r; });
+  let pending: Promise<unknown> | undefined;
+  try {
+    pending = dispatchExecute!("test-id", { task: "nul\u0000in\u0000task", category: "quick" }, undefined, undefined, ctx).catch((e: unknown) => `rejected: ${String(e)}`);
+    await firstWidgetInstalled; // deterministic latch on first widget installation
+    assert.ok(lastWidgetFactory, "widget must render even when the spawn cannot carry NUL argv");
+    const widget = lastWidgetFactory!({}, { fg: (_t: string, s: string) => s });
+    const mid = widget.render(200);
+    for (const row of mid) assert.ok(!row.includes("\u0000") && !row.includes("\n") && !row.includes("\r"), "row must be NUL/newline-free");
+  } finally {
+    clearIntervalsCreatedSince(intervalSnapshot);
+    if (pending) await pending; // always settle
+  }
+});
+
+// Safe styling order: normalization runs BEFORE theme styling; the only ESC bytes in a row
+// come from the theme's own trusted wrappers.
+test("styling order: theme ANSI is applied after normalization (trusted escapes pass through)", async () => {
+  await loadExtension();
+  const ctx = ensureCtx();
+  if (sessionStartHandler) await sessionStartHandler({}, ctx);
+  const file = join(fakeHome, `argv-${++argvCounter}.b64`);
+  const intervalSnapshot = new Set(liveIntervals);
+  process.env.ORCH_TEST_ARGV_FILE = file;
+  try {
+    await dispatchExecute!("test-id", { task: "styled\nesc\u001b[1mrow", category: "quick" }, undefined, undefined, ctx);
+    assert.ok(lastWidgetFactory);
+    const ansiTheme = { fg: (t: string, s: string) => `\u001b[${t === "accent" ? "31" : "90"}m${s}\u001b[0m` };
+    const widget = lastWidgetFactory!({}, ansiTheme);
+    const rows = widget.render(160);
+    assert.equal(rows.length, 2);
+    // heading row: two theme.fg wrappers ⇒ exactly 2 ESC pairs; preview row: one ⇒ 1 pair.
+    assert.equal((rows[0].match(/\u001b\[/g) ?? []).length, 4, "heading: only the theme's own ESC sequences");
+    assert.equal((rows[1].match(/\u001b\[/g) ?? []).length, 2, "preview: only the theme's own ESC sequence");
+    // Precise: after stripping the trusted ANSI wrappers, no control characters remain in the
+    // visible text — normalization happened before styling, and nothing re-introduced controls.
+    for (const row of rows) {
+      const visible = stripAnsi(row);
+      assert.ok(!/[\u0000-\u0008\u000e-\u001f\u007f-\u009f\n\r]/.test(visible), "visible text control-free");
+    }
+  } finally {
+    delete process.env.ORCH_TEST_ARGV_FILE;
+    clearIntervalsCreatedSince(intervalSnapshot);
+  }
+});
+
+// Byte preservation for supported (non-NUL) argv must extend to the newly covered controls.
+test("original task bytes with ESC/NEL reach the agent child byte-for-byte", async () => {
+  const original = "fold-bytes\u001b[1mX\u0085Y\u007fZ";
+  await dispatchAndRender(original, 160);
+  const file = join(fakeHome, `argv-${argvCounter}.b64`);
+  const argv = readFileSync(file, "utf-8").split("\n").filter(Boolean).map((l) => Buffer.from(l, "base64").toString("utf-8"));
+  assert.equal(argv[argv.length - 1], original, "task argv unchanged byte-for-byte");
 });
 
 // Honest teardown (NOT a behavior test): restore globals and env even when a test failed,
