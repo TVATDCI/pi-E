@@ -262,7 +262,11 @@ export default function (pi: ExtensionAPI) {
             theme.fg("dim", ` ${s.modelFlag} · ${s.thinkingLevel ?? "off"} · ${Math.round(s.elapsed / 1000)}s · tools:${s.toolCount}`),
             width,
           ));
-          rows.push(truncateToWidth(theme.fg("muted", `  ${s.task.slice(0, Math.max(0, width - 4))}`), width));
+          // Normalize the DISPLAY preview to one row before width truncation so embedded
+          // LF/CR/CRLF cannot escape a returned terminal row; params.task passed to
+          // resolveAndSpawn stays byte-for-byte.
+          const preview = s.task.replace(/\s+/g, " ");
+          rows.push(truncateToWidth(theme.fg("muted", `  ${preview.slice(0, Math.max(0, width - 4))}`), width));
         }
         return rows;
       },
