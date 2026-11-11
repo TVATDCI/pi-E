@@ -248,6 +248,13 @@ export default function (pi: ExtensionAPI) {
 
   const render = () => {
     if (!widgetCtx?.hasUI) return;
+    // Normalize every dynamic string BEFORE theme styling/truncation: collapse whitespace and
+    // strip C0/C1 controls (NUL, BS, ESC, US, DEL, NEL, C1) so nothing interpolated into a
+    // returned row — heading text (persona/category/model flag/thinking) or task preview —
+    // can escape the single terminal row. Already-styled rows are never re-normalized; the
+    // theme's own trusted ANSI passes through untouched. params.task / spawn arguments /
+    // routing / records are unaffected (display-only).
+    const normalizeRow = (s: string): string => s.replace(/[\s\u0000-\u0008\u000e-\u001f\u007f-\u009f]+/g, " ");
     widgetCtx.ui.setWidget("orchestrator", (_tui, theme) => ({
       invalidate() {},
       render(width: number): string[] {
@@ -256,13 +263,14 @@ export default function (pi: ExtensionAPI) {
         for (const s of subs.values()) {
           const color = s.status === "running" ? "accent" : s.status === "done" ? "success" : "error";
           const icon = s.status === "running" ? "●" : s.status === "done" ? "✓" : "✗";
-          const tag = s.persona ? `:${s.persona}` : "";
+          const tag = s.persona ? `:${normalizeRow(s.persona)}` : "";
           rows.push(truncateToWidth(
-            theme.fg(color, `${icon} #${s.id} [${s.category}]${tag}`) +
-            theme.fg("dim", ` ${s.modelFlag} · ${s.thinkingLevel ?? "off"} · ${Math.round(s.elapsed / 1000)}s · tools:${s.toolCount}`),
+            theme.fg(color, `${icon} #${normalizeRow(String(s.id))} [${normalizeRow(s.category)}]${tag}`) +
+            theme.fg("dim", ` ${normalizeRow(s.modelFlag)} · ${normalizeRow(s.thinkingLevel ?? "off")} · ${Math.round(s.elapsed / 1000)}s · tools:${s.toolCount}`),
             width,
           ));
-          rows.push(truncateToWidth(theme.fg("muted", `  ${s.task.slice(0, Math.max(0, width - 4))}`), width));
+          const preview = normalizeRow(s.task);
+          rows.push(truncateToWidth(theme.fg("muted", `  ${preview.slice(0, Math.max(0, width - 4))}`), width));
         }
         return rows;
       },
