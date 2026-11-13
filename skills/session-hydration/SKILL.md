@@ -17,3 +17,14 @@ On `continue` / `where was I` / `pick up`: read the active section of `memory.md
 ## Write-side mechanics for memory.md (extracted verbatim from AGENTS.md)
 
 - `~/.pi/agent/memory.md` — **session-narrative log** (the arc: what happened, what's next). Freeform markdown, read on `continue` / `where was I`. Bounded by `scripts/rotate-memory-md.ts` (active-KB budget + month-granular archives). Auto-fed by the `compaction-capture` extension. Its top **Active block** follows the hotcache contract (header · decisions · open questions · archive pointer) — format owned by the `session-hydration` skill. **Refresh, don't append**, when state changes materially — the narrative detail lives below it.
+
+
+## Substrate rules (moved verbatim from AGENTS.md, 2026-11-13 backpass rework)
+
+Not the session JSONL, not `/note`, not compaction summaries — those are ephemeral or lossy. (Trust files over generated summaries.)
+
+**Resolve → Forget Hygiene:** when a fix or decision resolves a tracked `[constraint]`/`[fact]`, immediately `memory_forget` it from `store.jsonl` — resolved problems must not remain in the active self-model.
+
+**Security scan boundary:** both the structured store AND the compaction-capture hook run `scanSecrets` at the write boundary and refuse on a hit — but that's a backstop, not license to try. Before reading a credential-bearing config (e.g. `mcp.json`), extract only the needed structure via `jq`/targeted grep, so embedded tokens never enter the transcript.
+
+**Active-block format:** the Active block carries the current session state; refresh it (never append stale copies) on material change — the exact format is the top of memory.md itself.

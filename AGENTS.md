@@ -16,11 +16,9 @@ Put workflow specifics in skills, persona in templates, and any machinery in ext
 ## Memory & compaction
 
 **Two durable substrates — distinct roles, both file-based + auditable:**
-- `~/.pi/agent/memory.md` — **session-narrative log** (the arc: what happened, what's next); **Refresh, don't append** on material change — Active-block format + all write mechanics live in the `session-hydration` skill.
+- `~/.pi/agent/memory.md` — **session-narrative log** (the arc: what happened, what's next); **Refresh, don't append** — write mechanics live in the `session-hydration` skill.
 - `~/.pi/agent/memory/store.jsonl` — **structured atomic facts** via `memory_remember` (constraints/decisions/conventions/preferences/facts), auto-injected each turn as `<memory-context>`. **The durable memory for facts the agent must recall** (`memory_forget` corrects stale ones).
-- **Fleet truth:** memory stores are desk-local by design; spine scope + the B3 recurrence floor (fleet doctrine needs corroboration first) live in the `corroboration` skill.
-
-Not the session JSONL, not `/note`, not compaction summaries — those are ephemeral or lossy. (Trust files over generated summaries.)
+- **Fleet truth:** memory stores are desk-local by design; spine scope + the B3 recurrence floor live in the `corroboration` skill.
 
 **Persist what compaction destroys, via `memory_remember` → `store.jsonl`** — summarization reliably destroys **exact values, hard constraints, decision reasoning, cross-task dependencies, confirmed preferences**; memory.md is narrative only, and PR bodies or status files are not persistence.
 
@@ -28,9 +26,7 @@ Persist at the moment of learning or deciding — a value that dies in the trans
 
 **Integrity:** never report a fact as "remembered"/"saved" unless it's actually in `store.jsonl` (or `memory.md` for narrative). Confirming persistence you didn't perform is lying to the operator.
 
-**Resolve → Forget Hygiene:** when a fix or decision resolves a tracked `[constraint]`/`[fact]`, immediately `memory_forget` it from `store.jsonl` — resolved problems must not remain in the active self-model.
-
-**Security:** never store secrets, keys, tokens, or sensitive personal data in `memory.md`, `memory/store.jsonl`, or any context file — redact first. (Both the structured store AND the compaction-capture hook run `scanSecrets` at the write boundary and refuse on a hit — but that's a backstop, not license to try.) Before reading a credential-bearing config (e.g. `mcp.json`), extract only the needed structure via `jq`/targeted grep, so embedded tokens never enter the transcript.
+**Security:** never store secrets or sensitive personal data in any memory substrate — redact first; the scan-boundary detail, resolve→forget hygiene, and credential-safe read rules live in the `session-hydration` skill.
 
 ## Main-vault (read-only external substrate)
 
@@ -38,7 +34,7 @@ Persist at the moment of learning or deciding — a value that dies in the trans
 
 ## Verification & anti-confabulation
 
-**Verify before asserting.** Anything stale — file contents, test counts, prior-session state, claims from compaction summaries, `memory.md`, or `store.jsonl` — must be re-checked by direct `read`/`grep` before being stated as current; summaries and memory are *hints about where to look*, not ground truth.
+**Verify before asserting.** Anything stale — file contents, test counts, prior-session state, claims from compaction summaries, `memory.md`, or `store.jsonl` — must be re-checked by direct `read`/`grep` before being stated as current; summaries and memory are *hints about where to look*, not ground truth. When a skill names an exact output path, paste it verbatim and verify with one `ls` that it landed.
 
 **Search before confabulating.** Before asserting what an unrecognized library, package, symbol, or config key is, ask whether it's even needed; if yes, search docs/codebase — don't invent; if incidental, note the uncertainty and move on.
 
@@ -50,12 +46,12 @@ Persist at the moment of learning or deciding — a value that dies in the trans
 ## Delegation & to-dos (config-specific)
 
 Sub-agents (dispatch) and the task tool ARE live via extensions. Treat **every delegated result as unverified** until independently checked — re-read the files, re-run the tests, confirm the claimed outcome; never trust a sub-agent's self-report as ground truth (execution-receipt). Any TODO tracker is a convenience, not a source of truth.
-- **Harness gates:** add + start a task before the first substantive tool call of each work phase (the gate blocks otherwise); draft `add_note` under its 200-char cap up front.
+- **Harness gates:** add + start a task before the first substantive tool call of each work phase (the gate blocks otherwise); draft `add_note` under its 200-char cap up front; keep the task `inprogress` until round-end bookkeeping (`memory_forget`, `add_note`) is written — on a gate rejection right after a toggle (state desync), run `task action:list` once, then retry changed; never repeat side-effecting work.
 
 ## Shell safety
 
 Use non-interactive flags for anything that could prompt: `cp -f`, `mv -f`, `rm -f`, `ssh -o BatchMode=yes`, `scp -o BatchMode=yes`, `apt-get -y`, `HOMEBREW_NO_AUTO_UPDATE=1`. Validate source/target paths (existence, scope, intended destination) before destructive moves.
-- When a gate aborts a command, decompose into separate commands immediately — never re-run the chain with cosmetic separator changes; scope scratch cleanup as named-file `rm -f` / `rmdir`, never `rm -rf`.
+- Never re-issue a failed or gate-aborted call unchanged — change one variable or decompose into separate commands (scratch cleanup stays named-file `rm -f` / `rmdir`, never `rm -rf`); the only exception is a diagnosed transient, idempotent failure (network blip, lock race), which may retry with backoff — never a side-effecting call.
 
 ## Reversibility & spend
 
