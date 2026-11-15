@@ -38,7 +38,7 @@ violation — surface it, never absorb it.
    git diff --name-only --cached # staged diff
    ```
    Every path in the output must be in the declared set, and the diff must not
-   silently delete declared-but-untouched files either (an empty realized set
+   silently drop declared-but-untouched files either (an empty realized set
    for a declared file is a mismatch worth explaining).
 4. **Violate → surface.** A file outside the declared set is a violation:
    stop, report it to the operator/brief owner with the exact path and likely
