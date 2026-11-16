@@ -31,10 +31,19 @@ export const SESSION_NOTES_TEXT =
 // Preview bound: heading + latest three notes, whatever the total. This is a
 // widget-content bound, not a host-layout guarantee about surrounding gaps.
 const PREVIEW_NOTE_ROWS = 3;
-// Viewer viewport in content lines (plus its own header/status rows).
+// Viewer viewport cap in body lines (plus its own header/status rows). Actual
+// body height adapts to the terminal (see openViewer); this caps it on tall
+// terminals so the viewer stays a viewer.
 const VIEWER_CONTENT_ROWS = 12;
 // Cells reserved for the note-index prefix inside the viewer.
 const VIEWER_PREFIX_CELLS = 6;
+// Mirror of the overlayOptions maxHeight "80%" below. pi-tui 1.5.2 resolves a
+// percentage maxHeight as Math.max(1, Math.floor(termHeight * pct / 100)) and
+// hard-slices component lines to that cap (tui.js parseSizeValue +
+// compositeOverlays), so the viewer computes its body height from the same
+// formula — otherwise short terminals clip the window's tail and make the
+// newest notes unreachable (review R1: 54/58 at 80x12).
+const VIEWER_MAX_BUDGET_RATIO = 0.8;
 
 export default function (pi: ExtensionAPI) {
   const notes: string[] = [];
@@ -106,6 +115,23 @@ export default function (pi: ExtensionAPI) {
         let builtWidth = -1;
         let wrapped: string[] = [];
 
+        // Actual visible budget: mirror the installed host's overlay height
+        // math (see VIEWER_MAX_BUDGET_RATIO). Header and status cost one row
+        // each; the rest is the scrolling body. Falls back to the default
+        // viewport when no terminal geometry is available (typed test stubs).
+        function visibleBudget(): number {
+          const rows = (tui as { terminal?: { rows?: unknown } } | undefined)?.terminal?.rows;
+          const budget =
+            typeof rows === "number" && Number.isFinite(rows) && rows > 0
+              ? Math.max(1, Math.floor(rows * VIEWER_MAX_BUDGET_RATIO))
+              : VIEWER_CONTENT_ROWS + 2;
+          return budget;
+        }
+
+        function bodyRows(): number {
+          return Math.max(0, Math.min(VIEWER_CONTENT_ROWS, visibleBudget() - 2));
+        }
+
         function rebuild(width: number) {
           builtWidth = width;
           wrapped = [];
@@ -123,7 +149,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         function maxOffset(): number {
-          return Math.max(0, wrapped.length - VIEWER_CONTENT_ROWS);
+          return Math.max(0, wrapped.length - bodyRows());
         }
 
         return {
@@ -134,28 +160,40 @@ export default function (pi: ExtensionAPI) {
               `${theme.fg("accent", `⚓ session notes (${notes.length})`)} ${theme.fg("dim", "· ↑↓ line · PgUp/PgDn page · Home/End ends · Esc close")}`,
               width,
             );
-            const slice = wrapped.slice(offset, offset + VIEWER_CONTENT_ROWS);
-            const body = slice.map((line) => truncateToWidth(line, width));
-            const status = truncateToWidth(
-              theme.fg(
-                "dim",
-                wrapped.length > 0
-                  ? `[${offset + 1}–${offset + slice.length} of ${wrapped.length} lines]`
-                  : "[no notes]",
+            // The overlay box is exactly these lines (no host border chrome);
+            // body height tracks the live terminal height, so resizes re-fit
+            // on the next render and the window can never be tail-clipped.
+            const lines: string[] = [header];
+            const rows = bodyRows();
+            let sliceLength = 0;
+            if (rows > 0) {
+              const slice = wrapped.slice(offset, offset + rows);
+              sliceLength = slice.length;
+              for (const line of slice) lines.push(truncateToWidth(line, width));
+            }
+            lines.push(
+              truncateToWidth(
+                theme.fg(
+                  "dim",
+                  wrapped.length > 0
+                    ? `[${offset + 1}–${offset + sliceLength} of ${wrapped.length} lines]`
+                    : "[no notes]",
+                ),
+                width,
               ),
-              width,
             );
-            return [header, ...body, status];
+            return lines;
           },
           handleInput(data: string): void {
             if (matchesKey(data, "escape")) {
               done(undefined);
               return;
             }
+            const rows = bodyRows();
             if (matchesKey(data, "up")) offset -= 1;
             else if (matchesKey(data, "down")) offset += 1;
-            else if (matchesKey(data, "pageUp")) offset -= VIEWER_CONTENT_ROWS;
-            else if (matchesKey(data, "pageDown")) offset += VIEWER_CONTENT_ROWS;
+            else if (matchesKey(data, "pageUp")) offset -= rows;
+            else if (matchesKey(data, "pageDown")) offset += rows;
             else if (matchesKey(data, "home")) offset = 0;
             else if (matchesKey(data, "end")) offset = Number.MAX_SAFE_INTEGER;
             else return;

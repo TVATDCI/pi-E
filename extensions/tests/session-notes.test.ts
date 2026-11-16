@@ -65,6 +65,12 @@ interface ViewerHandle {
 }
 
 const themeStub = { fg: (_t: string, s: string) => s, bold: (s: string) => s };
+// Shared tui stub with LIVE terminal geometry: tests mutate rows to simulate
+// resizes; the viewer reads tui.terminal.rows on every render.
+const tuiStub: { requestRender: () => void; terminal: { rows: number } } = {
+  requestRender: () => undefined,
+  terminal: { rows: 30 },
+};
 
 interface Driver {
   widgets: CapturedWidget[];
@@ -122,7 +128,7 @@ function makeDriver(opts?: { hasUI?: boolean; mode?: string }): Driver {
           };
         });
         const component = factory(
-          { requestRender: () => undefined },
+          tuiStub,
           themeStub,
           { matches: () => false },
           resolveClosed!,
@@ -442,6 +448,79 @@ tests.push(async () => {
   await d.notesCommand!("hide", d.ctx);
   await d.notesCommand!("show", d.ctx);
   check("headless: hide/show are safe no-ops", d.viewer === undefined);
+});
+
+// 12. R1 (independent-review fix): viewer geometry tracks the ACTUAL visible
+// height. pi-tui 1.5.2 hard-slices overlay lines to maxHeight =
+// max(1, floor(rows * 80 / 100)); the viewer mirrors that math so the whole
+// list stays reachable at every terminal height — regression-pinned at
+// 12/16/24/40 rows, incl. tall→short→tall resize, last note and long-note tail.
+tests.push(async () => {
+  const d = makeDriver();
+  await fireSessionStart(d);
+  const longNote = "long-tail-note " + "filler words here to force wrapping ".repeat(6) + "sierra tango end";
+  await addNotesViaCommand(d, 57, "g");
+  await d.noteCommand!(longNote, d.ctx);
+  const openP = d.notesCommand!("", d.ctx);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const v = openViewer(d);
+  const width = 60;
+
+  const expectations: Array<{ rows: number; lines: number }> = [
+    { rows: 12, lines: 9 },
+    { rows: 16, lines: 12 },
+    { rows: 24, lines: 14 }, // budget 19 > cap: body capped at 12
+    { rows: 40, lines: 14 },
+  ];
+  for (const exp of expectations) {
+    tuiStub.terminal.rows = exp.rows;
+    const lines = v.component.render(width);
+    check(`rows ${exp.rows}: rendered lines equal the visible budget (${exp.lines}) — no tail clipping`,
+      lines.length === exp.lines);
+    v.component.handleInput(KEYS.end);
+    const endLines = v.component.render(width);
+    const joined = endLines.join("\n");
+    check(`rows ${exp.rows}: End reaches the newest note`, /g-57/.test(joined));
+    check(`rows ${exp.rows}: End shows the long-note tail (sierra tango end)`, /sierra tango end/.test(joined));
+    const m = /\[(\d+)–(\d+) of (\d+) lines\]/.exec(endLines[endLines.length - 1] ?? "");
+    check(`rows ${exp.rows}: status window ends at the last wrapped line`,
+      !!m && m[2] === m[3]);
+  }
+
+  // Page step equals the current body height (7 body rows at 12-row terminal).
+  tuiStub.terminal.rows = 12;
+  v.component.handleInput(KEYS.end);
+  const atBottom = v.component.render(width);
+  const b = /\[(\d+)–/.exec(atBottom[atBottom.length - 1] ?? "");
+  v.component.handleInput(KEYS.pageUp);
+  const afterPage = v.component.render(width);
+  const a = /\[(\d+)–/.exec(afterPage[afterPage.length - 1] ?? "");
+  check("PageUp steps by the full body height (7 lines at 12 rows)",
+    !!a && !!b && Number(b[1]) - Number(a[1]) === 7);
+
+  // Tall → short → tall resize: geometry re-fits live, nothing unreachable.
+  tuiStub.terminal.rows = 40;
+  v.component.handleInput(KEYS.end);
+  let lines = v.component.render(width);
+  check("tall (40 rows): 14 rendered lines", lines.length === 14);
+  tuiStub.terminal.rows = 12;
+  lines = v.component.render(width);
+  check("shrunk to 12 rows: 9 rendered lines, no crash", lines.length === 9);
+  check("short: status window still consistent", /\[\d+–\d+ of \d+ lines\]/.test(lines.join("\n")));
+  v.component.handleInput(KEYS.end);
+  lines = v.component.render(width);
+  check("short: End still reaches the newest note", /g-57/.test(lines.join("\n")));
+  tuiStub.terminal.rows = 40;
+  lines = v.component.render(width);
+  check("grew back to 40 rows: 14 rendered lines again", lines.length === 14);
+  v.component.handleInput(KEYS.end);
+  const regrown = v.component.render(width);
+  check("grew back: End bottom shows the newest note after resize", /g-57/.test(regrown.join("\n")));
+
+  tuiStub.terminal.rows = 30;
+  v.component.handleInput(KEYS.escape);
+  await v.closed;
+  await openP;
 });
 
 (async () => {
