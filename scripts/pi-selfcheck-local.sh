@@ -8,7 +8,14 @@
 # Scope (converged boundary c + round table a): everything STACK-specific —
 #   1. scripts/stack-health.sh      — invoked, output folded, exit folded (no re-implementation).
 #   2. scripts/run-tests.ts         — the extension suite (behavioral authority: bridge composition,
-#                                     sentinel, purpose/task gates, memory chain); tail + exit folded.
+#                                     sentinel, purpose/task gates, memory chain); tail + exit folded,
+#                                     then COUNT-ENFORCED: the suite's discovered file-count (parsed
+#                                     from the suite's own output, never a second discovery pass) must
+#                                     equal EXPECTED_SUITE_FILES below — a silently shrunken suite must
+#                                     never read green. The constant's update path is a ONE-LINE
+#                                     deliberate edit of that constant at the top of this hook: bump
+#                                     it when a test file lands; lower it ONLY after confirming the
+#                                     removal was intentional (never to silence a failure).
 #   3. File-level checks (live desk):
 #        bridge/global-export.jsonl — exists, every line JSONL-parses, mtime < 25h
 #        memory/store.jsonl         — last line JSON-parses
@@ -31,6 +38,10 @@ ROOT="$(dirname "$(dirname "$SCRIPT_PATH")")"   # scripts/<hook> -> repo / insta
 PI_HOME="${HOME}/.pi/agent"                     # live desk data (matches stack-health.sh convention)
 SUITE_BUDGET=480                                # seconds — suite is the long pole; <10 min total contract
 SH_BUDGET=60                                    # stack-health is file ops + git; generous but bounded
+EXPECTED_SUITE_FILES=50                         # suite file-count floor (suite output "run-tests: 50 file(s)"
+                                                # verified green at cd57229, 2026-11-16). Update path: ONE
+                                                # deliberate edit of this number — bump when a test file lands;
+                                                # lower ONLY after confirming the removal was intentional.
 
 fails=0
 json_keys=()
@@ -139,7 +150,17 @@ else
     suite_rc=1 # mktemp failed — do not run the suite without its scratch slot
   fi
   if [ "$suite_rc" -eq 0 ]; then
-    pass "extension-suite" "$(grep -E 'files? passed' "$SUITE_TMP" | tail -1)"
+    # Count enforcement: the discovered file-count comes from the suite's OWN
+    # output above; an unparseable count reads as 0 and FAILs below.
+    suite_files="$(grep -E '^run-tests: [0-9]+ file' "$SUITE_TMP" | head -1 | sed -E 's/^run-tests: ([0-9]+) file.*/\1/')"
+    suite_files="${suite_files:-0}"
+    if [ "$suite_files" -lt "$EXPECTED_SUITE_FILES" ]; then
+      fail "extension-suite" "suite file-count ${suite_files} < EXPECTED_SUITE_FILES=${EXPECTED_SUITE_FILES} — a silently shrunken suite must not read green (hint: a test file vanished or suite discovery broke; if the shrink is deliberate, edit EXPECTED_SUITE_FILES at the top of this hook — one-line deliberate edit)"
+    elif [ "$suite_files" -gt "$EXPECTED_SUITE_FILES" ]; then
+      fail "extension-suite" "suite file-count ${suite_files} > EXPECTED_SUITE_FILES=${EXPECTED_SUITE_FILES} (hint: a new test file landed — update the EXPECTED_SUITE_FILES constant at the top of this hook: one-line deliberate edit)"
+    else
+      pass "extension-suite" "$(grep -E 'files? passed' "$SUITE_TMP" | tail -1)"
+    fi
   elif [ "$suite_rc" = 124 ]; then
     fail "extension-suite" "TIMEOUT after ${SUITE_BUDGET}s (hint: run manually: cd $ROOT && node --experimental-strip-types scripts/run-tests.ts)"
   else
