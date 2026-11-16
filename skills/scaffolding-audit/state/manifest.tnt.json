@@ -1,13 +1,13 @@
 {
-  "recorded-at": "2026-11-04T17:26:57.318Z",
+  "recorded-at": "2026-11-10T15:11:13.568Z",
   "surface-scope": "pi",
   "last-audit-commit": {
-    "~/.pi/agent": "c5287beb9593e72da8346d1cad703b38347e1f77"
+    "~/.pi/agent": "c74a3af97f954e76d055893ea56297d24c4f6302"
   },
   "model-state": {
     "source": {
       "path": "extensions/orchestration-engine/tier-map.ts",
-      "sha256": "c11544509540d6114803c722b051684ff91f5059a91a5dcd37aa34b7252ac18f"
+      "sha256": "28daf5e519ce632c3099b03279cad2132b182f540303e3b99c1d64eb84efa040"
     },
     "assignments": {
       "quick": {
