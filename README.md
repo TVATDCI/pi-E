@@ -51,6 +51,8 @@ run_chain({ …, context: "…" }) # curated handoff: findings/constraints appen
 /persona-forge reject <new-id>  # discard a pending persona
 /dc-mode abort|continue    # toggle damage-control mode
 /note <text>               # persistent in-session note
+/notes                     # browse ALL notes read-only (↑↓ PgUp/PgDn Home/End, Esc close)
+/notes hide | /notes show  # hide/show the compact notes preview (capture continues while hidden)
 Remember that …          # persists a fact via memory_remember → ranked + injected next turn
 ```
 
@@ -147,7 +149,7 @@ Remember that …          # persists a fact via memory_remember → ranked + in
 | `mini-task-tracker.ts`                                                     | 229 | `task` tool + widget; non-mutating tools (read/grep/find/ls/`memory_remember`) exempt from the task gate                                                                                                                                                               |
 | `mini-damage-control.ts`                                                   | 168 | Safety: fail-closed + deny-additive + `/dc-mode`                                                                                                                                                                                                                       |
 | `orchestration-engine/routing-stats.ts`                                    | 204 | Pure aggregation for `/routing-stats` incl. usage section (unit-tested)                                                                                                                                                                                                |
-| `session-notes.ts`                                                         | 133 | `add_note` + `/note` persistent widget                                                                                                                                                                                                                                 |
+| `session-notes.ts`                                                         | 312 | `add_note` + `/note` capture; bounded preview (latest 3) + `/notes` full viewer + `/notes hide\|show`                                                                                                                                                                    |
 | `mini-purpose-gate.ts`                                                     | 163 | Boot intent gate + **`PI_PURPOSE`** env adoption: INBOUND var pi **reads** (rpc mode only; `PI_SESSION_*` stays pi's outbound namespace — design-v0.2)                                                                                                                 |
 | `orchestration-engine/test-routing-stats.ts`                               | 58  | Aggregator unit tests (13/13)                                                                                                                                                                                                                                          |
 | `web-research.ts`                                                          | 311 | Keyless `search` (Wikipedia+DDG-IA+npm+GitHub) + `fetch` (curl+w3m→text, truncated, SSRF-hardened) tools                                                                                                                                                               |

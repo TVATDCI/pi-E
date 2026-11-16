@@ -1,6 +1,13 @@
 // Lesson 0002 build-along: session-notes — all 5 primitives in one file.
 // API verified against Pi extensions.md; patterns from theme-cycler.ts +
 // the extensions.md quick-start. Import locked per LR-0001.
+//
+// session-notes-ui-refactor (2026-11-16): the widget no longer renders one row
+// per note — a long notes list used to displace the editor entirely (58 notes
+// = 59 widget rows). Preview is bounded (heading + latest 3 notes, 4 content
+// rows max); /notes opens every held note in a read-only scrollable viewer;
+// /notes hide|show toggles preview visibility only. Stored note text is never
+// rewritten: flattening/truncation are display-only.
 
 // Step 0 — The skeleton
 import type {
@@ -8,7 +15,12 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import {
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 
 // Session-notes behavioral framing — consumed by prompt-coordinator.ts (sole before_agent_start
 // registrant). Co-located here because the text is about the add_note tool this module owns.
@@ -16,11 +28,35 @@ export const SESSION_NOTES_TEXT =
   "## Session notes\n" +
   "You have an `add_note` tool and the user has `/note`. Use `add_note` to record decisions, TODOs, or context worth keeping visible this session.";
 
+// Preview bound: heading + latest three notes, whatever the total. This is a
+// widget-content bound, not a host-layout guarantee about surrounding gaps.
+const PREVIEW_NOTE_ROWS = 3;
+// Viewer viewport cap in body lines (plus its own header/status rows). Actual
+// body height adapts to the terminal (see openViewer); this caps it on tall
+// terminals so the viewer stays a viewer.
+const VIEWER_CONTENT_ROWS = 12;
+// Cells reserved for the note-index prefix inside the viewer.
+const VIEWER_PREFIX_CELLS = 6;
+// Mirror of the overlayOptions maxHeight "80%" below. pi-tui 1.5.2 resolves a
+// percentage maxHeight as Math.max(1, Math.floor(termHeight * pct / 100)) and
+// hard-slices component lines to that cap (tui.js parseSizeValue +
+// compositeOverlays), so the viewer computes its body height from the same
+// formula — otherwise short terminals clip the window's tail and make the
+// newest notes unreachable (review R1: 54/58 at 80x12).
+const VIEWER_MAX_BUDGET_RATIO = 0.8;
+
 export default function (pi: ExtensionAPI) {
   const notes: string[] = [];
-  //   What this is: the factory shell. Pi calls your default-exported function with pi (the ExtensionAPI — your handle to register everything). The notes array is the extension's in-memory state — it lives for the session, shared across all primitives. This closure-over-shared-state is how extensions coordinate: the command writes to notes, the tool writes to notes, the widget reads from notes.
+  // Preview visibility is local to the running extension; note capture continues
+  // while hidden and adding a note never reopens the preview.
+  let previewHidden = false;
 
-  // Step 1: COMMAND — user types /note <text></text>
+  // Display-only whitespace flattening: embedded newlines/tabs must not expand
+  // the panel. Stored note text is untouched — this only shapes the preview row.
+  function flattenForPreview(text: string): string {
+    return text.replace(/\s+/g, " ").trim();
+  }
+
   // --- WIDGET HELPER (used by command + tool) ---
   function renderWidget(ctx: ExtensionContext) {
     if (!ctx.hasUI) return;
@@ -29,36 +65,154 @@ export default function (pi: ExtensionAPI) {
       (_tui, theme) => ({
         invalidate() {},
         render(width: number): string[] {
-          if (notes.length === 0) {
-            return [
-              truncateToWidth(
-                theme.fg(
-                  "muted",
-                  "⚓ session-notes: empty — /note <text> or the add_note tool",
-                ),
-                width,
-              ),
-            ];
-          }
-          return [
-            truncateToWidth(
-              theme.fg("accent", `⚓ session-notes (${notes.length})`),
-              width,
-            ),
-            ...notes.map((n) =>
-              truncateToWidth(theme.fg("dim", `  • ${n}`), width),
-            ),
-          ];
+          // No panel at all when there are zero notes or the preview is hidden;
+          // /note and /notes stay fully available either way.
+          if (notes.length === 0 || previewHidden) return [];
+
+          const total = notes.length;
+          // Latest three, chronological order (oldest of the three first).
+          const shown = notes.slice(-PREVIEW_NOTE_ROWS);
+          const hiddenCount = total - shown.length;
+
+          // Heading: total count always; hidden count and the /notes hint as
+          // width permits (drop the hint first, then the hidden segment).
+          const base = theme.fg("accent", `⚓ session-notes (${total})`);
+          const withHidden =
+            hiddenCount > 0
+              ? `${base} ${theme.fg("muted", `· +${hiddenCount} earlier hidden`)}`
+              : base;
+          const hint = theme.fg("dim", `· /notes opens all`);
+          let heading = `${withHidden} ${hint}`;
+          if (visibleWidth(heading) > width) heading = withHidden;
+          if (visibleWidth(heading) > width) heading = base;
+
+          const rows = shown.map((n) =>
+            truncateToWidth(theme.fg("dim", `  • ${flattenForPreview(n)}`), width),
+          );
+          return [truncateToWidth(heading, width), ...rows];
         },
       }),
       { placement: "belowEditor" },
     );
   }
 
-  //   What this is: a helper that (re)renders the widget. setWidget takes a key, a factory (not a string — it's called every render cycle), and a placement. The factory returns { invalidate, render } — same shape as setFooter from Lesson 0001. render(width) returns an array of strings, one per TUI line. theme.fg("accent", text) applies theme colors.
+  //   What this is: a helper that (re)renders the widget. setWidget takes a key, a factory (not a string — it's called every render cycle), and a placement. The factory returns { invalidate, render } — same shape as setFooter from Lesson 0001. render(width) returns an array of strings, one per TUI line. theme.fg("accent", text) applies theme colors. The factory closure captures notes by reference and reads it fresh each render.
 
-  //   Why a factory and not a string: the widget re-renders on every UI tick. If it were a static string, it couldn't react to notes changing. The factory closure captures notes by reference and reads it fresh each render.
-  // Why this comes first: both the command (Step 2) and the tool (Step 3) call renderWidget(ctx) after mutating notes. Defining it once avoids duplication.
+  // --- FULL READ-ONLY VIEWER (/notes) ---
+  // Opens every held note, wrapped, in a scrollable read-only screen. Rendered
+  // as an overlay: pi's fullscreen renderer consumes unmodified PageUp/PageDown
+  // for its own viewport scrolling before focused editor-area components see
+  // input (pi-tui tui-alt-screen.ts "intentionally shadow" comment, verified
+  // live in a disposable pi session); only the overlay path defers those keys
+  // to the component. The overlay never replaces the editor, so editor input
+  // is preserved verbatim while browsing and focus returns on close.
+  function openViewer(ctx: ExtensionContext): Promise<void> {
+    return ctx.ui.custom<void>(
+      (tui, theme, _keybindings, done) => {
+        // Start pinned to the newest notes: the first render clamps this to the
+        // bottom of the wrapped list (End behaves identically).
+        let offset = Number.MAX_SAFE_INTEGER;
+        let builtWidth = -1;
+        let wrapped: string[] = [];
+
+        // Actual visible budget: mirror the installed host's overlay height
+        // math (see VIEWER_MAX_BUDGET_RATIO). Header and status cost one row
+        // each; the rest is the scrolling body. Falls back to the default
+        // viewport when no terminal geometry is available (typed test stubs).
+        function visibleBudget(): number {
+          const rows = (tui as { terminal?: { rows?: unknown } } | undefined)?.terminal?.rows;
+          const budget =
+            typeof rows === "number" && Number.isFinite(rows) && rows > 0
+              ? Math.max(1, Math.floor(rows * VIEWER_MAX_BUDGET_RATIO))
+              : VIEWER_CONTENT_ROWS + 2;
+          return budget;
+        }
+
+        function bodyRows(): number {
+          return Math.max(0, Math.min(VIEWER_CONTENT_ROWS, visibleBudget() - 2));
+        }
+
+        function rebuild(width: number) {
+          builtWidth = width;
+          wrapped = [];
+          const inner = Math.max(1, width - VIEWER_PREFIX_CELLS);
+          notes.forEach((note, i) => {
+            const segments = wrapTextWithAnsi(note, inner);
+            segments.forEach((seg, j) => {
+              const prefix =
+                j === 0
+                  ? theme.fg("accent", `${String(i + 1).padStart(3, " ")}· `)
+                  : " ".repeat(VIEWER_PREFIX_CELLS);
+              wrapped.push(`${prefix}${seg}`);
+            });
+          });
+        }
+
+        function maxOffset(): number {
+          return Math.max(0, wrapped.length - bodyRows());
+        }
+
+        return {
+          render(width: number): string[] {
+            if (width !== builtWidth) rebuild(width);
+            offset = Math.min(Math.max(0, offset), maxOffset());
+            const header = truncateToWidth(
+              `${theme.fg("accent", `⚓ session notes (${notes.length})`)} ${theme.fg("dim", "· ↑↓ line · PgUp/PgDn page · Home/End ends · Esc close")}`,
+              width,
+            );
+            // The overlay box is exactly these lines (no host border chrome);
+            // body height tracks the live terminal height, so resizes re-fit
+            // on the next render and the window can never be tail-clipped.
+            const lines: string[] = [header];
+            const rows = bodyRows();
+            let sliceLength = 0;
+            if (rows > 0) {
+              const slice = wrapped.slice(offset, offset + rows);
+              sliceLength = slice.length;
+              for (const line of slice) lines.push(truncateToWidth(line, width));
+            }
+            lines.push(
+              truncateToWidth(
+                theme.fg(
+                  "dim",
+                  wrapped.length > 0
+                    ? `[${offset + 1}–${offset + sliceLength} of ${wrapped.length} lines]`
+                    : "[no notes]",
+                ),
+                width,
+              ),
+            );
+            return lines;
+          },
+          handleInput(data: string): void {
+            if (matchesKey(data, "escape")) {
+              done(undefined);
+              return;
+            }
+            const rows = bodyRows();
+            if (matchesKey(data, "up")) offset -= 1;
+            else if (matchesKey(data, "down")) offset += 1;
+            else if (matchesKey(data, "pageUp")) offset -= rows;
+            else if (matchesKey(data, "pageDown")) offset += rows;
+            else if (matchesKey(data, "home")) offset = 0;
+            else if (matchesKey(data, "end")) offset = Number.MAX_SAFE_INTEGER;
+            else return;
+            offset = Math.min(Math.max(0, offset), maxOffset());
+            tui.requestRender();
+          },
+          invalidate() {
+            builtWidth = -1; // rebuild (and re-clamp) on the next render
+          },
+        };
+      },
+      // Centered floating panel (same pattern as chain-clarify.ts); maxHeight
+      // keeps it inside small terminals.
+      {
+        overlay: true,
+        overlayOptions: { anchor: "center", width: "70%", minWidth: 40, maxHeight: "80%" },
+      },
+    );
+  }
 
   // Step 2 — Command primitive (pi.registerCommand)
   // 1. COMMAND — user types /note <text>
@@ -76,8 +230,40 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  //   What this is: the user types /note ship the Pi port. Pi parses the slash command, calls your handler with args (everything after /note ) and ctx (the ExtensionContext — UI handle, session, model, cwd). You push to notes, re-render the widget, and show a toast.
-  // Key fact for the glossary gate: this is user-invoked. The LLM never sees it. tool_call hooks do NOT intercept it. That's the asymmetry you'll feel in Exercise 3.
+  //   Key fact for the glossary gate: /note is user-invoked. The LLM never sees it. tool_call hooks do NOT intercept it. The add_note tool (Step 3) is LLM-invoked and gated.
+
+  // 1b. COMMAND — /notes: browse all notes read-only; /notes hide|show toggles
+  // the bounded preview (visibility only — capture continues while hidden and
+  // a hidden preview is never auto-reopened by new notes).
+  pi.registerCommand("notes", {
+    description: "Browse all session notes (read-only) · /notes hide|show toggles the preview",
+    handler: async (args, ctx) => {
+      const arg = args.trim().toLowerCase();
+      if (arg === "hide") {
+        previewHidden = true;
+        renderWidget(ctx);
+        return;
+      }
+      if (arg === "show") {
+        previewHidden = false;
+        renderWidget(ctx);
+        return;
+      }
+      if (arg) {
+        ctx.ui.notify("Usage: /notes · /notes hide · /notes show", "warning");
+        return;
+      }
+      if (notes.length === 0) {
+        ctx.ui.notify("No session notes yet — /note <text> adds one", "info");
+        return;
+      }
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify("/notes viewer requires interactive mode", "warning");
+        return;
+      }
+      await openViewer(ctx);
+    },
+  });
 
   // Step 3 — Tool primitive (pi.registerTool)
   // 2. TOOL — the LLM calls add_note
@@ -98,9 +284,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  //   What this is: the LLM decides to call add_note. Pi sends the tool definition (name + description + parameters schema) to the model; when the model calls it, Pi runs your execute.
-  // Type.Object(...) is TypeBox — a JSON-Schema builder. Type.Object({ text: Type.String() }) compiles to {"type":"object","properties":{"text":{"type":"string"}}}. The description field feeds the LLM's tool-use decision. TypeBox is how tool parameters are typed in Pi — you'll see it in every tool you register.
-  // Key fact: this is LLM-invoked and visible to tool_call hooks. That's why the hook in Step 4 can gate it — but can't gate the /note command from Step 2.
+  //   Key fact: this is LLM-invoked and visible to tool_call hooks. That's why the hook in Step 4 can gate it — but can't gate the /note command from Step 2.
 
   // Step 4 — Hook primitive (pi.on("tool_call", ...))
   // 3. HOOK — gate the add_note tool call (inline gate; deep-dive in Lesson 0003)
@@ -113,9 +297,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  //   What this is: every tool call fires this hook BEFORE execution. You get event.toolName and event.input (the parameters the LLM passed). Returning { block: true, reason } cancels the call and feeds the reason back to the LLM. Returning nothing (undefined) lets it through.
-  // This is the port-critical primitive: Sisyphus's hard-coded gate plugin → tool_call hooks. Lesson 0003 deep-dives this. Notice the gate is per-tool — you check event.toolName === "add_note" before applying the length rule. A real gate (damage-control) checks event.toolName === "bash" and inspects event.input.command for destructive patterns.
-  // The asymmetry you'll test: this hook fires for add_note (tool) but NOT for /note (command). Try a 201-char note both ways in Exercise 3 — the tool call is blocked, the command sails through.
+  //   The gate is per-tool — you check event.toolName === "add_note" before applying the length rule. The asymmetry: this hook fires for add_note (tool) but NOT for /note (command). A 201-char note: the tool call is blocked, the command sails through.
 
   // Step 5 — Widget initialization (session_start)
   // 4. WIDGET — initialize on session start
@@ -123,10 +305,8 @@ export default function (pi: ExtensionAPI) {
     renderWidget(ctx);
   });
 
-  //   What this is: when Pi boots, session_start fires with a fresh ctx. You call renderWidget once to paint the empty-state ("📓 session-notes: empty — ..."). Without this, the widget wouldn't appear until the first note is added.
+  //   Without this the widget wouldn't be registered until the first note is added. With zero notes the widget renders zero rows — no empty panel.
 
   // Step 6 — Prompt augmentation moved to prompt-coordinator.ts (sole before_agent_start
   // registrant). SESSION_NOTES_TEXT (module-level export above) is the pure string it emits.
 }
-// What this is: before EVERY agent turn, Pi fires before_agent_start with the current event.systemPrompt. You return a new systemPrompt — here, the original + a section telling the LLM the tool exists. This is per-turn mutation: you can change it every turn based on state, session phase, user intent.
-// This is the other port-critical primitive: Sisyphus's large fixed system prompt → before_agent_start injection. Instead of a 10K-token monolith, you inject context dynamically, per-turn, only when relevant.
