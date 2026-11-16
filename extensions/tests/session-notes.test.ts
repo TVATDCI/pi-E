@@ -227,7 +227,7 @@ tests.push(async () => {
   check("58 notes: shows the latest three (more-52,53,54) in order",
     /more-52/.test(f58[1]!) && /more-53/.test(f58[2]!) && /more-54/.test(f58[3]!));
   check("58 notes: earlier notes not rendered as rows", !/more-1\b/.test(f58.join("\n")));
-  for (let i = 1; i <= 942; i++) await d.noteCommand(`bulk-${i}`, d.ctx);
+  for (let i = 1; i <= 942; i++) await d.noteCommand!(`bulk-${i}`, d.ctx);
   const f1000 = renderPreview(d, 80);
   check("1000 notes: still exactly 4 rows (large-count regression)", f1000.length === 4);
   check("1000 notes: hidden count +997", /\+997 earlier hidden/.test(f1000[0]!));
