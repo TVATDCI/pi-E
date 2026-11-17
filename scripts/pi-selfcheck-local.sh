@@ -38,8 +38,8 @@ ROOT="$(dirname "$(dirname "$SCRIPT_PATH")")"   # scripts/<hook> -> repo / insta
 PI_HOME="${HOME}/.pi/agent"                     # live desk data (matches stack-health.sh convention)
 SUITE_BUDGET=480                                # seconds — suite is the long pole; <10 min total contract
 SH_BUDGET=60                                    # stack-health is file ops + git; generous but bounded
-EXPECTED_SUITE_FILES=50                         # suite file-count floor (suite output "run-tests: 50 file(s)"
-                                                # verified green at cd57229, 2026-11-16). Update path: ONE
+EXPECTED_SUITE_FILES=51                         # suite file-count floor (suite output "run-tests: 51 file(s)"
+                                                # verified green with gate-v1.2 leg-1 test fold, 2026-11-17). Update path: ONE
                                                 # deliberate edit of this number — bump when a test file lands;
                                                 # lower ONLY after confirming the removal was intentional.
 
