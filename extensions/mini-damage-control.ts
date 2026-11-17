@@ -1761,14 +1761,36 @@ export default function (pi: ExtensionAPI) {
               return false;
             });
           });
+          // N2 (recheck round 3): unset/empty-var mid-name elision (mini-d${E}c with E unset)
+          // reconstructs protected paths at execution. Expand KNOWN vars first, then elide
+          // any remaining $VAR/`${VAR}` segments, then strip quotes (quote boundaries end
+          // var names — elision on the raw token, mirroring the O1-fold discipline). This
+          // intentionally over-blocks set-nonempty elisions: fail-closed, same trade as O1.
+          if (!tokenLevel) {
+            for (const rawTok of tokens) {
+              const elided = expandTilde(
+                expandShellEnvVars(rawTok).replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, "").replace(/['"]/g, ""),
+              );
+              if (elided === rawTok || !elided.includes("/")) continue;
+              const tok = expandShellEnvVars(expandTilde(elided)); // idempotent second pass
+              const norm = pathResolve(isAbsolute(tok) ? tok : join(ctx.cwd, tok));
+              if (rootReal.some((rr) => underStorePrefix(norm, rr)) || roots.some((r) => norm.startsWith(r + sep) || norm === r)) { tokenLevel = true; break; }
+              if (norm === rulesReal) { tokenLevel = true; break; }
+              const resolved = realpathNearest(norm);
+              if (resolved && (rootReal.some((rr) => underStorePrefix(resolved, rr)) || resolved === rulesReal)) { tokenLevel = true; break; }
+            }
+          }
         }
         let squashed = false;
         if (!lexical && !tokenLevel) {
           // Space-quote split net: a protected path torn apart by quoted whitespace still
           // lands in the quote-stripped, whitespace-free command (N1: env + tilde forms of
-          // the store AND the rules file included).
+          // the store AND the rules file included; N2: $VAR-segment-elided flat form too —
+          // greedy, backstop-only, the token net above is the precise fix).
           const flat = cmd.replace(/['"\\]/g, "").replace(/\s+/g, "");
-          squashed = storeRefForms.concat(rulesForms).some((form) => flat.includes(form.replace(/['"\\]/g, "").replace(/\s+/g, "")));
+          const flatDeEnv = flat.replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, "");
+          const forms = storeRefForms.concat(rulesForms).map((form) => form.replace(/['"\\]/g, "").replace(/\s+/g, ""));
+          squashed = forms.some((form) => flat.includes(form) || (flatDeEnv !== flat && flatDeEnv.includes(form)));
         }
         if (lexical || tokenLevel || squashed) {
           violationWhat = "shell command references the privileged mini-dc store/rules";

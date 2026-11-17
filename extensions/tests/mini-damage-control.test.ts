@@ -1242,6 +1242,37 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   rmSync(storeN1, { recursive: true, force: true });
 }
 
+{
+  section("F4/N2 — unset-var mid-name elision escape shapes (D1-D5 + write + benign control)");
+  // Captain round-4 ruling: unset/empty-var segments reconstruct protected paths at
+  // execution (mini-d${E}c with E unset). Pins verbatim from the recheck report; inert
+  // strings — the gate denies, nothing executes. Production root protected regardless of
+  // the harness seam.
+  const storeN2 = mkdtempSync(join(os.tmpdir(), "minidc-v12-n2-"));
+  const d1 = await drive({ command: 'cat $HOME/.pi/agent/mini-d${E}c/someRepo/grants.yaml', env: WORKER_ENV, mode: "json", storeDir: storeN2 });
+  check("N2 D1: unset-var mid-name elision store read DENIED", R(d1).block === true && (R(d1).reason ?? "").includes("privileged mini-dc store/rules"));
+  cleanupHarness(d1);
+  const d2 = await drive({ command: 'cat $HOME/.pi/agent/mini-d"$E"c/someRepo/grants.yaml', env: WORKER_ENV, mode: "json", storeDir: storeN2 });
+  check("N2 D2: quote-delimited unset-var mid-name elision DENIED (raw-first de-env)", R(d2).block === true);
+  cleanupHarness(d2);
+  const d3 = await drive({ command: 'cat ~/.pi/agent/mini-d${E}c-rules.yaml', env: WORKER_ENV, mode: "json", storeDir: storeN2 });
+  check("N2 D3: elided global rules file read DENIED", R(d3).block === true);
+  cleanupHarness(d3);
+  const d4 = await drive({ command: 'echo forged > $HOME/.pi/agent/mini-d${E}c/someRepo/trail.jsonl', env: WORKER_ENV, mode: "json", storeDir: storeN2 });
+  check("N2 D4: elided production trail WRITE DENIED", R(d4).block === true);
+  cleanupHarness(d4);
+  const d5 = await drive({ command: 'cat $HOME/.pi/a${E}gent/mini-dc/someRepo/grants.yaml', env: WORKER_ENV, mode: "json", storeDir: storeN2 });
+  check("N2 D5: elision inside a path segment (agent) DENIED", R(d5).block === true);
+  cleanupHarness(d5);
+  const dW = await drive({ command: 'echo x >> ~/.pi/agent/mini-d${E}c-rules.yaml', env: WORKER_ENV, mode: "json", storeDir: storeN2 });
+  check("N2 write variant: elided rules-file append DENIED", R(dW).block === true);
+  cleanupHarness(dW);
+  const dBenign = await drive({ command: 'cat ${E}dir/notes.txt', env: WORKER_ENV, mode: "json", storeDir: storeN2 });
+  check("N2 benign control: unset-var non-store reads still pass", R(dBenign).block === false);
+  cleanupHarness(dBenign);
+  rmSync(storeN2, { recursive: true, force: true });
+}
+
 // ── restore production seams ─────────────────────────────────────────────────
 setStoreRootForTesting(null);
 setEnvSourceForTesting(null);
