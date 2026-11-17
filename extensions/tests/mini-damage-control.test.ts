@@ -40,6 +40,7 @@ import miniDc, {
   sessionScopeCount,
   setDialogClockForTesting,
   setEnvSourceForTesting,
+  setGlobalRulesPathForTesting,
   setStoreRootForTesting,
   sha16,
   Countdown,
@@ -251,6 +252,9 @@ function makeHarness(opts: DriveOpts): HarnessWithRun {
   };
   setEnvSourceForTesting(opts.env ?? WORKER_ENV);
   setStoreRootForTesting(store);
+  // AF1 round: global rules layer is ISOLATED — point the rules-loading path at a scratch
+  // fixture that never exists so no test outcome depends on this desk's real global file.
+  setGlobalRulesPathForTesting(join(tmp, "scratch-global-rules.yaml"));
   (miniDc as unknown as (p: unknown) => void)(pi);
   return {
     ...h,
@@ -1273,9 +1277,93 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   rmSync(storeN2, { recursive: true, force: true });
 }
 
+{
+  section("AF1 — D-net-first: D-shaped bash asks with NO rule match (2026-11-17 both-desk alignment finding)");
+  // ddd↔TNT live-smoke finding: `git -C <dir> push` passed UNGATED — the plain-push rule regex
+  // missed the -C form and the token D-net only ran after a rule match. The net now fires
+  // BEFORE the rules ask/block decision. All fixtures are deny-only inert shapes: the gate
+  // blocks or asks, nothing executes.
+  const mcAf1 = new ManualClock();
+  setDialogClockForTesting(mcAf1);
+  const hAf1c = await drive({
+    command: "git -C /tmp/x push origin main",
+    env: CAPTAIN_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("d"); dlg.handleInput("y"); }, // d: open the detail pane for the text pins
+  });
+  check("AF1: -C-form push with NO rule match raises the D dialog (was: ungated pass)", hAf1c.customCalls === 1);
+  const textAf1c = renderText(hAf1c.dialogs[0]);
+  check("AF1: the no-rule dialog classifies D on the token net (no rule pin)", textAf1c.includes("class: D") && textAf1c.includes("destructive git form") && textAf1c.includes("matched rule: destructive git form"));
+  check("AF1: captain y proceeds the no-rule D ask", R(hAf1c).block === false);
+  const slugAf1c = harnessSlug(hAf1c);
+  check("AF1: no-rule D proceed lands in the trail (cls D, captain, scope once)", (readTrail(slugAf1c) ?? []).some((t) => t.cls === "D" && t.decision === "proceed" && t.actor === "captain" && t.scope === "once"));
+  cleanupHarness(hAf1c);
+
+  const hAf1w = await drive({
+    command: "git -C /tmp/x push origin main",
+    env: WORKER_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("y"); dlg.handleInput("n"); }, // no y row renders for worker D (F1); n resolves
+  });
+  check("AF1: D at the worker seat is REFUSED on y (park-or-refuse law unchanged)", hAf1w.customCalls === 1 && R(hAf1w).block === true && (R(hAf1w).reason ?? "").includes("class D rejects non-captain answers always"));
+  cleanupHarness(hAf1w);
+
+  const hAf1h = await drive({ command: "git -C /tmp/x push origin main", env: WORKER_ENV, mode: "json" });
+  check("AF1: -C-form push headless → in-band ASK→deny (no abort)", R(hAf1h).block === true && (R(hAf1h).reason ?? "").includes("headless ASK→deny") && hAf1h.abortCalls === 0 && hAf1h.customCalls === 0);
+  cleanupHarness(hAf1h);
+
+  const hAf1q = await drive({ command: "git 'push'", env: WORKER_ENV, mode: "json" });
+  check("AF1: quote-split push (rule-miss shape) gates D headless", R(hAf1q).block === true && (R(hAf1q).reason ?? "").includes("headless ASK→deny"));
+  cleanupHarness(hAf1q);
+
+  const hAf1bs = await drive({ command: "git pu\\sh origin main", env: WORKER_ENV, mode: "json" });
+  check("AF1: backslash-split push (rule-miss shape) gates D headless", R(hAf1bs).block === true && (R(hAf1bs).reason ?? "").includes("headless ASK→deny"));
+  cleanupHarness(hAf1bs);
+
+  const hAf1g = await drive({
+    command: "gh pr -R o/r merge 5",
+    env: WORKER_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("d"); dlg.handleInput("y"); dlg.handleInput("n"); }, // d + no-y-row law; n resolves
+  });
+  check("AF1: gh pr merge (rule-miss shape) asks D at the worker pane and never proceeds on y", hAf1g.customCalls === 1 && renderText(hAf1g.dialogs[0]).includes("class: D") && R(hAf1g).block === true);
+  cleanupHarness(hAf1g);
+
+  // Rule matches keep their precedence: an ask-rule still asks ONCE with its rule text.
+  const pushRuleYaml = [
+    "bashToolPatterns:",
+    "  - pattern: '\\bgit\\s+push\\b'",
+    "    reason: plain git-push confirm",
+    "    ask: true",
+    "",
+  ].join("\n");
+  const hAf1r = await drive({
+    command: "git push",
+    env: CAPTAIN_ENV,
+    rulesYaml: pushRuleYaml,
+    dialogScript: (dlg) => { dlg.handleInput("d"); dlg.handleInput("y"); }, // d: open the detail pane for the rule-text pin
+  });
+  const textAf1r = renderText(hAf1r.dialogs[0]);
+  check("AF1: plain git push still asks via its rule — ONCE, rule text unchanged (no double dialog)", hAf1r.customCalls === 1 && textAf1r.includes("matched rule: \\bgit\\s+push\\b"));
+  check("AF1: rule-matched push still classifies D and proceeds on captain y", textAf1r.includes("class: D") && R(hAf1r).block === false);
+  cleanupHarness(hAf1r);
+
+  // Block wins over ask: a D-shaped command matching a BLOCK rule hard-blocks without dialog.
+  const hAf1b = await drive({ command: "git push v12deny2", env: WORKER_ENV, mode: "json" });
+  check("AF1: D-shaped command matching a BLOCK rule hard-blocks WITHOUT dialog", hAf1b.customCalls === 0 && R(hAf1b).block === true && (R(hAf1b).reason ?? "").includes("v12 deny rule"));
+  cleanupHarness(hAf1b);
+
+  // No over-gate: non-D, rule-unmatched commands stay silent.
+  const hAf1n = await drive({ command: "npm test", env: WORKER_ENV });
+  check("AF1: npm test stays silent (no rule match, not D-shaped)", hAf1n.customCalls === 0 && R(hAf1n).block === false);
+  cleanupHarness(hAf1n);
+  const hAf1e = await drive({ command: "echo x >> scratch-note.txt", env: WORKER_ENV });
+  check("AF1: plain echo-append stays silent (no over-gate)", hAf1e.customCalls === 0 && R(hAf1e).block === false);
+  cleanupHarness(hAf1e);
+  setDialogClockForTesting(null);
+}
+
 // ── restore production seams ─────────────────────────────────────────────────
 setStoreRootForTesting(null);
 setEnvSourceForTesting(null);
+setGlobalRulesPathForTesting(null);
 setDialogClockForTesting(null);
 
 console.log(`\n${pass} passed, ${fail} failed`);
