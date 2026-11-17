@@ -19,6 +19,7 @@ import miniDc, {
   activeSessionScope,
   buildDecisionHeader,
   buildDialogOptions,
+  canonicalRemote,
   classifyBashCommand,
   composePriorLine,
   createGrant,
@@ -1571,6 +1572,57 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   rmSync(otherR1, { recursive: true, force: true });
   rmSync(directPrimary, { recursive: true, force: true });
   rmSync(storeR1, { recursive: true, force: true });
+}
+
+{
+  section("R1.c — identity fix: scheme-explicit ports never match port-less identities (2026-11-18)");
+  // Captain-worded fix for pipeline review finding R1-001: canonicalRemote folded an
+  // explicit ssh:// URL port into the repository path (ssh://git@host:2222/o/r →
+  // host/2222/o/r), letting two DIFFERENT repositories share one pool slug/store. Fix:
+  // scheme-explicit ports stay colon-delimited (host:2222/o/r); scheme-less scp colons
+  // remain literal path folds. Fixtures mirror the standalone verify-r1001 proof.
+  const poolC = mkdtempSync(join(os.tmpdir(), "minidc-r1c-pool-"));
+  const primaryC = mkdtempSync(join(os.tmpdir(), "minidc-r1c-primary-"));
+  mkdirSync(join(primaryC, ".git"), { recursive: true });
+  // Registered repo whose REAL PATH is "2222/o/r" (port-less https spelling).
+  writeFileSync(join(primaryC, ".git", "config"), '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://host/2222/o/r\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  mkdirSync(join(poolC, "portrepo-a1b2c3", "1", "work"), { recursive: true });
+  writeFileSync(join(poolC, "portrepo-a1b2c3", "1", "work", ".git"), `gitdir: ${join(primaryC, ".git", "worktrees", "w1")}\n`);
+  const repoC = mkdtempSync(join(os.tmpdir(), "minidc-r1c-repob-"));
+  const SSH_PORT = "ssh://git@host:2222/o/r"; // real repo: host, PORT 2222, path o/r
+  const HTTPS_2222 = "https://host/2222/o/r"; // real repo: host, path 2222/o/r
+
+  // Unit level: distinct canonical identities (port kept, not folded into path).
+  check("R1.c: scheme-explicit port stays colon-delimited in the identity", canonicalRemote(SSH_PORT) === "host:2222/o/r");
+  check("R1.c: port-less https path spelling unchanged", canonicalRemote(HTTPS_2222) === "host/2222/o/r");
+  check("R1.c: the two DIFFERENT repos canonicalize DIFFERENTLY (the R1-001 wrong match is gone)", canonicalRemote(SSH_PORT) !== canonicalRemote(HTTPS_2222));
+  check("R1.c: scheme-less scp colon stays a literal path fold (unchanged)", canonicalRemote("git@host:2222/o/r") === "host/2222/o/r");
+  check("R1.c: colon-less ssh:// URL keeps the historical git@-prefixed fold (unchanged by this fix)", canonicalRemote("ssh://git@host/o/r") === "git@host/o/r");
+  check("R1.c: https-with-port identity is port-distinct (unchanged)", canonicalRemote("https://host:2222/o/r") === "host:2222/o/r");
+  check("R1.c: same host:port/path unify across ssh/git@/git/https spellings", canonicalRemote("git://host:2222/o/r") === canonicalRemote("https://host:2222/o/r") && canonicalRemote("ssh://host:2222/o/r") === canonicalRemote(SSH_PORT));
+
+  // Exported seam + end-to-end: the explicit-port repo no longer steals the other slug.
+  check("R1.c: poolSlugForRemote no longer steals the port-less repo's slug", poolSlugForRemote(SSH_PORT, { poolBase: poolC }) === null);
+  check("R1.c: resolveRepoSlug keeps the path-hash identity for the explicit-port repo", resolveRepoSlug(repoC, { poolBase: poolC, remoteUrl: SSH_PORT }) === `r-${sha16(repoC)}`);
+  check("R1.c: the registered https repo still unifies to its own pool slug", resolveRepoSlug(primaryC, { poolBase: poolC, remoteUrl: HTTPS_2222 }) === "portrepo");
+  check("R1.c: no-port ssh to a different path still does not match (control)", resolveRepoSlug(repoC, { poolBase: poolC, remoteUrl: "ssh://git@host/o/r" }) === `r-${sha16(repoC)}`);
+
+  // A pool-registered repo whose origin ITSELF carries the port: same-port spellings
+  // still unify to THAT repo's slug (distinctness must not break correct unification).
+  const poolC2 = mkdtempSync(join(os.tmpdir(), "minidc-r1c-pool2-"));
+  const primaryC2 = mkdtempSync(join(os.tmpdir(), "minidc-r1c-primary2-"));
+  mkdirSync(join(primaryC2, ".git"), { recursive: true });
+  writeFileSync(join(primaryC2, ".git", "config"), '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = ssh://git@host:2222/o/r\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  mkdirSync(join(poolC2, "portrepo2-a1b2c3", "1", "work"), { recursive: true });
+  writeFileSync(join(poolC2, "portrepo2-a1b2c3", "1", "work", ".git"), `gitdir: ${join(primaryC2, ".git", "worktrees", "w1")}\n`);
+  check("R1.c: poolSlugForRemote unifies same-host same-port same-path spellings", poolSlugForRemote(SSH_PORT, { poolBase: poolC2 }) === "portrepo2");
+  check("R1.c: resolveRepoSlug end-to-end: explicit-port repo unifies when its OWN repo is registered", resolveRepoSlug(repoC, { poolBase: poolC2, remoteUrl: "https://host:2222/o/r" }) === "portrepo2");
+
+  rmSync(poolC, { recursive: true, force: true });
+  rmSync(primaryC, { recursive: true, force: true });
+  rmSync(repoC, { recursive: true, force: true });
+  rmSync(poolC2, { recursive: true, force: true });
+  rmSync(primaryC2, { recursive: true, force: true });
 }
 
 // ── restore production seams ─────────────────────────────────────────────────

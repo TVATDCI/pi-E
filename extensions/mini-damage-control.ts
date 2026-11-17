@@ -267,13 +267,27 @@ export function resolveRepoSlug(
  *  while PRESERVING repository-path case, so two distinct case-sensitive repository paths
  *  never merge into one approval identity (correction round 1: the prior whole-URL
  *  lowercasing could collapse distinct repos on case-sensitive hosts; a safe extra re-ask
- *  on case-variant GitHub spellings is preferred over that). */
+ *  on case-variant GitHub spellings is preferred over that). R1-001 fix: a scheme-explicit
+ *  PORT (ssh://git@host:2222/o/r) stays colon-delimited in the identity (`host:2222/o/r`)
+ *  and can never equal a port-less/path-only spelling (`host/2222/o/r` is PATH text there);
+ *  scheme-less scp colons remain literal path separators, unchanged. */
 export function canonicalRemote(url: string): string {
   let u = url.trim();
   const scheme = /^(?:https?|ssh|git):\/\//i.exec(u);
+  const schemeExplicit = scheme !== null;
   if (scheme) u = u.slice((scheme[0] as string).length);
   const scp = /^git@([^:/]+):/.exec(u);
-  if (scp) u = `${(scp[1] as string).toLowerCase()}/${u.slice((scp[0] as string).length)}`;
+  if (scp) {
+    const host = (scp[1] as string).toLowerCase();
+    const rest = u.slice((scp[0] as string).length);
+    // In a scheme-explicit URL the colon after git@host is a PORT separator, not scp path
+    // syntax — keep `host:port/…` so an explicit-port spelling never identity-matches a
+    // port-less one. Plain scp (no scheme) keeps the historical fold: colon-delimited
+    // remainder is literal path. Port-less ssh:// URLs keep the old fold too, so same-repo
+    // scp/ssh/https spellings still unify.
+    const port = schemeExplicit ? /^([0-9]+)\//.exec(rest) : null;
+    u = port ? `${host}:${rest}` : `${host}/${rest}`;
+  }
   const slash = u.indexOf("/");
   if (slash > 0) u = `${u.slice(0, slash).toLowerCase()}${u.slice(slash)}`;
   return u.replace(/\/+$/, "").replace(/\.git$/, "");
