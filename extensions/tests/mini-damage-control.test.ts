@@ -383,6 +383,7 @@ section("WP1 — authoritative read-only command engine");
   ];
   check("F2: token-normalized D forms route D (the four reviewer counterexamples)", f2Forms.every((c) => classifyBashCommand(c).cls === "D"));
   check("F2 net is equality-token, not substring: benign args stay out", classifyBashCommand("git log --grep=merge").cls === "R" && classifyBashCommand("git log grep-merge.txt").cls === "R");
+  check("O1 fold: env-assembled push token routes D (de-env variant)", classifyBashCommand("git pu\"$X\"sh origin main").cls === "D");
   check("fail-closed-on-unknown pinned", classifyBashCommand("frobnicate --depth 9").cls === "G" && classifyBashCommand("").cls === "G");
   check("git -c config-override wrapper fails closed (substituted config)", classifyBashCommand("git -c x=y log").cls === "G");
   check("rule-pinned class D honored", classifyBashCommand("rotate-creds --force", { ruleClass: "D" }).cls === "D");
@@ -1212,6 +1213,33 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   })());
   cleanupHarness(h);
   setDialogClockForTesting(null);
+}
+
+{
+  section("F4/N1 — env-expanded + rules-file escape shapes (V8/V9/V10 + write variants)");
+  // These pins reference the PRODUCTION store/rules forms as inert command strings — the
+  // gate denies them and nothing is executed. Tier 0 protects the production default root
+  // regardless of the harness store seam (N1).
+  const hV8 = await drive({ command: "cat $HOME/.pi/agent/mini-'dc'/someRepo/grants.yaml", env: WORKER_ENV, mode: "json", storeDir: mkdtempSync(join(os.tmpdir(), "minidc-v12-n1-")) });
+  check("N1 V8: $HOME-expanded quote-split store read DENIED", R(hV8).block === true && (R(hV8).reason ?? "").includes("privileged mini-dc store/rules"));
+  cleanupHarness(hV8);
+  const storeN1 = mkdtempSync(join(os.tmpdir(), "minidc-v12-n1-"));
+  const hV9 = await drive({ command: "cat ${HOME}/.pi/agent/mini-'dc'/someRepo/grants.yaml", env: WORKER_ENV, mode: "json", storeDir: storeN1 });
+  check("N1 V9: ${HOME}-expanded quote-split store read DENIED", R(hV9).block === true);
+  cleanupHarness(hV9);
+  const hV10 = await drive({ command: "cat ~/.pi/agent/mini-'dc'-rules.yaml", env: WORKER_ENV, mode: "json", storeDir: storeN1 });
+  check("N1 V10: quote-split global rules file read DENIED (protected target in its own right)", R(hV10).block === true);
+  cleanupHarness(hV10);
+  const hW1 = await drive({ command: "echo forged > $HOME/.pi/agent/mini-'dc'/someRepo/trail.jsonl", env: WORKER_ENV, mode: "json", storeDir: storeN1 });
+  check("N1 write variant: $HOME quote-split trail write DENIED", R(hW1).block === true);
+  cleanupHarness(hW1);
+  const hW2 = await drive({ command: "echo x >> ~/.pi/agent/mini-'dc'-rules.yaml", env: WORKER_ENV, mode: "json", storeDir: storeN1 });
+  check("N1 write variant: rules-file append DENIED", R(hW2).block === true);
+  cleanupHarness(hW2);
+  const hPlain = await drive({ command: "cat $HOME/.pi/agent/notes.txt", env: WORKER_ENV, mode: "json", storeDir: storeN1 });
+  check("N1 control: non-store $HOME reads still pass", R(hPlain).block === false);
+  cleanupHarness(hPlain);
+  rmSync(storeN1, { recursive: true, force: true });
 }
 
 // ── restore production seams ─────────────────────────────────────────────────

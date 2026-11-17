@@ -523,15 +523,27 @@ function normalizeShellToken(t: string): string {
 function tokenBasedDForm(command: string): string | null {
   const raw = command.trim();
   if (!raw || /\n/.test(raw)) return null;
-  const tokens = raw.split(/\s+/).map(normalizeShellToken).filter(Boolean);
+  const rawTokens = raw.split(/\s+/).filter(Boolean);
+  const tokens = rawTokens.map(normalizeShellToken).filter(Boolean);
   if (tokens.length === 0) return null;
   const head = tokens[0];
   const rest = tokens.slice(1);
   if (head === "git") {
-    if (rest.some((t) => t === "push" || t === "merge" || t === "rebase")) {
+    // O1 fold (recheck): env-assembled destructive tokens ("git pu\"$X\"sh") — also try the
+    // $VAR-segment-removed variant, de-env'd on the RAW token BEFORE quote-stripping (quote
+    // boundaries end var names: stripping quotes first would merge pu"$X"sh into pu$xsh).
+    // Whole-token vars with unknowable values (git $ACTION) stay a documented residual:
+    // removal cannot synthesize a token that isn't there.
+    const restDeEnv = rawTokens
+      .slice(1)
+      .map((t) => t.replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, ""))
+      .map(normalizeShellToken)
+      .filter(Boolean);
+    const variants = [rest, restDeEnv];
+    if (variants.some((toks) => toks.some((t) => t === "push" || t === "merge" || t === "rebase"))) {
       return "destructive git form (push/merge/rebase token, quote/order-normalized)";
     }
-    if (rest.includes("reset") && rest.includes("--hard")) {
+    if (variants.some((toks) => toks.includes("reset") && toks.includes("--hard"))) {
       return "destructive git form (reset --hard, quote/order-normalized)";
     }
   }
@@ -1458,6 +1470,19 @@ function underStorePrefix(p: string, storeReal: string): boolean {
   return p === storeReal || p.startsWith(storeReal + sep);
 }
 
+// N1 (2026-11-17 recheck): bash words like `$HOME/.pi/...` and `${TMPDIR}/...` carry env
+// refs the OS expands at execution — expand the KNOWN location vars before analysis
+// (arbitrary `$VAR` values are unknowable at gate time; that residual stays documented).
+function expandShellEnvVars(s: string): string {
+  const home = envSource().HOME || os.homedir();
+  const tmp = envSource().TMPDIR || os.tmpdir();
+  return s
+    .replace(/\$\{HOME\}/g, home)
+    .replace(/\$HOME\b/g, home)
+    .replace(/\$\{TMPDIR\}/g, tmp)
+    .replace(/\$TMPDIR\b/g, tmp);
+}
+
 /** Realpath of the nearest EXISTING ancestor, with the non-existing tail rebuilt on top
  *  (so write-targets inside the store that don't exist yet still resolve into it). */
 function realpathNearest(p: string): string | null {
@@ -1653,23 +1678,41 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
     // ── Tier 0 (v1.2 WP4): protected mini-dc store — non-captain seats are denied ──
     // Worker tool/file/shell attempts to create/revoke grants or rewrite the trail are
-    // denied before any other tier. F4 (2026-11-17 review): checks are realpath + quote +
-    // `..`-normalization + first-glob-segment aware — beyond lexical only, still BEST-EFFORT
-    // (documented honestly in README; shell-string analysis cannot be total).
+    // denied before any other tier. F4 + N1 (2026-11-17 review + recheck): realpath of the
+    // nearest existing ancestor, quote/token-aware (incl. shell-escaped quotes), tilde AND
+    // env-expanded ($HOME/${HOME}/$TMPDIR), `..`-normalized, first-glob-segment aware, with
+    // the global rules file as a protected target in its own right — beyond lexical only,
+    // still BEST-EFFORT (documented honestly in README; shell-string analysis cannot be total).
     const seat = resolveSeat(envSource());
     if (seat !== "captain") {
-      const storePath = storeRoot();
-      const storeReal = (() => {
-        try { return realpathSync(storePath); } catch { return storePath; }
-      })();
+      // N1: protect BOTH the active store root (test seam or production) AND the production
+      // default — the production store and the global rules file stay protected regardless
+      // of any module-level root override.
+      const activeRoot = storeRoot();
+      const prodDefault = join(os.homedir(), ".pi", "agent", "mini-dc");
+      const roots = activeRoot === prodDefault ? [activeRoot] : [activeRoot, prodDefault];
+      const rootReal = roots.map((r) => {
+        try { return realpathSync(r); } catch { return r; }
+      });
+      const rulesReal = pathResolve(GLOBAL_RULES_PATH);
+      const rulesForms = [
+        rulesReal,
+        GLOBAL_RULES_PATH,
+        "~/.pi/agent/mini-dc-rules.yaml",
+        "$HOME/.pi/agent/mini-dc-rules.yaml",
+        "${HOME}/.pi/agent/mini-dc-rules.yaml",
+      ];
       const storeRefForms = [
-        storePath,
-        storeReal,
+        ...roots,
+        ...rootReal,
         "~/.pi/agent/mini-dc",
         "$HOME/.pi/agent/mini-dc",
+        "${HOME}/.pi/agent/mini-dc",
+        "$HOME/.pi/agent/mini-dc-rules.yaml",
+        "${HOME}/.pi/agent/mini-dc-rules.yaml",
         ".pi/agent/mini-dc",
       ];
-      let storeViolation: string | null = null;
+      let violationWhat: string | null = null;
       if (
         isToolCallEventType("read", event) ||
         isToolCallEventType("write", event) ||
@@ -1677,25 +1720,27 @@ export default function (pi: ExtensionAPI) {
       ) {
         const p = String(event.input?.path ?? "");
         const candidates = [p, expandTilde(p), join(ctx.cwd, p)];
-        // Lexical net + realpath-of-nearest-existing-ancestor net (catches ..-traversal and
-        // symlinked ancestors; lexical fallback when nothing resolves).
-        const lexical = candidates.some((c) => c.startsWith(storePath));
+        // Lexical net + realpath-of-nearest-existing-ancestor net per protected root, plus
+        // the global rules file as a protected target in its own right (N1).
+        const lexical = candidates.some((c) => roots.some((r) => c.startsWith(r)) || c === rulesReal);
         const viaReal = candidates.some((c) => {
           const resolved = realpathNearest(c);
-          return !!resolved && underStorePrefix(resolved, storeReal);
+          if (!resolved) return false;
+          return rootReal.some((rr) => underStorePrefix(resolved, rr)) || resolved === rulesReal;
         });
         if (lexical || viaReal) {
-          storeViolation = `privileged mini-dc store path: ${p}`;
+          violationWhat = `privileged mini-dc store/rules path: ${p}`;
         }
       } else if (isToolCallEventType("bash", event)) {
         const cmd = String(event.input?.command ?? "");
         const lexical = storeRefForms.some((form) => cmd.includes(form));
         let tokenLevel = false;
         if (!lexical) {
-          // F4 token net: per token, try the shell-dequote variants (raw, '\'':escaped
-          // quotes resolved, quotes/backslash-escapes stripped), tilde-expand, normalize
-          // `..` via resolve, realpath the nearest existing ancestor, prefix-check; glob
-          // tokens expand their first glob segment against the fixed directory.
+          // F4/N1 token net: per token, try the shell-dequote variants (raw, '\'':escaped
+          // quotes resolved, quotes/backslash-escapes stripped), expand tilde AND the known
+          // env forms, normalize `..` via resolve, realpath the nearest existing ancestor,
+          // prefix-check against every protected root, equality against the global rules
+          // file; glob tokens expand their first glob segment.
           const tokens = cmd.split(/\s+/).map((t) => t.replace(/^['"]/g, "")).filter(Boolean);
           tokenLevel = tokens.some((rawTok) => {
             const variants = [rawTok];
@@ -1703,32 +1748,36 @@ export default function (pi: ExtensionAPI) {
             if (unescaped !== rawTok) variants.push(unescaped);
             const stripped = rawTok.replace(/['"]/g, "").replace(/\\(.)/g, "$1");
             if (stripped !== rawTok && stripped !== unescaped) variants.push(stripped);
-            return variants.some((tok) => {
-              const expanded = expandTilde(tok);
-              const norm = pathResolve(isAbsolute(expanded) ? expanded : join(ctx.cwd, expanded));
-              if (underStorePrefix(norm, storeReal) || norm.startsWith(storePath + sep) || norm === storePath) return true;
+            return variants.some((rawVariant) => {
+              const tok = expandShellEnvVars(expandTilde(rawVariant));
+              const norm = pathResolve(isAbsolute(tok) ? tok : join(ctx.cwd, tok));
+              if (rootReal.some((rr) => underStorePrefix(norm, rr)) || roots.some((r) => norm.startsWith(r + sep) || norm === r)) return true;
+              if (norm === rulesReal) return true;
               const resolved = realpathNearest(norm);
-              if (resolved && underStorePrefix(resolved, storeReal)) return true;
-              if (GLOB_CHARS.test(tok)) return globTokenTouchesStore(expanded, storeReal, ctx.cwd);
+              if (resolved && (rootReal.some((rr) => underStorePrefix(resolved, rr)) || resolved === rulesReal)) return true;
+              if (GLOB_CHARS.test(tok)) {
+                return rootReal.some((rr) => globTokenTouchesStore(tok, rr, ctx.cwd));
+              }
               return false;
             });
           });
         }
         let squashed = false;
         if (!lexical && !tokenLevel) {
-          // Space-quote split net: a store path torn apart by quoted whitespace still lands
-          // in the quote-stripped, whitespace-free command.
+          // Space-quote split net: a protected path torn apart by quoted whitespace still
+          // lands in the quote-stripped, whitespace-free command (N1: env + tilde forms of
+          // the store AND the rules file included).
           const flat = cmd.replace(/['"\\]/g, "").replace(/\s+/g, "");
-          squashed = flat.includes(storePath) || flat.includes(storeReal);
+          squashed = storeRefForms.concat(rulesForms).some((form) => flat.includes(form.replace(/['"\\]/g, "").replace(/\s+/g, "")));
         }
         if (lexical || tokenLevel || squashed) {
-          storeViolation = "shell command references the privileged mini-dc store";
+          violationWhat = "shell command references the privileged mini-dc store/rules";
         }
       }
-      if (storeViolation) {
+      if (violationWhat) {
         const body =
-          `${storeViolation}. The grants/trail store is captain-managed; ` +
-          `worker and supervisor panes are denied (best-effort adversarial resistance: realpath, quote, traversal and glob aware) — ` +
+          `${violationWhat}. The grants/trail store and the global rules file are captain-managed; ` +
+          `worker and supervisor panes are denied (best-effort adversarial resistance: realpath, env/quote/traversal/glob aware) — ` +
           `grant/revoke/trail writes go through ` +
           `the captain dialog or /dc-grants only.`;
         const reason = isHeadless(ctx.mode)
