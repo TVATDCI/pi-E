@@ -27,6 +27,7 @@ import miniDc, {
   isReadOnlyAllowlisted,
   loadGrants,
   matchGrant,
+  poolSlugForRemote,
   pruneScopesToSession,
   readTrail,
   recordSessionScope,
@@ -41,6 +42,7 @@ import miniDc, {
   setDialogClockForTesting,
   setEnvSourceForTesting,
   setGlobalRulesPathForTesting,
+  setPoolBaseForTesting,
   setStoreRootForTesting,
   sha16,
   Countdown,
@@ -51,7 +53,7 @@ import miniDc, {
   type Seat,
   type TrailEntry,
 } from "../mini-damage-control.ts";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as os from "node:os";
@@ -1360,10 +1362,167 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   setDialogClockForTesting(null);
 }
 
+{
+  section("R1.a — token D-net widens to the named publication/dispatch families (2026-11-17)");
+  // Same AF1 law, more families: every widened D-shaped RULE-MISS form asks D even with no
+  // rule match; the raw word-adjacent D_FORMS regexes stay the second net; BLOCK rules still
+  // win over ask; the D seat law is seat-generic. All fixtures are deny-only inert strings —
+  // the gate blocks or asks, nothing executes. Spellings verified against installed
+  // help/docs; gh deployment (no such subcommand) and pip publish (no such command) are
+  // recorded gaps, not cells.
+  const dCells: Array<[string, string, string]> = [
+    ["npm --registry https://reg.invalid publish", "publication form", "npm publish flag-reordered"],
+    ["npm 'publish'", "publication form", "npm publish quoted"],
+    ["npm pu\"$X\"blish", "publication form", "npm publish env-assembled"],
+    ["yarn publish --tag next", "publication form", "yarn publish"],
+    ["pnpm -r publish", "publication form", "pnpm publish flag-reordered"],
+    ["bun publish", "publication form", "bun publish"],
+    ["cargo publish --dry-run", "publication form", "cargo publish (dry-run still publication-class)"],
+    ["docker -H unix:///x/y push img:tag", "container publication form", "docker push flag-reordered"],
+    ["docker \"push\" img:tag", "container publication form", "docker push quoted"],
+    ["docker build --push .", "container publication form", "docker build --push (BuildKit registry shorthand)"],
+    ["docker buildx build -q --push .", "container publication form", "docker buildx build --push reordered"],
+    ["gh -R o/r release create v1.0", "gh release publication form", "gh release create flag-reordered"],
+    ["gh 'release' 'create' v1", "gh release publication form", "gh release create quoted"],
+    ["gh release upload v1.0 ./x.tgz", "gh release publication form", "gh release upload"],
+    ["gh -R o/r workflow run ci.yml", "gh workflow dispatch form", "gh workflow run reordered"],
+  ];
+  for (const [cmd, frag, label] of dCells) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(
+      `R1.a: ${label} (rule-miss) gates D headless`,
+      R(h).block === true && (R(h).reason ?? "").includes("headless ASK→deny") && (R(h).reason ?? "").includes(frag),
+    );
+    cleanupHarness(h);
+  }
+
+  // Seat law on a widened family: captain y proceeds (trail lands); worker y is refused.
+  const hR1cap = await drive({
+    command: "npm --registry https://reg.invalid publish",
+    env: CAPTAIN_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("d"); dlg.handleInput("y"); }, // d: detail pane for the class/why pins
+  });
+  const textR1cap = renderText(hR1cap.dialogs[0]);
+  check("R1.a: widened family at captain seat renders class D + the publication why (no rule pin)", hR1cap.customCalls === 1 && textR1cap.includes("class: D") && textR1cap.includes("publication form"));
+  check("R1.a: captain y proceeds the widened-family ask", R(hR1cap).block === false);
+  const slugR1cap = harnessSlug(hR1cap);
+  check("R1.a: widened-family proceed lands in the trail (cls D, captain, scope once)", (readTrail(slugR1cap) ?? []).some((t) => t.cls === "D" && t.decision === "proceed" && t.actor === "captain" && t.scope === "once"));
+  cleanupHarness(hR1cap);
+  const hR1w = await drive({
+    command: "docker build --push .",
+    env: WORKER_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("y"); dlg.handleInput("n"); }, // no y row renders for worker D; n resolves
+  });
+  check("R1.a: widened family at worker seat REFUSES y (class D law unchanged)", hR1w.customCalls === 1 && R(hR1w).block === true && (R(hR1w).reason ?? "").includes("class D rejects non-captain answers always"));
+  cleanupHarness(hR1w);
+
+  // BLOCK-rule precedence survives the widening: block beats ask, no dialog.
+  const hR1b = await drive({ command: "docker build --push v12deny3", env: WORKER_ENV, mode: "json" });
+  check("R1.a: widened D shape matching a BLOCK rule hard-blocks WITHOUT dialog", hR1b.customCalls === 0 && R(hR1b).block === true && (R(hR1b).reason ?? "").includes("v12 deny rule"));
+  cleanupHarness(hR1b);
+
+  // F4 wording: the no-rule headless deny speaks of the ACTION, not a rule.
+  const hR1f4 = await drive({ command: "cargo publish", env: WORKER_ENV, mode: "json" });
+  check("R1/F4: headless deny wording says the ACTION requires confirmation (no rule matched)", (R(hR1f4).reason ?? "").includes("This action requires operator confirmation") && !(R(hR1f4).reason ?? "").includes("This rule requires"));
+  cleanupHarness(hR1f4);
+
+  // Benign near-miss controls: the net stays head-scoped and exact-token — reads, PR
+  // creation, plain builds, and the npx/pip wrapper paths route R/G (gated), never D.
+  const r1Benign: Array<[string, string]> = [
+    ["npm test", "G"],
+    ["npm view left-pad versions", "R"],
+    ["npm pack --dry-run", "G"],
+    ["docker ps", "G"],
+    ["docker build .", "G"],
+    ["docker buildx build -q .", "G"],
+    ["docker pull alpine", "G"],
+    ["gh release list", "R"],
+    ["gh release view v1.0", "R"],
+    ["gh pr create --title x", "G"],
+    ["gh workflow list", "G"],
+    ["gh workflow view ci.yml", "G"],
+    ["gh run list", "R"],
+    ["cargo build", "G"],
+    ["pip install wheel", "G"],
+    // The named npx publication path: `npx npm publish` carries the word-adjacent npm
+    // publish form INSIDE it → routes D via the existing word layer (verified). Versioned
+    // spellings escape the word regex and stay at the wrapper-bin boundary (G, gated).
+    ["npx npm publish", "D"],
+    ["npx npm@latest publish", "G"],
+    ["echo release create workflow run", "R"],
+    ["cat publish-notes.md", "R"],
+  ];
+  for (const [cmd, wantCls] of r1Benign) {
+    check(`R1.a control: ${cmd} routes ${wantCls}`, classifyBashCommand(cmd).cls === wantCls);
+  }
+}
+
+{
+  section("R1.b — primary/pool slug unification via canonical origin remote (N2 consistency)");
+  // Fixture (real files, no git needed — the resolver reads pointer/config text only):
+  // a primary checkout with .git/config origin, plus a pool project dir whose slots point
+  // back at it with worktree .git pointer files. Same repo → ONE slug whether asked from the
+  // pool branch (path) or the primary branch (remote identity); everything else keeps the
+  // collision-proof path hash. Read-only metadata only — never the mini-dc store.
+  const poolR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-pool-"));
+  const primaryR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-primary-"));
+  mkdirSync(join(primaryR1, ".git"), { recursive: true });
+  writeFileSync(join(primaryR1, ".git", "config"), '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://github.com/o/fixrepo.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  mkdirSync(join(poolR1, "fixrepo-a1b2c3", "1", "work"), { recursive: true });
+  writeFileSync(join(poolR1, "fixrepo-a1b2c3", "1", "work", ".git"), `gitdir: ${join(primaryR1, ".git", "worktrees", "w1")}\n`);
+  mkdirSync(join(poolR1, "fixrepo-a1b2c3", "2", "work"), { recursive: true });
+  writeFileSync(join(poolR1, "fixrepo-a1b2c3", "2", "work", ".git"), `gitdir: ${join(primaryR1, ".git", "worktrees", "w2")}\n`);
+  const primaryRemote = "https://github.com/o/fixrepo.git";
+  check("R1.b: non-pool primary resolves to the POOL slug via origin identity", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: primaryRemote }) === "fixrepo");
+  check("R1.b: scp-style spelling canonicalizes to the same identity", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "git@github.com:o/fixrepo.git" }) === "fixrepo");
+  check("R1.b: .git-suffix-less https spelling canonicalizes identically", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "https://github.com/o/fixrepo" }) === "fixrepo");
+  check("R1.b: pool slots still resolve by path (unchanged branch)", resolveRepoSlug(join(poolR1, "fixrepo-a1b2c3", "1", "work"), { poolBase: poolR1 }) === "fixrepo");
+  check("R1.b: second slot → same slug (recycling stability preserved)", resolveRepoSlug(join(poolR1, "fixrepo-a1b2c3", "2", "work"), { poolBase: poolR1 }) === "fixrepo");
+  check("R1.b: poolSlugForRemote direct hit → pool-derived slug", poolSlugForRemote(primaryRemote, { poolBase: poolR1 }) === "fixrepo");
+  // Two pool projects of the SAME repo: sorted-first, same stripped slug.
+  mkdirSync(join(poolR1, "fixrepo-dddddd", "w"), { recursive: true });
+  writeFileSync(join(poolR1, "fixrepo-dddddd", "w", ".git"), `gitdir: ${join(primaryR1, ".git", "worktrees", "w3")}\n`);
+  check("R1.b: multiple pool projects of one repo → same unified slug (deterministic)", poolSlugForRemote(primaryRemote, { poolBase: poolR1 }) === "fixrepo");
+  rmSync(join(poolR1, "fixrepo-dddddd"), { recursive: true, force: true });
+  // Basename coincidence is NOT identity: same name, different/no remote → path hash.
+  const otherR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-other-"));
+  check("R1.b: basename coincidence is NOT identity (different remote → path hash)", resolveRepoSlug(otherR1, { poolBase: poolR1, remoteUrl: "https://github.com/x/other.git" }) === `r-${sha16(otherR1)}`);
+  check("R1.b: remote-less repo keeps the path hash (no origin → no unification)", resolveRepoSlug(otherR1, { poolBase: poolR1 }) === `r-${sha16(otherR1)}`);
+  check("R1.b: absent pool base → path hash even with a remote", resolveRepoSlug(primaryR1, { poolBase: join(poolR1, "missing"), remoteUrl: primaryRemote }) === `r-${sha16(primaryR1)}`);
+  // Registry robustness: malformed pointer / marker-less projects are skipped, not fatal.
+  mkdirSync(join(poolR1, "broken-9f8e7d", "w"), { recursive: true });
+  writeFileSync(join(poolR1, "broken-9f8e7d", "w", ".git"), "not-a-pointer\n");
+  mkdirSync(join(poolR1, "z-empty-123ab"), { recursive: true });
+  check("R1.b: malformed pointer + marker-less pool projects are skipped, resolution still lands", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: primaryRemote }) === "fixrepo");
+  // Direct-checkout pool layout: <proj>-<hex>/.git as a DIRECTORY with its own config.
+  mkdirSync(join(poolR1, "direct-b7c6d5", ".git"), { recursive: true });
+  writeFileSync(join(poolR1, "direct-b7c6d5", ".git", "config"), '[remote "origin"]\n\turl = https://github.com/o/directrepo.git\n');
+  const directPrimary = mkdtempSync(join(os.tmpdir(), "minidc-r1-directp-"));
+  check("R1.b: pool project as direct checkout (config at .git/config) unifies too", resolveRepoSlug(directPrimary, { poolBase: poolR1, remoteUrl: "https://github.com/o/directrepo.git" }) === "direct");
+  // E2E: the GATE's handler slug unifies through the remote — the trail lands under the
+  // pool slug, and the old r-hash store dir is never created. Scratch pool base via the
+  // testing seam; scratch store via storeDir; the ask lands a deny trail (actor=gate).
+  const storeR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-store-"));
+  setPoolBaseForTesting(poolR1);
+  const hR1e2e = makeHarness({ command: "echo v12askg7", env: WORKER_ENV, mode: "json", storeDir: storeR1 });
+  execSync(`git -C ${JSON.stringify(hR1e2e.tmp)} remote add origin https://github.com/o/fixrepo.git`);
+  await hR1e2e.run();
+  check("R1.b e2e: the gate resolves the handler slug through the remote identity", existsSync(join(storeR1, "fixrepo", "trail.jsonl")));
+  check("R1.b e2e: the r-hash store dir is NOT created for the unified repo", !existsSync(join(storeR1, `r-${sha16(hR1e2e.tmp)}`)));
+  cleanupHarness(hR1e2e);
+  setPoolBaseForTesting(null);
+  rmSync(poolR1, { recursive: true, force: true });
+  rmSync(primaryR1, { recursive: true, force: true });
+  rmSync(otherR1, { recursive: true, force: true });
+  rmSync(directPrimary, { recursive: true, force: true });
+  rmSync(storeR1, { recursive: true, force: true });
+}
+
 // ── restore production seams ─────────────────────────────────────────────────
 setStoreRootForTesting(null);
 setEnvSourceForTesting(null);
 setGlobalRulesPathForTesting(null);
+setPoolBaseForTesting(null);
 setDialogClockForTesting(null);
 
 console.log(`\n${pass} passed, ${fail} failed`);
