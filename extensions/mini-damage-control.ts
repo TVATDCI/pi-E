@@ -688,7 +688,7 @@ function tokenBasedDForm(command: string): string | null {
       return "destructive git form (reset --hard, quote/order-normalized)";
     }
   }
-  if (head === "gh" && rest.includes("merge")) {
+  if (head === "gh" && variants.some((toks) => toks.includes("merge"))) {
     return "destructive gh merge form (token-normalized)";
   }
   // ── R1 (2026-11-17): the remaining NAMED dangerous-form families widen into the net ──
@@ -711,7 +711,9 @@ function tokenBasedDForm(command: string): string | null {
   // installed npx/npm-exec help documents). A file/argument merely named publish does NOT
   // imply publication: some other package token must name an npm-class package (`npx cowsay
   // publish`, `npx publish` stay out). The `-p` shorthand is absent from the installed help —
-  // not claimed, stays a documented residual. bunx deliberately excluded (correction spec).
+  // not claimed there, but the value token still matches pkgSpec independent of the flag
+  // form — `npx -p npm publish` gates as a pinned over-gate (fail-closed). bunx deliberately
+  // excluded (correction spec).
   if (head === "npx") {
     const pkgSpec = /^(npm|yarn|pnpm|bun|cargo)(@[\w.-]+)?$/;
     const pkgFlag = /^--package=(npm|yarn|pnpm|bun|cargo)(@[\w.-]+)?$/;

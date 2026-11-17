@@ -1480,6 +1480,7 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
     // (F2) gh adjacent-pair matching on the de-env'd variant — real env assembly
     ["gh release \"$X\" create", "gh release publication form", "gh release $X-env assembly (was ungated)"],
     ["gh workflow \"$X\" run", "gh workflow dispatch form", "gh workflow $X-env assembly (was ungated)"],
+    ["gh pr mer\"$X\"ge 41", "destructive gh merge form", "gh pr merge $X-env assembly (was ungated)"],
     // (F3) docker truthy --push flag VALUES
     ["docker build --push=true .", "container publication form", "docker build --push=true (was ungated)"],
     ["docker buildx build --push=1 .", "container publication form", "docker buildx build --push=1 (was ungated)"],
