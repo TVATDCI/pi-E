@@ -51,7 +51,7 @@ import miniDc, {
   type TrailEntry,
 } from "../mini-damage-control.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as os from "node:os";
 import { execSync, spawn } from "node:child_process";
@@ -373,11 +373,28 @@ section("WP1 — authoritative read-only command engine");
     "ssh-add ~/.ssh/id_ed25519", "gh auth token",
   ];
   check("D-forms (push/merge/publish/credentials) route D", dForms.every((c) => classifyBashCommand(c).cls === "D"));
+  // F2 (review): argv-order/quoting D forms — token-normalized net catches what the
+  // word-adjacent regexes miss. Counterexamples pinned verbatim from the review report.
+  const f2Forms = [
+    "git -C /tmp/repo push origin main",
+    "git 'push' origin main",
+    "git pu\\sh origin main",
+    "gh pr -R owner/repo merge 5",
+  ];
+  check("F2: token-normalized D forms route D (the four reviewer counterexamples)", f2Forms.every((c) => classifyBashCommand(c).cls === "D"));
+  check("F2 net is equality-token, not substring: benign args stay out", classifyBashCommand("git log --grep=merge").cls === "R" && classifyBashCommand("git log grep-merge.txt").cls === "R");
   check("fail-closed-on-unknown pinned", classifyBashCommand("frobnicate --depth 9").cls === "G" && classifyBashCommand("").cls === "G");
   check("git -c config-override wrapper fails closed (substituted config)", classifyBashCommand("git -c x=y log").cls === "G");
   check("rule-pinned class D honored", classifyBashCommand("rotate-creds --force", { ruleClass: "D" }).cls === "D");
   check("secret-path reads demoted to G (never ride the supervisor-approvable R lane)", classifyBashCommand("cat ~/.env", { zeroAccessPaths: ["~/.env*"] }).cls === "G");
   check("D beats R even for a read-looking variant (git push is never R)", classifyBashCommand("git push --dry-run").cls === "D");
+  check("find . -name '*.ts' stays R; mutation flags stay G", classifyBashCommand("find . -name '*.ts'").cls === "R" && classifyBashCommand("find . -fprint /tmp/out.txt").cls === "G");
+  // F3 (review): reflog narrowing + -fls + fsck --lost-found — the write-capable forms the
+  // report named, pinned verbatim as G; the read forms stay R.
+  check("F3: reflog write-capable sub-subcommands route G", classifyBashCommand("git reflog expire --expire=now --all").cls === "G" && classifyBashCommand("git reflog delete HEAD@{1}").cls === "G");
+  check("F3: reflog read forms stay R", classifyBashCommand("git reflog").cls === "R" && classifyBashCommand("git reflog show").cls === "R" && classifyBashCommand("git reflog list").cls === "R");
+  check("F3: find -fls routes G (writes/truncates the named file)", classifyBashCommand("find . -fls /tmp/out.txt").cls === "G");
+  check("F3: fsck --lost-found routes G; bare fsck stays R", classifyBashCommand("git fsck --lost-found").cls === "G" && classifyBashCommand("git fsck").cls === "R");
   check("isReadOnlyAllowlisted agrees with the classifier's R lane", isReadOnlyAllowlisted("git log --oneline") && !isReadOnlyAllowlisted("npm test"));
 }
 
@@ -679,7 +696,10 @@ section("WP3 — dialog v2: countdown, composer, label-bound hotkeys, exactly-on
 
 {
   const rowsD = buildDialogOptions("D", "captain", "git push *");
-  check("class D: no session/grant rows ever (D-never-scope)", !rowsD.some((r) => r.id === "session" || r.id === "grant"));
+  check("class D captain: proceed row renders, no session/grant rows ever (D-never-scope)", rowsD.some((r) => r.id === "proceed") && !rowsD.some((r) => r.id === "session" || r.id === "grant"));
+  const rowsDWorker = buildDialogOptions("D", "worker", "git push *");
+  const rowsDFirstmate = buildDialogOptions("D", "firstmate", "git push *");
+  check("F1: class D at non-captain seats renders [block, compose] ONLY — no proceed row", rowsDWorker.length === 2 && rowsDWorker.every((r) => r.id === "block" || r.id === "compose") && rowsDFirstmate.length === 2 && rowsDFirstmate.every((r) => r.id === "block" || r.id === "compose"));
   const rowsRCaptain = buildDialogOptions("R", "captain", "git log *");
   check("R + captain answerer: session + grant rows render", rowsRCaptain.some((r) => r.id === "session") && rowsRCaptain.some((r) => r.id === "grant"));
   const rowsRFirstmate = buildDialogOptions("R", "firstmate", "git log *");
@@ -688,7 +708,10 @@ section("WP3 — dialog v2: countdown, composer, label-bound hotkeys, exactly-on
   check("R + crewmate-drivable pane: NO scope rows (C5)", !rowsRWorker.some((r) => r.id === "session" || r.id === "grant"));
   const rowsGCaptain = buildDialogOptions("G", "captain", null);
   check("G + captain: session row renders (C6 captain panes only), grant row never", rowsGCaptain.some((r) => r.id === "session") && !rowsGCaptain.some((r) => r.id === "grant"));
-  check("G + firstmate: no scope rows", !buildDialogOptions("G", "firstmate", null).some((r) => r.id === "session" || r.id === "grant"));
+  const rowsGFmEnum = buildDialogOptions("G", "firstmate", null, true);
+  check("G + firstmate ENUMERATED steering: proceed row renders, no scope rows", rowsGFmEnum.some((r) => r.id === "proceed") && !rowsGFmEnum.some((r) => r.id === "session" || r.id === "grant"));
+  const rowsGFm = buildDialogOptions("G", "firstmate", null, false);
+  check("F1: G + firstmate non-enumerated renders [block, compose] ONLY", rowsGFm.length === 2 && rowsGFm.every((r) => r.id === "block" || r.id === "compose"));
   check("G + worker: no scope rows", !buildDialogOptions("G", "worker", null).some((r) => r.id === "session" || r.id === "grant"));
   check("grant rows are R-only (never-D structural)", !buildDialogOptions("G", "captain", "x *").some((r) => r.id === "grant") && !buildDialogOptions("D", "captain", "x *").some((r) => r.id === "grant"));
 }
@@ -788,7 +811,11 @@ section("WP5 — authorization matrix + worker-G parking");
   check("enumerated steering-G carries NO scope discretion for firstmate", q("G", "firstmate", true, "session").allowed === false && q("G", "firstmate", true, "grant").allowed === false);
   check("non-enumerated G PARKS for firstmate (never answered)", q("G", "firstmate", false, "proceed").allowed === false && q("G", "firstmate", false, "proceed").effect === "park");
   check("G session scope: captain panes only (C6); grants are R-only for everyone", q("G", "captain", false, "session").allowed === true && q("G", "captain", false, "grant").allowed === false);
-  check("worker pane: proceed/deny allowed (preserved pane keys), scope rows never", q("R", "worker", false, "proceed").allowed && q("G", "worker", false, "deny").allowed && q("R", "worker", false, "session").allowed === false && q("R", "worker", false, "grant").allowed === false);
+  check("worker pane R: proceed/deny allowed (preserved pane keys)", q("R", "worker", false, "proceed").allowed && q("R", "worker", false, "deny").allowed);
+  check("worker pane scope rows never (C5)", q("R", "worker", false, "session").allowed === false && q("R", "worker", false, "grant").allowed === false);
+  check("F1 probe: worker pane non-enumerated G proceed → PARK (never proceeds)", q("G", "worker", false, "proceed").allowed === false && q("G", "worker", false, "proceed").effect === "park");
+  check("worker pane non-enumerated G deny is always safe", q("G", "worker", false, "deny").allowed === true && q("G", "worker", false, "deny").effect === "deny");
+  check("worker pane enumerated steering-G proceed allowed", q("G", "worker", true, "proceed").allowed === true);
   check("R grants allowed for firstmate (supervisor-approvable class)", q("R", "firstmate", false, "grant").allowed === true);
 }
 
@@ -1070,6 +1097,121 @@ section("WP7 — end-to-end integration (real gate, real dialog, real store)");
   check("/dc-mode usage guard preserved", h.notifies.some((n) => n.includes("Usage: /dc-mode abort|continue")));
   check("status line extended additively (grants/scopes counts)", h.statuses.some((s) => s.includes("grants") && s.includes("scopes")));
   cleanupHarness(h);
+}
+
+{
+  section("WP4 store protection — F4 adversarial defeat shapes (realpath/quote/traversal/glob)");
+  const store1 = mkdtempSync(join(os.tmpdir(), "minidc-v12-prot-"));
+  mkdirSync(join(store1, "someRepo"), { recursive: true });
+  const base = basename(store1);
+  const dir = dirname(store1);
+
+  // shape A: parent-traversal write tool — lexical prefix says mid-dir, OS resolves into the store
+  const mid = mkdtempSync(join(os.tmpdir(), "minidc-v12-mid-"));
+  const traversalPath = join(mid, "..", base, "someRepo", "grants.yaml");
+  const hTrav = await drive({ toolName: "write", path: traversalPath, env: WORKER_ENV, mode: "json", storeDir: store1 });
+  check("F4: parent-traversal write (realpath of nearest existing ancestor) DENIED", R(hTrav).block === true && (R(hTrav).reason ?? "").includes("privileged mini-dc store"));
+  cleanupHarness(hTrav);
+  rmSync(mid, { recursive: true, force: true });
+
+  // shape B: quote-split inside the store base name — lexical scan misses, token strip + realpath catch
+  const quotedBase = base.replace(/-(?=[^-]*$)/, "'-");
+  const quotedPath = join(dir, quotedBase, "someRepo", "grants.yaml");
+  const hQuote = await drive({ command: `cat ${quotedPath}`, env: WORKER_ENV, mode: "json", storeDir: store1 });
+  check("F4: quote-split store path read DENIED (token dequote + realpath)", R(hQuote).block === true);
+  cleanupHarness(hQuote);
+
+  // shape C: glob form — first glob segment expands via readdir, realpath-checked
+  const globPrefix = base.slice(0, base.lastIndexOf("-"));
+  const hGlob = await drive({ command: `cat ${join(dir, `${globPrefix}-*`, "someRepo", "grants.yaml")}`, env: WORKER_ENV, mode: "json", storeDir: store1 });
+  check("F4: glob-form store read DENIED (first-glob-segment expansion)", R(hGlob).block === true);
+  cleanupHarness(hGlob);
+
+  // shape B2: shell-escaped quote inside the store NAME (reviewer's ln -s form, escaped-quote class)
+  const qStore = mkdtempSync(join(os.tmpdir(), "minidc-v12-sto're-"));
+  mkdirSync(join(qStore, "someRepo"), { recursive: true });
+  const escapedQ = qStore.replace("'", "'\\''"); // shell single-quote escape of the literal quote
+  const hLn = await drive({ command: `ln -s ${escapedQ}/someRepo/grants.yaml ${join(os.tmpdir(), `lnk-probe-v12-${Date.now().toString(36)}`)}`, env: WORKER_ENV, mode: "json", storeDir: qStore });
+  check("F4: shell-escaped quote-in-name symlink creation DENIED", R(hLn).block === true);
+  cleanupHarness(hLn);
+  rmSync(qStore, { recursive: true, force: true });
+
+  // benign control: a non-store path still sails through the tier
+  const hBenign = await drive({ command: `cat ${join(mid, "file.txt")}`, env: WORKER_ENV, mode: "json", storeDir: store1 });
+  check("F4: token net does not over-block non-store reads", R(hBenign).block === false);
+  cleanupHarness(hBenign);
+  rmSync(store1, { recursive: true, force: true });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answered y)");
+// ══════════════════════════════════════════════════════════════════════════
+
+{
+  section("F1.a worker pane answers Class D with y → refused, never proceeds");
+  const mc = new ManualClock();
+  setDialogClockForTesting(mc);
+  const h = await drive({
+    command: "git push --v12askd1",
+    env: WORKER_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("y"); dlg.handleInput("n"); }, // y row absent (render gate); n → block answer
+  });
+  check("F1: worker y on Class D NEVER proceeds", R(h).block === true);
+  check("F1: refusal carries the matrix why", (R(h).reason ?? "").includes("Answer refused") && (R(h).reason ?? "").includes("non-captain"));
+  const slug = harnessSlug(h);
+  check("F1: refused answer lands as a gate deny in the trail", (readTrail(slug) ?? []).some((t) => t.decision === "deny" && t.actor === "gate"));
+  cleanupHarness(h);
+  setDialogClockForTesting(null);
+}
+
+{
+  section("F1.b firstmate pane answers Class D with y → refused, never proceeds");
+  const mc = new ManualClock();
+  setDialogClockForTesting(mc);
+  const h = await drive({
+    command: "git push --v12askd2",
+    env: { FM_SUPERVISOR: "1", PI_SESSION_ID: "sess-fm-1" },
+    dialogScript: (dlg) => { dlg.handleInput("y"); dlg.handleInput("n"); },
+  });
+  check("F1: firstmate y on Class D NEVER proceeds (D rejects firstmate answers always)", R(h).block === true && (R(h).reason ?? "").includes("Answer refused"));
+  cleanupHarness(h);
+  setDialogClockForTesting(null);
+}
+
+{
+  section("F1.c firstmate pane answers non-enumerated G with y → PARKED, never proceeds");
+  const mc = new ManualClock();
+  setDialogClockForTesting(mc);
+  const h = await drive({
+    command: "v12askg51 --now",
+    env: { FM_SUPERVISOR: "1", PI_SESSION_ID: "sess-fm-2" },
+    dialogScript: (dlg) => { dlg.handleInput("y"); dlg.handleInput("n"); },
+  });
+  const parkRec = h.entries.find((e) => e.customType === "mini-dc-park");
+  check("F1: firstmate y on non-enumerated G parks (never proceeds)", R(h).block === true && !!parkRec);
+  check("F1: matrix-park wording is distinct + carries the refusal", (R(h).reason ?? "").includes("(parked)") && (R(h).reason ?? "").includes("refused by the authorization matrix"));
+  check("F1: park record carries the refusal for the supervisor", !!parkRec && typeof (parkRec.data as { refusal?: string }).refusal === "string");
+  cleanupHarness(h);
+  setDialogClockForTesting(null);
+}
+
+{
+  section("F1.d worker pane answers non-enumerated G with y → PARKED, never proceeds");
+  const mc = new ManualClock();
+  setDialogClockForTesting(mc);
+  const h = await drive({
+    command: "v12askg52 --now",
+    env: WORKER_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("y"); }, // y row IS rendered for worker G; the matrix parks the answer
+  });
+  const parkRec = h.entries.find((e) => e.customType === "mini-dc-park");
+  check("F1: worker y on non-enumerated G parks — the answer seam honors the matrix, never the keystroke", R(h).block === true && !!parkRec && (R(h).reason ?? "").includes("never pane-proceeds"));
+  check("F1: matrix-park lands in the trail (actor=gate)", (() => {
+    const slug = harnessSlug(h);
+    return (readTrail(slug) ?? []).some((t) => t.decision === "park" && t.actor === "gate");
+  })());
+  cleanupHarness(h);
+  setDialogClockForTesting(null);
 }
 
 // ── restore production seams ─────────────────────────────────────────────────

@@ -44,8 +44,8 @@ function isToolCallEventType(toolName: string, event: { toolName: string }): boo
 }
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { minimatch } from "minimatch";
-import { readFileSync, existsSync, appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative, isAbsolute, sep } from "node:path";
+import { readFileSync, existsSync, appendFileSync, mkdirSync, rmSync, writeFileSync, realpathSync, readdirSync } from "node:fs";
+import { join, relative, isAbsolute, sep, dirname, resolve as pathResolve } from "node:path";
 import * as os from "node:os";
 import { createHash, randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
@@ -404,13 +404,22 @@ function gitArgsOk(tokens: string[]): boolean {
   const sub = tokens[0];
   const rest = tokens.slice(1);
   // Always-read subcommands (any args — reads only; redirects were already rejected).
+  // reflog and fsck are NOT here (F3): both carry write-capable forms (expire/delete;
+  // --lost-found writes .git/lost-found) — see the guarded cases below.
   const always = new Set([
     "status", "log", "show", "diff", "rev-parse", "describe", "ls-files",
-    "ls-remote", "cat-file", "grep", "blame", "shortlog", "reflog",
-    "count-objects", "fsck", "merge-base", "diff-tree", "version", "var",
+    "ls-remote", "cat-file", "grep", "blame", "shortlog",
+    "count-objects", "merge-base", "diff-tree", "version", "var",
   ]);
   if (always.has(sub)) return true;
   switch (sub) {
+    case "reflog":
+      // F3: bare reflog / reflog show / reflog list are reads; expire|delete|write|exists
+      // mutate or probe the recovery data and route G.
+      return rest.length === 0 || rest[0] === "show" || rest[0] === "list";
+    case "fsck":
+      // F3: --lost-found writes .git/lost-found/* — everything else reads.
+      return !rest.some((t) => t === "--lost-found");
     case "symbolic-ref":
       return rest.length <= 1; // read HEAD; the two-arg form WRITES a ref
     case "branch": {
@@ -479,6 +488,7 @@ function findArgsOk(tokens: string[]): boolean {
       t === "-execdir" ||
       t === "-ok" ||
       t === "-okdir" ||
+      t === "-fls" || // F3: -fls writes/truncates the named file
       t.startsWith("-fprint"),
   );
 }
@@ -501,6 +511,36 @@ export function isReadOnlyAllowlisted(command: string): boolean {
   return false; // unknown → fail closed to G
 }
 
+// F2 (2026-11-17 review): argv-order/quoting D detection — bash parsing makes `git -C d push`,
+// `git 'push'`, `git pu\sh`, and `gh pr -R o/r merge` all execute push/merge regardless of
+// word adjacency. Token-level pass: quote/backslash-normalize, then route D on the destructive
+// token appearing anywhere after a git/gh head. Exact-token equality (not substring) keeps
+// benign args (--grep=merge, paths like grep-merge.txt) out of the net.
+function normalizeShellToken(t: string): string {
+  return t.replace(/['"]/g, "").replace(/\\(.)/g, "$1").toLowerCase();
+}
+
+function tokenBasedDForm(command: string): string | null {
+  const raw = command.trim();
+  if (!raw || /\n/.test(raw)) return null;
+  const tokens = raw.split(/\s+/).map(normalizeShellToken).filter(Boolean);
+  if (tokens.length === 0) return null;
+  const head = tokens[0];
+  const rest = tokens.slice(1);
+  if (head === "git") {
+    if (rest.some((t) => t === "push" || t === "merge" || t === "rebase")) {
+      return "destructive git form (push/merge/rebase token, quote/order-normalized)";
+    }
+    if (rest.includes("reset") && rest.includes("--hard")) {
+      return "destructive git form (reset --hard, quote/order-normalized)";
+    }
+  }
+  if (head === "gh" && rest.includes("merge")) {
+    return "destructive gh merge form (token-normalized)";
+  }
+  return null;
+}
+
 export interface BashClassification {
   cls: DecisionClass;
   why: string;
@@ -514,6 +554,9 @@ export function classifyBashCommand(
   opts?: { ruleClass?: "D"; zeroAccessPaths?: string[] },
 ): BashClassification {
   if (opts?.ruleClass === "D") return { cls: "D", why: "rule-pinned class D" };
+  // Token-level net FIRST (F2), raw word-adjacent regexes as the second net.
+  const tokenD = tokenBasedDForm(command);
+  if (tokenD) return { cls: "D", why: tokenD };
   if (D_FORMS.some((re) => re.test(command))) {
     return { cls: "D", why: "destructive/push/merge/publish/credentials form" };
   }
@@ -609,9 +652,16 @@ export function sanitizeAskerText(
 export function resolveSeat(env: Record<string, string | undefined>): Seat {
   // Trusted invocation paths ONLY: the environment as provisioned at pane birth by the
   // spawner (firstmate/herdr/pi). Never files, CLI args, or prompt content (worker-writable
-  // channels). Known residual: a pane can spawn a child pi with authored env — the child can
-  // at most RENDER captain rows for itself; grant creation still needs an interactive answer
-  // an autonomous worker cannot produce. Cross-pane socket verification = leg-2 hardening seam.
+  // channels).
+  // F5 residual (2026-11-17 review — NAMED, understated before): the dialog is itself an
+  // interactive-answer surface, and a pane-controlled keystroke stream (tmux/herdr
+  // send-keys class of vector) can drive it. A clean-env child pi in a pane the worker
+  // controls therefore resolves seat=captain end-to-end: D asks, grant rows, /dc-grants.
+  // Bound in the meantime by: the F1 matrix at the answer seam (worker/refused-seat keys
+  // park or deny — never proceed) and the F4 store hardening. Leg 2's cross-pane
+  // verification must be scoped against exactly this send-keys vector: verify the
+  // ANSWERING pane's identity through the herdr socket (pane ↔ session binding), not env
+  // alone, before a captain/firstmate answer or grant creation is honored.
   const taskId = (env.FM_TASK_ID ?? "").trim();
   if (taskId) return "worker";
   if ((env.FM_SUPERVISOR ?? "").trim() === "1") return "firstmate";
@@ -900,10 +950,17 @@ export function resolveDecisionMatrix(q: MatrixQuery): MatrixVerdict {
     }
     return { allowed: false, effect: "park", why: "non-enumerated G parks to the captain" };
   }
-  // Worker answering its own pane: preserved pane-key contract — proceed/deny this once;
-  // scope rows never render on a crewmate-drivable pane (C5).
+  // Worker answering its own pane: preserved pane-key contract — proceed/deny this once for
+  // class R and enumerated steering-G; scope rows never render on a crewmate-drivable pane
+  // (C5); and a non-enumerated G NEVER proceeds on a pane key — it parks (F1 probe row).
   if (q.answer === "session" || q.answer === "grant") {
     return { allowed: false, effect: "deny", why: "crewmate-drivable panes never render scope rows (C5)" };
+  }
+  if (q.cls === "G" && !q.enumeratedSteering) {
+    if (q.answer === "proceed") {
+      return { allowed: false, effect: "park", why: "non-enumerated G parks to the supervisor (never pane-proceeds)" };
+    }
+    return { allowed: true, effect: "deny", why: "pane deny is always safe" };
   }
   return {
     allowed: true,
@@ -1095,18 +1152,27 @@ export function buildDialogOptions(
   cls: DecisionClass,
   answerSeat: Seat,
   grantPattern: string | null,
+  enumeratedSteering = false,
 ): DialogOption[] {
+  // F1 (2026-11-17 review): never render an answer the authorization matrix would refuse —
+  // class D at a non-captain seat and non-enumerated G at the firstmate relay get
+  // [block, compose] only. The matrix remains the answer-seam backstop regardless.
+  const answerRefused =
+    (cls === "D" && answerSeat !== "captain") ||
+    (cls === "G" && answerSeat === "firstmate" && !enumeratedSteering);
   const rows: DialogOption[] = [
     { id: "block", key: "n", label: "🛑  No, block" },
-    { id: "proceed", key: "y", label: "🟢  Yes, proceed this once" },
   ];
   const compose: DialogOption = {
     id: "compose",
     key: "a",
     label: "✎  No, and tell the agent why…",
   };
-  const canScope = answerSeat === "captain" || answerSeat === "firstmate";
-  if (cls === "D") return [...rows, compose];
+  const canScope = !answerRefused && (answerSeat === "captain" || answerSeat === "firstmate");
+  if (!answerRefused) {
+    rows.push({ id: "proceed", key: "y", label: "🟢  Yes, proceed this once" });
+  }
+  if (cls === "D") return [...rows, compose]; // no scope rows ever
   if (canScope && cls === "R") {
     rows.push({
       id: "session",
@@ -1332,7 +1398,12 @@ export class DecisionDialog implements Component {
   }
 
   dispose(): void {
-    this.countdown.dispose(); // repeated open/close safety: timer always cleared
+    // F6 (2026-11-17 review, leg-2 live round): dispose-without-finish leaves the awaited
+    // ctx.ui.custom promise UNRESOLVED — if the TUI ever pops the overlay without a result,
+    // the tool_call hangs. No failing test exists yet; per the fix-round ruling, no behavior
+    // change without one. Pin this in the leg-2 live validation (dispose the live overlay
+    // via /reload-class races and assert the await settles).
+    this.countdown.dispose();
   }
 
   private finish(outcome: DialogOutcome): void {
@@ -1376,6 +1447,58 @@ function gitOut(args: string, cwd: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ── F4 (2026-11-17 review): store protection beyond lexical matching ──────────
+// Lexical prefix checks are defeated by `..`-traversal, quoting, and globs. Helpers:
+
+const GLOB_CHARS = /[*?\[]/;
+
+function underStorePrefix(p: string, storeReal: string): boolean {
+  return p === storeReal || p.startsWith(storeReal + sep);
+}
+
+/** Realpath of the nearest EXISTING ancestor, with the non-existing tail rebuilt on top
+ *  (so write-targets inside the store that don't exist yet still resolve into it). */
+function realpathNearest(p: string): string | null {
+  let cur = p;
+  for (let i = 0; i < 64; i++) {
+    try {
+      const real = realpathSync(cur);
+      const tail = relative(cur, p);
+      return tail ? pathResolve(real, tail) : real;
+    } catch {
+      /* not yet existing — climb */
+    }
+    const parent = dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+  return null;
+}
+
+/** A token carrying glob chars: expand the FIRST glob segment against the fixed prefix's
+ *  real directory entries, then test each expansion's realpath against the store. Best-effort
+ *  by construction (later glob segments stay literal — realpathNearest still resolves the
+ *  existing prefix part of the tail). */
+function globTokenTouchesStore(token: string, storeReal: string, cwd: string): boolean {
+  const segs = token.split("/");
+  const idx = segs.findIndex((s) => GLOB_CHARS.test(s));
+  if (idx <= 0) return false; // glob in the first segment or none — out of scope (best-effort)
+  const fixedDir = pathResolve(cwd, segs.slice(0, idx).join("/"));
+  let entries: string[];
+  try {
+    entries = readdirSync(fixedDir);
+  } catch {
+    return false;
+  }
+  for (const e of entries) {
+    if (!minimatch(e, segs[idx], { dot: true })) continue;
+    const candidate = [...segs.slice(0, idx), e, ...segs.slice(idx + 1)].join("/");
+    const resolved = realpathNearest(pathResolve(cwd, candidate));
+    if (resolved && underStorePrefix(resolved, storeReal)) return true;
+  }
+  return false;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -1528,14 +1651,20 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    // ── Tier 0 (v1.2 WP4): protected mini-dc store — non-captain seats have ZERO access ──
+    // ── Tier 0 (v1.2 WP4): protected mini-dc store — non-captain seats are denied ──
     // Worker tool/file/shell attempts to create/revoke grants or rewrite the trail are
-    // denied before any other tier (all three attack shapes unit-pinned).
+    // denied before any other tier. F4 (2026-11-17 review): checks are realpath + quote +
+    // `..`-normalization + first-glob-segment aware — beyond lexical only, still BEST-EFFORT
+    // (documented honestly in README; shell-string analysis cannot be total).
     const seat = resolveSeat(envSource());
     if (seat !== "captain") {
       const storePath = storeRoot();
+      const storeReal = (() => {
+        try { return realpathSync(storePath); } catch { return storePath; }
+      })();
       const storeRefForms = [
         storePath,
+        storeReal,
         "~/.pi/agent/mini-dc",
         "$HOME/.pi/agent/mini-dc",
         ".pi/agent/mini-dc",
@@ -1548,19 +1677,59 @@ export default function (pi: ExtensionAPI) {
       ) {
         const p = String(event.input?.path ?? "");
         const candidates = [p, expandTilde(p), join(ctx.cwd, p)];
-        if (candidates.some((c) => c.startsWith(storePath))) {
+        // Lexical net + realpath-of-nearest-existing-ancestor net (catches ..-traversal and
+        // symlinked ancestors; lexical fallback when nothing resolves).
+        const lexical = candidates.some((c) => c.startsWith(storePath));
+        const viaReal = candidates.some((c) => {
+          const resolved = realpathNearest(c);
+          return !!resolved && underStorePrefix(resolved, storeReal);
+        });
+        if (lexical || viaReal) {
           storeViolation = `privileged mini-dc store path: ${p}`;
         }
       } else if (isToolCallEventType("bash", event)) {
         const cmd = String(event.input?.command ?? "");
-        if (storeRefForms.some((form) => cmd.includes(form))) {
+        const lexical = storeRefForms.some((form) => cmd.includes(form));
+        let tokenLevel = false;
+        if (!lexical) {
+          // F4 token net: per token, try the shell-dequote variants (raw, '\'':escaped
+          // quotes resolved, quotes/backslash-escapes stripped), tilde-expand, normalize
+          // `..` via resolve, realpath the nearest existing ancestor, prefix-check; glob
+          // tokens expand their first glob segment against the fixed directory.
+          const tokens = cmd.split(/\s+/).map((t) => t.replace(/^['"]/g, "")).filter(Boolean);
+          tokenLevel = tokens.some((rawTok) => {
+            const variants = [rawTok];
+            const unescaped = rawTok.replace(/'\\''/g, "'");
+            if (unescaped !== rawTok) variants.push(unescaped);
+            const stripped = rawTok.replace(/['"]/g, "").replace(/\\(.)/g, "$1");
+            if (stripped !== rawTok && stripped !== unescaped) variants.push(stripped);
+            return variants.some((tok) => {
+              const expanded = expandTilde(tok);
+              const norm = pathResolve(isAbsolute(expanded) ? expanded : join(ctx.cwd, expanded));
+              if (underStorePrefix(norm, storeReal) || norm.startsWith(storePath + sep) || norm === storePath) return true;
+              const resolved = realpathNearest(norm);
+              if (resolved && underStorePrefix(resolved, storeReal)) return true;
+              if (GLOB_CHARS.test(tok)) return globTokenTouchesStore(expanded, storeReal, ctx.cwd);
+              return false;
+            });
+          });
+        }
+        let squashed = false;
+        if (!lexical && !tokenLevel) {
+          // Space-quote split net: a store path torn apart by quoted whitespace still lands
+          // in the quote-stripped, whitespace-free command.
+          const flat = cmd.replace(/['"\\]/g, "").replace(/\s+/g, "");
+          squashed = flat.includes(storePath) || flat.includes(storeReal);
+        }
+        if (lexical || tokenLevel || squashed) {
           storeViolation = "shell command references the privileged mini-dc store";
         }
       }
       if (storeViolation) {
         const body =
           `${storeViolation}. The grants/trail store is captain-managed; ` +
-          `worker and firstmate panes have zero access — grant/revoke/trail writes go through ` +
+          `worker and supervisor panes are denied (best-effort adversarial resistance: realpath, quote, traversal and glob aware) — ` +
+          `grant/revoke/trail writes go through ` +
           `the captain dialog or /dc-grants only.`;
         const reason = isHeadless(ctx.mode)
           ? `🛑 BLOCKED by mini-dc (headless): ${body} DO NOT work around this — surface to the Operator.`
@@ -1568,12 +1737,12 @@ export default function (pi: ExtensionAPI) {
         pi.appendEntry("mini-dc-log", {
           tool: event.toolName,
           input: event.input,
-          rule: "protected store (worker/firstmate zero-access)",
+          rule: "protected store (worker/supervisor denied, best-effort)",
           mode,
           seat,
           ...(isHeadless(ctx.mode) ? { headlessDeny: true, askClass: false } : {}),
         });
-        ctx.ui.notify("🛑 mini-dc: privileged mini-dc store is zero-access for this seat", "error");
+        ctx.ui.notify("🛑 mini-dc: privileged mini-dc store is protected for this seat", "error");
         if (isHeadless(ctx.mode)) return { block: true, reason };
         if (mode === "abort") ctx.abort();
         return { block: true, reason };
@@ -1776,7 +1945,7 @@ export default function (pi: ExtensionAPI) {
               cls,
               headerLines,
               detailLines,
-              options: buildDialogOptions(cls, seat, grantPattern),
+              options: buildDialogOptions(cls, seat, grantPattern, steering),
               timeoutMs: 180000,
               tui,
               onResult: done,
@@ -1798,7 +1967,12 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ── v1.2 WP3/WP4/WP5: map the dialog outcome ──
+    // ── v1.2 WP3/WP4/WP5: map the dialog outcome THROUGH THE AUTHORIZATION MATRIX ──
+    // F1 (2026-11-17 review): the matrix is load-bearing at the answer seam, not dead code —
+    // a pane-keyed y (including a keystroke-injected one) is honored ONLY when the class ×
+    // answering-seat × enumeration law allows it; refusals deny or park, never proceed.
+    let matrixParkWhy: string | null = null;
+    let refusedNote: string | null = null;
     if (dialogOutcome) {
       const cls: DecisionClass = clsInfo ? clsInfo.cls : "G";
       const trailTask = (() => {
@@ -1824,7 +1998,13 @@ export default function (pi: ExtensionAPI) {
         });
       };
 
-      if (dialogOutcome.kind === "proceed") {
+      const answer: "proceed" | "session" | "grant" | "deny" =
+        dialogOutcome.kind === "proceed"
+          ? dialogOutcome.grant ? "grant" : dialogOutcome.sessionScope ? "session" : "proceed"
+          : "deny";
+      const verdict = resolveDecisionMatrix({ cls, answerSeat: seat, enumeratedSteering: steering, answer });
+
+      if (verdict.allowed && dialogOutcome.kind === "proceed") {
         if (dialogOutcome.grant) {
           // Grant rows only render for R asks with a captain/firstmate answer seat (C5);
           // this seat check is the load-bearing defense — workers NEVER create (Q3).
@@ -1880,9 +2060,9 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (dialogOutcome.kind === "park") {
+        // Timeout park (unanswered 180s window) — the original WP5 parked state.
         dialogTimedOut = true;
         trailAppend("park", "none", undefined, "gate");
-        // Supervisor-readable keyed-blocked state (leg-2 fm-dc-answer consumes this).
         const parkKey = `${slug ?? "noslug"}::${dialogId || sha16(command).slice(0, 10)}`;
         pi.appendEntry("mini-dc-park", {
           key: parkKey,
@@ -1898,10 +2078,38 @@ export default function (pi: ExtensionAPI) {
           steering,
           at: new Date().toISOString(),
         });
-      } else {
-        // block (optionally with the operator's deny message)
+      } else if (verdict.effect === "park") {
+        // Matrix-refused answer (e.g. non-enumerated G answered at any non-captain seat):
+        // the pane's answer is NOT honored — the ask parks for the supervisor, never proceeds.
+        dialogTimedOut = true;
+        matrixParkWhy = verdict.why;
+        trailAppend("park", "none", verdict.why, "gate");
+        const parkKey = `${slug ?? "noslug"}::${dialogId || sha16(command).slice(0, 10)}`;
+        pi.appendEntry("mini-dc-park", {
+          key: parkKey,
+          cls,
+          tool: event.toolName,
+          command: isToolCallEventType("bash", event) ? command : undefined,
+          rule: violation,
+          seat,
+          pane: paneId,
+          task: trailTask,
+          session: sessionId ?? null,
+          mode, // abort and continue modes BOTH emit the parked state
+          steering,
+          refusal: verdict.why,
+          at: new Date().toISOString(),
+        });
+      } else if (verdict.allowed) {
+        // Honored deny — the pane's block answer lands as a decision.
         denyMessage = dialogOutcome.message;
         trailAppend("deny", "none", denyMessage);
+      } else {
+        // Refused answer with deny effect (class D answered at a non-captain seat, D scope
+        // attempts, crewmate scope attempts): blocked with the matrix why; the DECISION is
+        // the gate's, not the pane's — actor=gate.
+        refusedNote = `Answer refused: ${verdict.why}.`;
+        trailAppend("deny", "none", verdict.why, "gate");
       }
     } else if (ask && isHeadless(ctx.mode) && slug && clsInfo) {
       // Headless ASK→deny (preserved contract) still lands a trail entry (actor=gate, evidence).
@@ -1936,18 +2144,26 @@ export default function (pi: ExtensionAPI) {
       return { block: true, reason: headlessReason(violation, !!ask) };
     }
 
-    const reason = dialogTimedOut
-      ? (
-          `🛑 BLOCKED by mini-dc (parked): ${violation}. ` +
-          `No answer within 180s — this is a park, not a denial: ` +
-          `surface a reminder to the user, then re-attempt the same action to raise the confirm again.`
-        )
-      : denyMessage
-        ? (
-            `🛑 BLOCKED by mini-dc: ${violation}. ` +
-            `Operator note: ${denyMessage} DO NOT work around this — tell the user.`
-          )
-        : `🛑 BLOCKED by mini-dc: ${violation}. DO NOT work around this — tell the user.`;
+    let reason: string;
+    if (dialogTimedOut && matrixParkWhy) {
+      reason =
+        `🛑 BLOCKED by mini-dc (parked): ${violation}. ` +
+        `The pane answer was refused by the authorization matrix (${matrixParkWhy}) — ` +
+        `this is a park, not a denial: the ask waits for the supervisor. ` +
+        `Re-attempt the same action to raise the confirm again.`;
+    } else if (dialogTimedOut) {
+      reason =
+        `🛑 BLOCKED by mini-dc (parked): ${violation}. ` +
+        `No answer within 180s — this is a park, not a denial: ` +
+        `surface a reminder to the user, then re-attempt the same action to raise the confirm again.`;
+    } else if (denyMessage) {
+      reason =
+        `🛑 BLOCKED by mini-dc: ${violation}. ` +
+        `Operator note: ${denyMessage} DO NOT work around this — tell the user.`;
+    } else {
+      reason = `🛑 BLOCKED by mini-dc: ${violation}. DO NOT work around this — tell the user.`;
+    }
+    if (refusedNote) reason += ` ${refusedNote}`;
     if (mode === "abort") {
       ctx.abort();
       return { block: true, reason };
