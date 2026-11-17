@@ -262,14 +262,21 @@ export function resolveRepoSlug(
 // (pointer files + .git/config) under the pool base — never the mini-dc store, never any
 // working tree — and every failure degrades to null (caller keeps the path-hash identity).
 
-/** Normalize remote spellings to one comparable identity: schemes, scp-style git@host:path,
- *  trailing slashes, and the .git suffix all fold away; case-folded (GitHub paths are). */
+/** Canonical remote identity: strips scheme/scp syntax (case-insensitive), folds the HOST
+ *  to lowercase (DNS is case-insensitive), strips trailing slashes and the .git suffix —
+ *  while PRESERVING repository-path case, so two distinct case-sensitive repository paths
+ *  never merge into one approval identity (correction round 1: the prior whole-URL
+ *  lowercasing could collapse distinct repos on case-sensitive hosts; a safe extra re-ask
+ *  on case-variant GitHub spellings is preferred over that). */
 export function canonicalRemote(url: string): string {
-  let u = url.trim().toLowerCase();
-  u = u.replace(/^(?:https?|ssh|git):\/\//, "");
-  u = u.replace(/^git@([^:/]+):/, "$1/");
-  u = u.replace(/\/+$/, "").replace(/\.git$/, "");
-  return u;
+  let u = url.trim();
+  const scheme = /^(?:https?|ssh|git):\/\//i.exec(u);
+  if (scheme) u = u.slice((scheme[0] as string).length);
+  const scp = /^git@([^:/]+):/.exec(u);
+  if (scp) u = `${(scp[1] as string).toLowerCase()}/${u.slice((scp[0] as string).length)}`;
+  const slash = u.indexOf("/");
+  if (slash > 0) u = `${u.slice(0, slash).toLowerCase()}${u.slice(slash)}`;
+  return u.replace(/\/+$/, "").replace(/\.git$/, "");
 }
 
 /** Origin remote URL from a git config file (INI slice parse; malformed/absent → null). */
@@ -698,18 +705,57 @@ function tokenBasedDForm(command: string): string | null {
   if (["npm", "yarn", "pnpm", "bun", "cargo"].includes(head) && familyHas(variants, "publish")) {
     return "publication form (publish token, quote/order-normalized)";
   }
-  if (head === "docker" && (familyHas(variants, "push") || familyHas(variants, "--push"))) {
-    return "container publication form (docker push/--push, quote/order-normalized)";
+  // Correction round 1 (review F1): the named npx publication path AT THE HANDLER SEAM —
+  // publication through an npm-class package invoked via npx: positional `<pkg>[@<version>]`,
+  // `--package=<pkg>[@<version>]`, and `--package <pkg>` (the package-selection spellings the
+  // installed npx/npm-exec help documents). A file/argument merely named publish does NOT
+  // imply publication: some other package token must name an npm-class package (`npx cowsay
+  // publish`, `npx publish` stay out). The `-p` shorthand is absent from the installed help —
+  // not claimed, stays a documented residual. bunx deliberately excluded (correction spec).
+  if (head === "npx") {
+    const pkgSpec = /^(npm|yarn|pnpm|bun|cargo)(@[\w.-]+)?$/;
+    const pkgFlag = /^--package=(npm|yarn|pnpm|bun|cargo)(@[\w.-]+)?$/;
+    const namesNpmClass = (toks: string[]): boolean =>
+      toks.some((t, i) =>
+        pkgSpec.test(t) ||
+        pkgFlag.test(t) ||
+        (t === "--package" && toks[i + 1] !== undefined && pkgSpec.test(toks[i + 1] as string)),
+      );
+    if (variants.some((toks) => namesNpmClass(toks) && familyHas([toks], "publish"))) {
+      return "publication form via npx (npm-class package publish, quote/order-normalized)";
+    }
+  }
+  if (head === "docker") {
+    // Correction round 1 (review F3): truthy boolean flag-VALUE spellings join the net —
+    // docker build/buildx accept --push=true / --push=1 (publication), while --push=false /
+    // --push=0 are explicit nonpublication forms that must stay OUT. Exact tokens push/--push
+    // unchanged; an unrelated option value (e.g. an image tag containing push) is not treated
+    // as publication beyond the documented exact-token corner.
+    const dockerPublish = (toks: string[]): boolean =>
+      toks.some((t) =>
+        t === "push" ||
+        t === "--push" ||
+        (t.startsWith("--push=") && t.slice("--push=".length) !== "false" && t.slice("--push=".length) !== "0"),
+      );
+    if (variants.some(dockerPublish)) {
+      return "container publication form (docker push/--push, quote/order-normalized)";
+    }
   }
   if (head === "gh") {
-    for (let i = 0; i + 1 < rest.length; i++) {
-      const sub = rest[i];
-      const subCmd = rest[i + 1];
-      if (sub === "release" && (subCmd === "create" || subCmd === "upload" || subCmd === "delete")) {
-        return "gh release publication form (token-normalized)";
-      }
-      if (sub === "workflow" && subCmd === "run") {
-        return "gh workflow dispatch form (token-normalized)";
+    // Correction round 1 (review F2): the gh pair-check runs on BOTH variants — the de-env'd
+    // array collapses removed $VAR tokens, so `gh release "$X" create` (a real publication
+    // after expansion) matches, mirroring the npm/git discipline. The prior rest-only loop
+    // left that env-assembled spelling ungated.
+    for (const toks of variants) {
+      for (let i = 0; i + 1 < toks.length; i++) {
+        const sub = toks[i];
+        const subCmd = toks[i + 1];
+        if (sub === "release" && (subCmd === "create" || subCmd === "upload" || subCmd === "delete")) {
+          return "gh release publication form (token-normalized)";
+        }
+        if (sub === "workflow" && subCmd === "run") {
+          return "gh workflow dispatch form (token-normalized)";
+        }
       }
     }
   }

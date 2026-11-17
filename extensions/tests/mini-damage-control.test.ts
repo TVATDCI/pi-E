@@ -1427,7 +1427,10 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   cleanupHarness(hR1f4);
 
   // Benign near-miss controls: the net stays head-scoped and exact-token — reads, PR
-  // creation, plain builds, and the npx/pip wrapper paths route R/G (gated), never D.
+  // creation, plain builds, and non-publication npx shapes route R/G (gated), never D.
+  // NOTE: these are classifier pins; handler-level no-rule pass cells for the correction
+  // shapes live in the correction-round block below (classifier G/D alone never proves a
+  // no-rule ask).
   const r1Benign: Array<[string, string]> = [
     ["npm test", "G"],
     ["npm view left-pad versions", "R"],
@@ -1444,16 +1447,64 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
     ["gh run list", "R"],
     ["cargo build", "G"],
     ["pip install wheel", "G"],
-    // The named npx publication path: `npx npm publish` carries the word-adjacent npm
-    // publish form INSIDE it → routes D via the existing word layer (verified). Versioned
-    // spellings escape the word regex and stay at the wrapper-bin boundary (G, gated).
+    // Named npx publication path: routes D at the REAL HANDLER via the token net (see the
+    // correction-round drive cells below — classifier pins here are backstops, not proof).
     ["npx npm publish", "D"],
-    ["npx npm@latest publish", "G"],
+    ["npx npm@latest publish", "D"],
+    ["npx -p npm publish", "D"],
+    ["npx publish", "G"],
+    ["npx cowsay publish", "G"],
+    ["npx npm run publish-notes", "G"],
     ["echo release create workflow run", "R"],
     ["cat publish-notes.md", "R"],
   ];
   for (const [cmd, wantCls] of r1Benign) {
     check(`R1.a control: ${cmd} routes ${wantCls}`, classifyBashCommand(cmd).cls === wantCls);
+  }
+}
+
+{
+  section("R1 correction round 1 — review FIX: npx seam, gh de-env pairs, docker --push values (2026-11-17)");
+  // Handler-level no-rule cells (the correction spec's proof layer: classifier G/D alone
+  // never proves a no-rule ask occurred — these drives go through the real tool_call seam).
+  // All inert deny-only strings; each gates D headless where the pre-correction head passed
+  // UNGATED (causal: reviewer-verified at 6fad10c vs base a6feda0).
+  const fixCells: Array<[string, string, string]> = [
+    // (F1) named npx publication at the real seam — help-documented package spellings only
+    ["npx npm publish", "publication form via npx", "npx npm publish (was ungated at handler)"],
+    ["npx npm@10.9.1 publish", "publication form via npx", "npx version-qualified npm publish"],
+    ["npx --package=npm@latest publish", "publication form via npx", "npx --package=<pkg>@<ver> spelling"],
+    ["npx --package npm publish", "publication form via npx", "npx --package <pkg> space form"],
+    ["npx yarn@1.22 publish", "publication form via npx", "npx version-qualified yarn publish"],
+    ["npx -p npm publish", "publication form via npx", "npx -p value spelling (over-gate, fail-closed)"],
+    // (F2) gh adjacent-pair matching on the de-env'd variant — real env assembly
+    ["gh release \"$X\" create", "gh release publication form", "gh release $X-env assembly (was ungated)"],
+    ["gh workflow \"$X\" run", "gh workflow dispatch form", "gh workflow $X-env assembly (was ungated)"],
+    // (F3) docker truthy --push flag VALUES
+    ["docker build --push=true .", "container publication form", "docker build --push=true (was ungated)"],
+    ["docker buildx build --push=1 .", "container publication form", "docker buildx build --push=1 (was ungated)"],
+  ];
+  for (const [cmd, frag, label] of fixCells) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(
+      `R1.fix: ${label} gates D headless`,
+      R(h).block === true && (R(h).reason ?? "").includes("headless ASK→deny") && (R(h).reason ?? "").includes(frag),
+    );
+    cleanupHarness(h);
+  }
+  // Nonpublication controls AT THE REAL HANDLER: falsy flag values and publish-merely-named
+  // arguments stay silent (no rule match, no ask) — an ask here would be over-gating.
+  const fixControls: string[] = [
+    "docker build --push=false .",
+    "docker build --push=0 .",
+    "npx cowsay publish",
+    "npx publish",
+    "npx npm run publish-notes",
+  ];
+  for (const cmd of fixControls) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(`R1.fix control: ${cmd} stays a silent pass at the handler`, h.customCalls === 0 && R(h).block === false);
+    cleanupHarness(h);
   }
 }
 
@@ -1476,6 +1527,9 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   check("R1.b: non-pool primary resolves to the POOL slug via origin identity", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: primaryRemote }) === "fixrepo");
   check("R1.b: scp-style spelling canonicalizes to the same identity", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "git@github.com:o/fixrepo.git" }) === "fixrepo");
   check("R1.b: .git-suffix-less https spelling canonicalizes identically", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "https://github.com/o/fixrepo" }) === "fixrepo");
+  // Correction round 1 (review F4): path case is identity — host spellings fold, paths don't.
+  check("R1.b F4: mixed-case HOST spellings of the same exact path still unify", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "git@GitHub.Com:o/fixrepo.git" }) === "fixrepo" && resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "https://GITHUB.com/o/fixrepo" }) === "fixrepo");
+  check("R1.b F4: distinct case-sensitive repository paths do NOT share a slug", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "https://github.com/o/FixRepo.git" }) === `r-${sha16(primaryR1)}`);
   check("R1.b: pool slots still resolve by path (unchanged branch)", resolveRepoSlug(join(poolR1, "fixrepo-a1b2c3", "1", "work"), { poolBase: poolR1 }) === "fixrepo");
   check("R1.b: second slot → same slug (recycling stability preserved)", resolveRepoSlug(join(poolR1, "fixrepo-a1b2c3", "2", "work"), { poolBase: poolR1 }) === "fixrepo");
   check("R1.b: poolSlugForRemote direct hit → pool-derived slug", poolSlugForRemote(primaryRemote, { poolBase: poolR1 }) === "fixrepo");
