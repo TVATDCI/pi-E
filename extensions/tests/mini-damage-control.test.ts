@@ -1511,6 +1511,34 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
 }
 
 {
+  section("R1.d — review R1e-002 fix: gh pair matching position-independent (2026-11-18)");
+  const fixCells: Array<[string, string, string]> = [
+    ["gh release -R o/r create v1", "gh release publication form", "gh release create interspersed-flag spelling"],
+    ["gh workflow -R o/r run ci.yml", "gh workflow dispatch form", "gh workflow run interspersed-flag spelling"],
+  ];
+  for (const [cmd, frag, label] of fixCells) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(
+      `R1.d: ${label} (rule-miss) gates D headless`,
+      R(h).block === true && (R(h).reason ?? "").includes("headless ASK→deny") && (R(h).reason ?? "").includes(frag),
+    );
+    cleanupHarness(h);
+  }
+  const fixControls: string[] = [
+    "gh release list",
+    "gh release view v1.0",
+    "gh workflow list",
+    "gh run list",
+    "gh pr create --title x",
+  ];
+  for (const cmd of fixControls) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(`R1.d control: ${cmd} stays a silent pass at the handler`, h.customCalls === 0 && R(h).block === false);
+    cleanupHarness(h);
+  }
+}
+
+{
   section("R1.b — primary/pool slug unification via canonical origin remote (N2 consistency)");
   // Fixture (real files, no git needed — the resolver reads pointer/config text only):
   // a primary checkout with .git/config origin, plus a pool project dir whose slots point

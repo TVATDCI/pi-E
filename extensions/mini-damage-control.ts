@@ -762,17 +762,11 @@ function tokenBasedDForm(command: string): string | null {
     // array collapses removed $VAR tokens, so `gh release "$X" create` (a real publication
     // after expansion) matches, mirroring the npm/git discipline. The prior rest-only loop
     // left that env-assembled spelling ungated.
-    for (const toks of variants) {
-      for (let i = 0; i + 1 < toks.length; i++) {
-        const sub = toks[i];
-        const subCmd = toks[i + 1];
-        if (sub === "release" && (subCmd === "create" || subCmd === "upload" || subCmd === "delete")) {
-          return "gh release publication form (token-normalized)";
-        }
-        if (sub === "workflow" && subCmd === "run") {
-          return "gh workflow dispatch form (token-normalized)";
-        }
-      }
+    if (variants.some((toks) => toks.includes("release") && (toks.includes("create") || toks.includes("upload") || toks.includes("delete")))) {
+      return "gh release publication form (token-normalized)";
+    }
+    if (variants.some((toks) => toks.includes("workflow") && toks.includes("run"))) {
+      return "gh workflow dispatch form (token-normalized)";
     }
   }
   return null;
