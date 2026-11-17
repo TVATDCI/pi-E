@@ -119,6 +119,16 @@ const GLOBAL_RULES_PATH = join(
   "mini-dc-rules.yaml",
 );
 
+// AF1 round (2026-11-17): test seam — the harness points the RULES-LOADING global path at a
+// scratch fixture so no test outcome depends on the desk's real global rules file (same
+// discipline as setStoreRootForTesting). Only the session_start load consults this override;
+// the Tier-0 store/rules PROTECTION forms keep the production constant, so the N1/V10 pin
+// (literal production path denied) holds regardless of what the harness loads.
+let globalRulesPathOverride: string | null = null;
+export function setGlobalRulesPathForTesting(path: string | null): void {
+  globalRulesPathOverride = path;
+}
+
 function loadRulesLayer(filepath: string): Rules | null {
   if (!existsSync(filepath)) return null;
   try {
@@ -1574,7 +1584,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     // Part A: load global floor + project override, merge deny-additive
-    const globalRules = loadRulesLayer(GLOBAL_RULES_PATH);
+    const globalRules = loadRulesLayer(globalRulesPathOverride ?? GLOBAL_RULES_PATH);
     const projectPath = join(ctx.cwd, ".pi", "mini-dc-rules.yaml");
     const projectRules = loadRulesLayer(projectPath);
 
@@ -1894,6 +1904,24 @@ export default function (pi: ExtensionAPI) {
           matchedRule = rule;
           break;
         }
+      }
+    }
+
+    // AF1 (2026-11-17 both-desk smoke-alignment finding): `git -C <dir> push` passed UNGATED —
+    // the plain-push rule regex misses the -C form and the token-level D-net only ran AFTER a
+    // rule match. Evaluate the token D-net BEFORE the rules ask/block decision: any D-shaped
+    // bash command gets the D ask (captain seat) / park-or-refuse (other seats) even when NO
+    // rule matches. Rule matches keep their precedence: a BLOCK rule still hard-blocks without
+    // dialog (block wins over ask — the seam above stays skipped), and an ask-rule still asks
+    // ONCE with its rule text (no double dialog — this seam stays skipped when a rule matched).
+    // The R/G classifier stays behind the rules engine exactly as before.
+    if (!violation && isToolCallEventType("bash", event)) {
+      const tokenD = tokenBasedDForm(String(event.input?.command ?? ""));
+      if (tokenD) {
+        violation = tokenD;
+        ask = true;
+        // matchedRule stays null — the bare D-net ask carries no rule pattern; the dialog's
+        // `matched rule` line renders the net's D why instead.
       }
     }
 
