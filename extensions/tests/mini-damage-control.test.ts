@@ -19,6 +19,7 @@ import miniDc, {
   activeSessionScope,
   buildDecisionHeader,
   buildDialogOptions,
+  canonicalRemote,
   classifyBashCommand,
   composePriorLine,
   createGrant,
@@ -27,6 +28,7 @@ import miniDc, {
   isReadOnlyAllowlisted,
   loadGrants,
   matchGrant,
+  poolSlugForRemote,
   pruneScopesToSession,
   readTrail,
   recordSessionScope,
@@ -41,6 +43,7 @@ import miniDc, {
   setDialogClockForTesting,
   setEnvSourceForTesting,
   setGlobalRulesPathForTesting,
+  setPoolBaseForTesting,
   setStoreRootForTesting,
   sha16,
   Countdown,
@@ -51,7 +54,7 @@ import miniDc, {
   type Seat,
   type TrailEntry,
 } from "../mini-damage-control.ts";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as os from "node:os";
@@ -1360,10 +1363,301 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
   setDialogClockForTesting(null);
 }
 
+{
+  section("R1.a — token D-net widens to the named publication/dispatch families (2026-11-17)");
+  // Same AF1 law, more families: every widened D-shaped RULE-MISS form asks D even with no
+  // rule match; the raw word-adjacent D_FORMS regexes stay the second net; BLOCK rules still
+  // win over ask; the D seat law is seat-generic. All fixtures are deny-only inert strings —
+  // the gate blocks or asks, nothing executes. Spellings verified against installed
+  // help/docs; gh deployment (no such subcommand) and pip publish (no such command) are
+  // recorded gaps, not cells.
+  const dCells: Array<[string, string, string]> = [
+    ["npm --registry https://reg.invalid publish", "publication form", "npm publish flag-reordered"],
+    ["npm 'publish'", "publication form", "npm publish quoted"],
+    ["npm pu\"$X\"blish", "publication form", "npm publish env-assembled"],
+    ["yarn publish --tag next", "publication form", "yarn publish"],
+    ["pnpm -r publish", "publication form", "pnpm publish flag-reordered"],
+    ["bun publish", "publication form", "bun publish"],
+    ["cargo publish --dry-run", "publication form", "cargo publish (dry-run still publication-class)"],
+    ["docker -H unix:///x/y push img:tag", "container publication form", "docker push flag-reordered"],
+    ["docker \"push\" img:tag", "container publication form", "docker push quoted"],
+    ["docker build --push .", "container publication form", "docker build --push (BuildKit registry shorthand)"],
+    ["docker buildx build -q --push .", "container publication form", "docker buildx build --push reordered"],
+    ["gh -R o/r release create v1.0", "gh release publication form", "gh release create flag-reordered"],
+    ["gh 'release' 'create' v1", "gh release publication form", "gh release create quoted"],
+    ["gh release upload v1.0 ./x.tgz", "gh release publication form", "gh release upload"],
+    ["gh -R o/r workflow run ci.yml", "gh workflow dispatch form", "gh workflow run reordered"],
+  ];
+  for (const [cmd, frag, label] of dCells) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(
+      `R1.a: ${label} (rule-miss) gates D headless`,
+      R(h).block === true && (R(h).reason ?? "").includes("headless ASK→deny") && (R(h).reason ?? "").includes(frag),
+    );
+    cleanupHarness(h);
+  }
+
+  // Seat law on a widened family: captain y proceeds (trail lands); worker y is refused.
+  const hR1cap = await drive({
+    command: "npm --registry https://reg.invalid publish",
+    env: CAPTAIN_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("d"); dlg.handleInput("y"); }, // d: detail pane for the class/why pins
+  });
+  const textR1cap = renderText(hR1cap.dialogs[0]);
+  check("R1.a: widened family at captain seat renders class D + the publication why (no rule pin)", hR1cap.customCalls === 1 && textR1cap.includes("class: D") && textR1cap.includes("publication form"));
+  check("R1.a: captain y proceeds the widened-family ask", R(hR1cap).block === false);
+  const slugR1cap = harnessSlug(hR1cap);
+  check("R1.a: widened-family proceed lands in the trail (cls D, captain, scope once)", (readTrail(slugR1cap) ?? []).some((t) => t.cls === "D" && t.decision === "proceed" && t.actor === "captain" && t.scope === "once"));
+  cleanupHarness(hR1cap);
+  const hR1w = await drive({
+    command: "docker build --push .",
+    env: WORKER_ENV,
+    dialogScript: (dlg) => { dlg.handleInput("y"); dlg.handleInput("n"); }, // no y row renders for worker D; n resolves
+  });
+  check("R1.a: widened family at worker seat REFUSES y (class D law unchanged)", hR1w.customCalls === 1 && R(hR1w).block === true && (R(hR1w).reason ?? "").includes("class D rejects non-captain answers always"));
+  cleanupHarness(hR1w);
+
+  // BLOCK-rule precedence survives the widening: block beats ask, no dialog.
+  const hR1b = await drive({ command: "docker build --push v12deny3", env: WORKER_ENV, mode: "json" });
+  check("R1.a: widened D shape matching a BLOCK rule hard-blocks WITHOUT dialog", hR1b.customCalls === 0 && R(hR1b).block === true && (R(hR1b).reason ?? "").includes("v12 deny rule"));
+  cleanupHarness(hR1b);
+
+  // F4 wording: the no-rule headless deny speaks of the ACTION, not a rule.
+  const hR1f4 = await drive({ command: "cargo publish", env: WORKER_ENV, mode: "json" });
+  check("R1/F4: headless deny wording says the ACTION requires confirmation (no rule matched)", (R(hR1f4).reason ?? "").includes("This action requires operator confirmation") && !(R(hR1f4).reason ?? "").includes("This rule requires"));
+  cleanupHarness(hR1f4);
+
+  // Benign near-miss controls: the net stays head-scoped and exact-token — reads, PR
+  // creation, plain builds, and non-publication npx shapes route R/G (gated), never D.
+  // NOTE: these are classifier pins; handler-level no-rule pass cells for the correction
+  // shapes live in the correction-round block below (classifier G/D alone never proves a
+  // no-rule ask).
+  const r1Benign: Array<[string, string]> = [
+    ["npm test", "G"],
+    ["npm view left-pad versions", "R"],
+    ["npm pack --dry-run", "G"],
+    ["docker ps", "G"],
+    ["docker build .", "G"],
+    ["docker buildx build -q .", "G"],
+    ["docker pull alpine", "G"],
+    ["gh release list", "R"],
+    ["gh release view v1.0", "R"],
+    ["gh pr create --title x", "G"],
+    ["gh workflow list", "G"],
+    ["gh workflow view ci.yml", "G"],
+    ["gh run list", "R"],
+    ["cargo build", "G"],
+    ["pip install wheel", "G"],
+    // Named npx publication path: routes D at the REAL HANDLER via the token net (see the
+    // correction-round drive cells below — classifier pins here are backstops, not proof).
+    ["npx npm publish", "D"],
+    ["npx npm@latest publish", "D"],
+    ["npx -p npm publish", "D"],
+    ["npx publish", "G"],
+    ["npx cowsay publish", "G"],
+    ["npx npm run publish-notes", "G"],
+    ["echo release create workflow run", "R"],
+    ["cat publish-notes.md", "R"],
+  ];
+  for (const [cmd, wantCls] of r1Benign) {
+    check(`R1.a control: ${cmd} routes ${wantCls}`, classifyBashCommand(cmd).cls === wantCls);
+  }
+}
+
+{
+  section("R1 correction round 1 — review FIX: npx seam, gh de-env pairs, docker --push values (2026-11-17)");
+  // Handler-level no-rule cells (the correction spec's proof layer: classifier G/D alone
+  // never proves a no-rule ask occurred — these drives go through the real tool_call seam).
+  // All inert deny-only strings; each gates D headless where the pre-correction head passed
+  // UNGATED (causal: reviewer-verified at 6fad10c vs base a6feda0).
+  const fixCells: Array<[string, string, string]> = [
+    // (F1) named npx publication at the real seam — help-documented package spellings only
+    ["npx npm publish", "publication form via npx", "npx npm publish (was ungated at handler)"],
+    ["npx npm@10.9.1 publish", "publication form via npx", "npx version-qualified npm publish"],
+    ["npx --package=npm@latest publish", "publication form via npx", "npx --package=<pkg>@<ver> spelling"],
+    ["npx --package npm publish", "publication form via npx", "npx --package <pkg> space form"],
+    ["npx yarn@1.22 publish", "publication form via npx", "npx version-qualified yarn publish"],
+    ["npx -p npm publish", "publication form via npx", "npx -p value spelling (over-gate, fail-closed)"],
+    // (F2) gh adjacent-pair matching on the de-env'd variant — real env assembly
+    ["gh release \"$X\" create", "gh release publication form", "gh release $X-env assembly (was ungated)"],
+    ["gh workflow \"$X\" run", "gh workflow dispatch form", "gh workflow $X-env assembly (was ungated)"],
+    ["gh pr mer\"$X\"ge 41", "destructive gh merge form", "gh pr merge $X-env assembly (was ungated)"],
+    // (F3) docker truthy --push flag VALUES
+    ["docker build --push=true .", "container publication form", "docker build --push=true (was ungated)"],
+    ["docker buildx build --push=1 .", "container publication form", "docker buildx build --push=1 (was ungated)"],
+  ];
+  for (const [cmd, frag, label] of fixCells) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(
+      `R1.fix: ${label} gates D headless`,
+      R(h).block === true && (R(h).reason ?? "").includes("headless ASK→deny") && (R(h).reason ?? "").includes(frag),
+    );
+    cleanupHarness(h);
+  }
+  // Nonpublication controls AT THE REAL HANDLER: falsy flag values and publish-merely-named
+  // arguments stay silent (no rule match, no ask) — an ask here would be over-gating.
+  const fixControls: string[] = [
+    "docker build --push=false .",
+    "docker build --push=0 .",
+    "npx cowsay publish",
+    "npx publish",
+    "npx npm run publish-notes",
+  ];
+  for (const cmd of fixControls) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(`R1.fix control: ${cmd} stays a silent pass at the handler`, h.customCalls === 0 && R(h).block === false);
+    cleanupHarness(h);
+  }
+}
+
+{
+  section("R1.d — review R1e-002 fix: gh pair matching position-independent (2026-11-18)");
+  const fixCells: Array<[string, string, string]> = [
+    ["gh release -R o/r create v1", "gh release publication form", "gh release create interspersed-flag spelling"],
+    ["gh workflow -R o/r run ci.yml", "gh workflow dispatch form", "gh workflow run interspersed-flag spelling"],
+  ];
+  for (const [cmd, frag, label] of fixCells) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(
+      `R1.d: ${label} (rule-miss) gates D headless`,
+      R(h).block === true && (R(h).reason ?? "").includes("headless ASK→deny") && (R(h).reason ?? "").includes(frag),
+    );
+    cleanupHarness(h);
+  }
+  const fixControls: string[] = [
+    "gh release list",
+    "gh release view v1.0",
+    "gh workflow list",
+    "gh run list",
+    "gh pr create --title x",
+  ];
+  for (const cmd of fixControls) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json" });
+    check(`R1.d control: ${cmd} stays a silent pass at the handler`, h.customCalls === 0 && R(h).block === false);
+    cleanupHarness(h);
+  }
+}
+
+{
+  section("R1.b — primary/pool slug unification via canonical origin remote (N2 consistency)");
+  // Fixture (real files, no git needed — the resolver reads pointer/config text only):
+  // a primary checkout with .git/config origin, plus a pool project dir whose slots point
+  // back at it with worktree .git pointer files. Same repo → ONE slug whether asked from the
+  // pool branch (path) or the primary branch (remote identity); everything else keeps the
+  // collision-proof path hash. Read-only metadata only — never the mini-dc store.
+  const poolR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-pool-"));
+  const primaryR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-primary-"));
+  mkdirSync(join(primaryR1, ".git"), { recursive: true });
+  writeFileSync(join(primaryR1, ".git", "config"), '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://github.com/o/fixrepo.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  mkdirSync(join(poolR1, "fixrepo-a1b2c3", "1", "work"), { recursive: true });
+  writeFileSync(join(poolR1, "fixrepo-a1b2c3", "1", "work", ".git"), `gitdir: ${join(primaryR1, ".git", "worktrees", "w1")}\n`);
+  mkdirSync(join(poolR1, "fixrepo-a1b2c3", "2", "work"), { recursive: true });
+  writeFileSync(join(poolR1, "fixrepo-a1b2c3", "2", "work", ".git"), `gitdir: ${join(primaryR1, ".git", "worktrees", "w2")}\n`);
+  const primaryRemote = "https://github.com/o/fixrepo.git";
+  check("R1.b: non-pool primary resolves to the POOL slug via origin identity", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: primaryRemote }) === "fixrepo");
+  check("R1.b: scp-style spelling canonicalizes to the same identity", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "git@github.com:o/fixrepo.git" }) === "fixrepo");
+  check("R1.b: .git-suffix-less https spelling canonicalizes identically", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "https://github.com/o/fixrepo" }) === "fixrepo");
+  // Correction round 1 (review F4): path case is identity — host spellings fold, paths don't.
+  check("R1.b F4: mixed-case HOST spellings of the same exact path still unify", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "git@GitHub.Com:o/fixrepo.git" }) === "fixrepo" && resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "https://GITHUB.com/o/fixrepo" }) === "fixrepo");
+  check("R1.b F4: distinct case-sensitive repository paths do NOT share a slug", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: "https://github.com/o/FixRepo.git" }) === `r-${sha16(primaryR1)}`);
+  check("R1.b: pool slots still resolve by path (unchanged branch)", resolveRepoSlug(join(poolR1, "fixrepo-a1b2c3", "1", "work"), { poolBase: poolR1 }) === "fixrepo");
+  check("R1.b: second slot → same slug (recycling stability preserved)", resolveRepoSlug(join(poolR1, "fixrepo-a1b2c3", "2", "work"), { poolBase: poolR1 }) === "fixrepo");
+  check("R1.b: poolSlugForRemote direct hit → pool-derived slug", poolSlugForRemote(primaryRemote, { poolBase: poolR1 }) === "fixrepo");
+  // Two pool projects of the SAME repo: sorted-first, same stripped slug.
+  mkdirSync(join(poolR1, "fixrepo-dddddd", "w"), { recursive: true });
+  writeFileSync(join(poolR1, "fixrepo-dddddd", "w", ".git"), `gitdir: ${join(primaryR1, ".git", "worktrees", "w3")}\n`);
+  check("R1.b: multiple pool projects of one repo → same unified slug (deterministic)", poolSlugForRemote(primaryRemote, { poolBase: poolR1 }) === "fixrepo");
+  rmSync(join(poolR1, "fixrepo-dddddd"), { recursive: true, force: true });
+  // Basename coincidence is NOT identity: same name, different/no remote → path hash.
+  const otherR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-other-"));
+  check("R1.b: basename coincidence is NOT identity (different remote → path hash)", resolveRepoSlug(otherR1, { poolBase: poolR1, remoteUrl: "https://github.com/x/other.git" }) === `r-${sha16(otherR1)}`);
+  check("R1.b: remote-less repo keeps the path hash (no origin → no unification)", resolveRepoSlug(otherR1, { poolBase: poolR1 }) === `r-${sha16(otherR1)}`);
+  check("R1.b: absent pool base → path hash even with a remote", resolveRepoSlug(primaryR1, { poolBase: join(poolR1, "missing"), remoteUrl: primaryRemote }) === `r-${sha16(primaryR1)}`);
+  // Registry robustness: malformed pointer / marker-less projects are skipped, not fatal.
+  mkdirSync(join(poolR1, "broken-9f8e7d", "w"), { recursive: true });
+  writeFileSync(join(poolR1, "broken-9f8e7d", "w", ".git"), "not-a-pointer\n");
+  mkdirSync(join(poolR1, "z-empty-123ab"), { recursive: true });
+  check("R1.b: malformed pointer + marker-less pool projects are skipped, resolution still lands", resolveRepoSlug(primaryR1, { poolBase: poolR1, remoteUrl: primaryRemote }) === "fixrepo");
+  // Direct-checkout pool layout: <proj>-<hex>/.git as a DIRECTORY with its own config.
+  mkdirSync(join(poolR1, "direct-b7c6d5", ".git"), { recursive: true });
+  writeFileSync(join(poolR1, "direct-b7c6d5", ".git", "config"), '[remote "origin"]\n\turl = https://github.com/o/directrepo.git\n');
+  const directPrimary = mkdtempSync(join(os.tmpdir(), "minidc-r1-directp-"));
+  check("R1.b: pool project as direct checkout (config at .git/config) unifies too", resolveRepoSlug(directPrimary, { poolBase: poolR1, remoteUrl: "https://github.com/o/directrepo.git" }) === "direct");
+  // E2E: the GATE's handler slug unifies through the remote — the trail lands under the
+  // pool slug, and the old r-hash store dir is never created. Scratch pool base via the
+  // testing seam; scratch store via storeDir; the ask lands a deny trail (actor=gate).
+  const storeR1 = mkdtempSync(join(os.tmpdir(), "minidc-r1-store-"));
+  setPoolBaseForTesting(poolR1);
+  const hR1e2e = makeHarness({ command: "echo v12askg7", env: WORKER_ENV, mode: "json", storeDir: storeR1 });
+  execSync(`git -C ${JSON.stringify(hR1e2e.tmp)} remote add origin https://github.com/o/fixrepo.git`);
+  await hR1e2e.run();
+  check("R1.b e2e: the gate resolves the handler slug through the remote identity", existsSync(join(storeR1, "fixrepo", "trail.jsonl")));
+  check("R1.b e2e: the r-hash store dir is NOT created for the unified repo", !existsSync(join(storeR1, `r-${sha16(hR1e2e.tmp)}`)));
+  cleanupHarness(hR1e2e);
+  setPoolBaseForTesting(null);
+  rmSync(poolR1, { recursive: true, force: true });
+  rmSync(primaryR1, { recursive: true, force: true });
+  rmSync(otherR1, { recursive: true, force: true });
+  rmSync(directPrimary, { recursive: true, force: true });
+  rmSync(storeR1, { recursive: true, force: true });
+}
+
+{
+  section("R1.c — identity fix: scheme-explicit ports never match port-less identities (2026-11-18)");
+  // Captain-worded fix for pipeline review finding R1-001: canonicalRemote folded an
+  // explicit ssh:// URL port into the repository path (ssh://git@host:2222/o/r →
+  // host/2222/o/r), letting two DIFFERENT repositories share one pool slug/store. Fix:
+  // scheme-explicit ports stay colon-delimited (host:2222/o/r); scheme-less scp colons
+  // remain literal path folds. Fixtures mirror the standalone verify-r1001 proof.
+  const poolC = mkdtempSync(join(os.tmpdir(), "minidc-r1c-pool-"));
+  const primaryC = mkdtempSync(join(os.tmpdir(), "minidc-r1c-primary-"));
+  mkdirSync(join(primaryC, ".git"), { recursive: true });
+  // Registered repo whose REAL PATH is "2222/o/r" (port-less https spelling).
+  writeFileSync(join(primaryC, ".git", "config"), '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://host/2222/o/r\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  mkdirSync(join(poolC, "portrepo-a1b2c3", "1", "work"), { recursive: true });
+  writeFileSync(join(poolC, "portrepo-a1b2c3", "1", "work", ".git"), `gitdir: ${join(primaryC, ".git", "worktrees", "w1")}\n`);
+  const repoC = mkdtempSync(join(os.tmpdir(), "minidc-r1c-repob-"));
+  const SSH_PORT = "ssh://git@host:2222/o/r"; // real repo: host, PORT 2222, path o/r
+  const HTTPS_2222 = "https://host/2222/o/r"; // real repo: host, path 2222/o/r
+
+  // Unit level: distinct canonical identities (port kept, not folded into path).
+  check("R1.c: scheme-explicit port stays colon-delimited in the identity", canonicalRemote(SSH_PORT) === "host:2222/o/r");
+  check("R1.c: port-less https path spelling unchanged", canonicalRemote(HTTPS_2222) === "host/2222/o/r");
+  check("R1.c: the two DIFFERENT repos canonicalize DIFFERENTLY (the R1-001 wrong match is gone)", canonicalRemote(SSH_PORT) !== canonicalRemote(HTTPS_2222));
+  check("R1.c: scheme-less scp colon stays a literal path fold (unchanged)", canonicalRemote("git@host:2222/o/r") === "host/2222/o/r");
+  check("R1.c: colon-less ssh:// URL keeps the historical git@-prefixed fold (unchanged by this fix)", canonicalRemote("ssh://git@host/o/r") === "git@host/o/r");
+  check("R1.c: https-with-port identity is port-distinct (unchanged)", canonicalRemote("https://host:2222/o/r") === "host:2222/o/r");
+  check("R1.c: same host:port/path unify across ssh/git@/git/https spellings", canonicalRemote("git://host:2222/o/r") === canonicalRemote("https://host:2222/o/r") && canonicalRemote("ssh://host:2222/o/r") === canonicalRemote(SSH_PORT));
+
+  // Exported seam + end-to-end: the explicit-port repo no longer steals the other slug.
+  check("R1.c: poolSlugForRemote no longer steals the port-less repo's slug", poolSlugForRemote(SSH_PORT, { poolBase: poolC }) === null);
+  check("R1.c: resolveRepoSlug keeps the path-hash identity for the explicit-port repo", resolveRepoSlug(repoC, { poolBase: poolC, remoteUrl: SSH_PORT }) === `r-${sha16(repoC)}`);
+  check("R1.c: the registered https repo still unifies to its own pool slug", resolveRepoSlug(primaryC, { poolBase: poolC, remoteUrl: HTTPS_2222 }) === "portrepo");
+  check("R1.c: no-port ssh to a different path still does not match (control)", resolveRepoSlug(repoC, { poolBase: poolC, remoteUrl: "ssh://git@host/o/r" }) === `r-${sha16(repoC)}`);
+
+  // A pool-registered repo whose origin ITSELF carries the port: same-port spellings
+  // still unify to THAT repo's slug (distinctness must not break correct unification).
+  const poolC2 = mkdtempSync(join(os.tmpdir(), "minidc-r1c-pool2-"));
+  const primaryC2 = mkdtempSync(join(os.tmpdir(), "minidc-r1c-primary2-"));
+  mkdirSync(join(primaryC2, ".git"), { recursive: true });
+  writeFileSync(join(primaryC2, ".git", "config"), '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = ssh://git@host:2222/o/r\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+  mkdirSync(join(poolC2, "portrepo2-a1b2c3", "1", "work"), { recursive: true });
+  writeFileSync(join(poolC2, "portrepo2-a1b2c3", "1", "work", ".git"), `gitdir: ${join(primaryC2, ".git", "worktrees", "w1")}\n`);
+  check("R1.c: poolSlugForRemote unifies same-host same-port same-path spellings", poolSlugForRemote(SSH_PORT, { poolBase: poolC2 }) === "portrepo2");
+  check("R1.c: resolveRepoSlug end-to-end: explicit-port repo unifies when its OWN repo is registered", resolveRepoSlug(repoC, { poolBase: poolC2, remoteUrl: "https://host:2222/o/r" }) === "portrepo2");
+
+  rmSync(poolC, { recursive: true, force: true });
+  rmSync(primaryC, { recursive: true, force: true });
+  rmSync(repoC, { recursive: true, force: true });
+  rmSync(poolC2, { recursive: true, force: true });
+  rmSync(primaryC2, { recursive: true, force: true });
+}
+
 // ── restore production seams ─────────────────────────────────────────────────
 setStoreRootForTesting(null);
 setEnvSourceForTesting(null);
 setGlobalRulesPathForTesting(null);
+setPoolBaseForTesting(null);
 setDialogClockForTesting(null);
 
 console.log(`\n${pass} passed, ${fail} failed`);

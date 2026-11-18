@@ -42,6 +42,7 @@ First live model call (or `pi --list-models`) verifies `auth.json` — the boots
 | `memory/audit.log` | write audit trail | optional copy (completes the audit story) |
 | `bridge/` | read-only bd (Main-vault) projection | DON'T copy — regenerate from the Main-vault side (`export-bd-global.sh`) |
 | `sessions/` | session JSONLs, ephemeral | no action |
+| `mini-dc/` | mini-damage-control runtime store (`grants.yaml` + `trail.jsonl` per repo slug), machine-local | optional copy — grants re-mint via the gate's captain re-ask (fail-closed) anyway |
 
 ## System dependencies
 

@@ -221,13 +221,19 @@ export function sha16(s: string): string {
   return createHash("sha256").update(s).digest("hex").slice(0, 16);
 }
 
+// Test seam for the pool base (same discipline as setStoreRootForTesting): production keeps
+// ~/.treehouse; the slug-unification e2e points the handler at a scratch pool fixture.
+let poolBaseOverride: string | null = null;
+export function setPoolBaseForTesting(dir: string | null): void {
+  poolBaseOverride = dir;
+}
 function defaultPoolBase(): string {
-  return join(os.homedir(), ".treehouse");
+  return poolBaseOverride ?? join(os.homedir(), ".treehouse");
 }
 
 export function resolveRepoSlug(
   gitRoot: string,
-  opts?: { poolBase?: string },
+  opts?: { poolBase?: string; remoteUrl?: string | null },
 ): string {
   const root = gitRoot.endsWith("/") && gitRoot !== "/" ? gitRoot.slice(0, -1) : gitRoot;
   const poolBase = opts?.poolBase ?? defaultPoolBase();
@@ -237,7 +243,146 @@ export function resolveRepoSlug(
     const stripped = seg1.replace(/-[0-9a-f]{5,}$/i, "");
     return stripped || seg1;
   }
+  // R1 (2026-11-17, N2 consistency): a non-pool root whose origin remote canonicalizes to a
+  // pool-registered repo's origin resolves to that SAME pool-derived slug — the primary
+  // checkout and its pooled worktrees share one store instead of a dual slug. Identity is
+  // the canonical remote URL, never the basename (same-basename different-repo stays
+  // distinct); no remote, no match, or any unreadable/malformed pool metadata falls back
+  // to the collision-proof path hash, exactly as before.
+  if (opts?.remoteUrl) {
+    const unified = poolSlugForRemote(opts.remoteUrl, { poolBase });
+    if (unified) return unified;
+  }
   return `r-${sha16(root)}`;
+}
+
+// ── R1: canonical origin-remote identity across the pool (primary/pool unification) ──
+// The pool keeps no registry file; its identity anchor is each slot's .git pointer back to
+// the primary checkout plus that primary's origin remote. The scan reads ONLY git metadata
+// (pointer files + .git/config) under the pool base — never the mini-dc store, never any
+// working tree — and every failure degrades to null (caller keeps the path-hash identity).
+
+/** Canonical remote identity: strips scheme/scp syntax (case-insensitive), folds the HOST
+ *  to lowercase (DNS is case-insensitive), strips trailing slashes and the .git suffix —
+ *  while PRESERVING repository-path case, so two distinct case-sensitive repository paths
+ *  never merge into one approval identity (correction round 1: the prior whole-URL
+ *  lowercasing could collapse distinct repos on case-sensitive hosts; a safe extra re-ask
+ *  on case-variant GitHub spellings is preferred over that). R1-001 fix: a scheme-explicit
+ *  PORT (ssh://git@host:2222/o/r) stays colon-delimited in the identity (`host:2222/o/r`)
+ *  and can never equal a port-less/path-only spelling (`host/2222/o/r` is PATH text there);
+ *  scheme-less scp colons remain literal path separators, unchanged. */
+export function canonicalRemote(url: string): string {
+  let u = url.trim();
+  const scheme = /^(?:https?|ssh|git):\/\//i.exec(u);
+  const schemeExplicit = scheme !== null;
+  if (scheme) u = u.slice((scheme[0] as string).length);
+  const scp = /^git@([^:/]+):/.exec(u);
+  if (scp) {
+    const host = (scp[1] as string).toLowerCase();
+    const rest = u.slice((scp[0] as string).length);
+    // In a scheme-explicit URL the colon after git@host is a PORT separator, not scp path
+    // syntax — keep `host:port/…` so an explicit-port spelling never identity-matches a
+    // port-less one. Plain scp (no scheme) keeps the historical fold: colon-delimited
+    // remainder is literal path. Port-less ssh:// URLs keep the old fold too, so same-repo
+    // scp/ssh/https spellings still unify.
+    const port = schemeExplicit ? /^([0-9]+)\//.exec(rest) : null;
+    u = port ? `${host}:${rest}` : `${host}/${rest}`;
+  }
+  const slash = u.indexOf("/");
+  if (slash > 0) u = `${u.slice(0, slash).toLowerCase()}${u.slice(slash)}`;
+  return u.replace(/\/+$/, "").replace(/\.git$/, "");
+}
+
+/** Origin remote URL from a git config file (INI slice parse; malformed/absent → null). */
+function readOriginRemoteFromConfig(configPath: string): string | null {
+  try {
+    let section = "";
+    for (const line of readFileSync(configPath, "utf8").split(/\r?\n/)) {
+      const sec = /^\s*\[\s*remote\s+"?([^"\]]+?)"?\s*\]\s*$/.exec(line);
+      if (sec) {
+        section = (sec[1] ?? "").trim();
+        continue;
+      }
+      if (section !== "origin") continue;
+      const url = /^\s*url\s*=\s*(.+?)\s*$/.exec(line);
+      if (url) return ((url[1] ?? "") as string).trim() || null;
+    }
+  } catch {
+    /* unreadable/absent → null */
+  }
+  return null;
+}
+
+/** Config path of the repo a pool project dir belongs to: shallow-walk (≤3 levels) for the
+ *  .git marker — a FILE means a worktree slot pointing back at its primary checkout
+ *  (`gitdir: <primary>/.git/worktrees/<slot>` → <primary>/.git/config); a DIRECTORY means
+ *  the project itself is a checkout. Layouts vary; every miss degrades to null. */
+function poolProjectOriginConfig(poolBase: string, entry: string): string | null {
+  const base = join(poolBase, entry);
+  const stack: string[] = [base];
+  let budget = 64; // node cap — bounded scan even on oddly deep pool layouts
+  while (stack.length > 0 && budget > 0) {
+    budget--;
+    const dir = stack.pop() as string;
+    let dirents;
+    try {
+      dirents = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of dirents) {
+      if (e.name !== ".git") {
+        if (e.isDirectory() && e.name !== "node_modules") {
+          const rel = relative(base, join(dir, e.name));
+          if (rel.split(sep).length <= 3) stack.push(join(dir, e.name));
+        }
+        continue;
+      }
+      const marker = join(dir, ".git");
+      if (e.isFile()) {
+        try {
+          const m = /^gitdir:\s*(.+)$/.exec(readFileSync(marker, "utf8").trim());
+          const p = ((m?.[1] ?? "") as string).trim();
+          const cut = p.lastIndexOf("/.git/worktrees/");
+          if (cut > 0) return join(p.slice(0, cut), ".git", "config");
+        } catch {
+          /* malformed pointer → keep scanning */
+        }
+      } else if (e.isDirectory()) {
+        return join(marker, "config");
+      }
+    }
+  }
+  return null;
+}
+
+/** Pool-derived slug of a pool-registered repo whose origin canonicalizes to `remoteUrl`
+ *  (sorted-deterministic first match). Null when the pool is absent/unreadable or no
+ *  registered repo shares the identity — the caller then keeps the path-hash slug. */
+export function poolSlugForRemote(
+  remoteUrl: string,
+  opts?: { poolBase?: string },
+): string | null {
+  const want = canonicalRemote(remoteUrl);
+  if (!want) return null;
+  const poolBase = opts?.poolBase ?? defaultPoolBase();
+  let listing: string[];
+  try {
+    listing = readdirSync(poolBase).sort();
+  } catch {
+    return null;
+  }
+  for (const entry of listing) {
+    if (!/-[0-9a-f]{5,}$/i.test(entry)) continue; // pool project dirs carry the instance id
+    const cfg = poolProjectOriginConfig(poolBase, entry);
+    if (!cfg) continue;
+    const url = readOriginRemoteFromConfig(cfg);
+    if (url && canonicalRemote(url) === want) {
+      const stripped = entry.replace(/-[0-9a-f]{5,}$/i, "");
+      return stripped || entry;
+    }
+  }
+  return null;
 }
 
 // ── WP0: decision trail — append-only, lock-serialized JSONL [C8] ────────────
@@ -538,18 +683,18 @@ function tokenBasedDForm(command: string): string | null {
   if (tokens.length === 0) return null;
   const head = tokens[0];
   const rest = tokens.slice(1);
+  // O1 fold (recheck): env-assembled destructive tokens ("git pu\"$X\"sh") — also try the
+  // $VAR-segment-removed variant, de-env'd on the RAW token BEFORE quote-stripping (quote
+  // boundaries end var names: stripping quotes first would merge pu"$X"sh into pu$xsh).
+  // Whole-token vars with unknowable values (git $ACTION) stay a documented residual:
+  // removal cannot synthesize a token that isn't there. Shared by every D family below.
+  const restDeEnv = rawTokens
+    .slice(1)
+    .map((t) => t.replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, ""))
+    .map(normalizeShellToken)
+    .filter(Boolean);
+  const variants = [rest, restDeEnv];
   if (head === "git") {
-    // O1 fold (recheck): env-assembled destructive tokens ("git pu\"$X\"sh") — also try the
-    // $VAR-segment-removed variant, de-env'd on the RAW token BEFORE quote-stripping (quote
-    // boundaries end var names: stripping quotes first would merge pu"$X"sh into pu$xsh).
-    // Whole-token vars with unknowable values (git $ACTION) stay a documented residual:
-    // removal cannot synthesize a token that isn't there.
-    const restDeEnv = rawTokens
-      .slice(1)
-      .map((t) => t.replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, ""))
-      .map(normalizeShellToken)
-      .filter(Boolean);
-    const variants = [rest, restDeEnv];
     if (variants.some((toks) => toks.some((t) => t === "push" || t === "merge" || t === "rebase"))) {
       return "destructive git form (push/merge/rebase token, quote/order-normalized)";
     }
@@ -557,8 +702,72 @@ function tokenBasedDForm(command: string): string | null {
       return "destructive git form (reset --hard, quote/order-normalized)";
     }
   }
-  if (head === "gh" && rest.includes("merge")) {
+  if (head === "gh" && variants.some((toks) => toks.includes("merge"))) {
     return "destructive gh merge form (token-normalized)";
+  }
+  // ── R1 (2026-11-17): the remaining NAMED dangerous-form families widen into the net ──
+  // Spellings verified against installed help/docs and the established word-layer D_FORMS
+  // families (see the R1 implementation report): npm/yarn/pnpm/bun/cargo publish (the
+  // publication class the word layer already treats as D); docker push AND docker build
+  // --push (BuildKit's registry-publication shorthand — the --push flag under a docker head
+  // IS publication semantics, so the exact token --push joins the net); gh release
+  // create|upload|delete (mirrors the existing word-layer family) and gh workflow run
+  // (workflow_dispatch). Recorded gaps, NOT invented: gh has no deployment subcommand
+  // (API-only) and pip has no publish command — nearest boundary: wrapper-bin G, documented.
+  const familyHas = (toks: string[][], want: string): boolean =>
+    toks.some((ts) => ts.includes(want));
+  if (["npm", "yarn", "pnpm", "bun", "cargo"].includes(head) && familyHas(variants, "publish")) {
+    return "publication form (publish token, quote/order-normalized)";
+  }
+  // Correction round 1 (review F1): the named npx publication path AT THE HANDLER SEAM —
+  // publication through an npm-class package invoked via npx: positional `<pkg>[@<version>]`,
+  // `--package=<pkg>[@<version>]`, and `--package <pkg>` (the package-selection spellings the
+  // installed npx/npm-exec help documents). A file/argument merely named publish does NOT
+  // imply publication: some other package token must name an npm-class package (`npx cowsay
+  // publish`, `npx publish` stay out). The `-p` shorthand is absent from the installed help —
+  // not claimed there, but the value token still matches pkgSpec independent of the flag
+  // form — `npx -p npm publish` gates as a pinned over-gate (fail-closed). bunx deliberately
+  // excluded (correction spec).
+  if (head === "npx") {
+    const pkgSpec = /^(npm|yarn|pnpm|bun|cargo)(@[\w.-]+)?$/;
+    const pkgFlag = /^--package=(npm|yarn|pnpm|bun|cargo)(@[\w.-]+)?$/;
+    const namesNpmClass = (toks: string[]): boolean =>
+      toks.some((t, i) =>
+        pkgSpec.test(t) ||
+        pkgFlag.test(t) ||
+        (t === "--package" && toks[i + 1] !== undefined && pkgSpec.test(toks[i + 1] as string)),
+      );
+    if (variants.some((toks) => namesNpmClass(toks) && familyHas([toks], "publish"))) {
+      return "publication form via npx (npm-class package publish, quote/order-normalized)";
+    }
+  }
+  if (head === "docker") {
+    // Correction round 1 (review F3): truthy boolean flag-VALUE spellings join the net —
+    // docker build/buildx accept --push=true / --push=1 (publication), while --push=false /
+    // --push=0 are explicit nonpublication forms that must stay OUT. Exact tokens push/--push
+    // unchanged; an unrelated option value (e.g. an image tag containing push) is not treated
+    // as publication beyond the documented exact-token corner.
+    const dockerPublish = (toks: string[]): boolean =>
+      toks.some((t) =>
+        t === "push" ||
+        t === "--push" ||
+        (t.startsWith("--push=") && t.slice("--push=".length) !== "false" && t.slice("--push=".length) !== "0"),
+      );
+    if (variants.some(dockerPublish)) {
+      return "container publication form (docker push/--push, quote/order-normalized)";
+    }
+  }
+  if (head === "gh") {
+    // Correction round 1 (review F2): the gh pair-check runs on BOTH variants — the de-env'd
+    // array collapses removed $VAR tokens, so `gh release "$X" create` (a real publication
+    // after expansion) matches, mirroring the npm/git discipline. The prior rest-only loop
+    // left that env-assembled spelling ungated.
+    if (variants.some((toks) => toks.includes("release") && (toks.includes("create") || toks.includes("upload") || toks.includes("delete")))) {
+      return "gh release publication form (token-normalized)";
+    }
+    if (variants.some((toks) => toks.includes("workflow") && toks.includes("run"))) {
+      return "gh workflow dispatch form (token-normalized)";
+    }
   }
   return null;
 }
@@ -1450,7 +1659,7 @@ function headlessReason(violation: string, askClass: boolean): string {
   if (askClass) {
     return (
       `🛑 BLOCKED by mini-dc (headless ASK→deny): ${violation}. ` +
-      `This rule requires operator confirmation in interactive sessions; headless sessions cannot confirm. ` +
+      `This action requires operator confirmation in interactive sessions; headless sessions cannot confirm. ` +
       `Restructure the command (file-wrapped script, non-ASK phrasing) or route the action via the Operator.`
     );
   }
@@ -1549,7 +1758,11 @@ export default function (pi: ExtensionAPI) {
     if (slugCache && slugCache.cwd === cwd) return slugCache.slug;
     const root = gitOut("rev-parse --show-toplevel", cwd);
     if (!root) return null;
-    const slug = resolveRepoSlug(root);
+    // R1: the origin remote feeds the primary/pool identity unification (N2); repos without
+    // an origin keep the path-hash identity. Cached per cwd — one remote fetch + pool scan
+    // per root, then never again this session.
+    const remote = gitOut("config --get remote.origin.url", root);
+    const slug = resolveRepoSlug(root, { remoteUrl: remote });
     slugCache = { cwd, slug };
     return slug;
   };

@@ -78,6 +78,10 @@ trust.json
 
 # pi crash journal (runtime artifact written by pi's crash reporting)
 crashes.json
+
+# mini-dc gate runtime store — machine-local trail + grants, never committed
+# (storeRoot() is ~/.pi/agent/mini-dc, which IS this repo's root on the live agent home)
+/mini-dc/
 .backpassrc.json
 .backpass/
 
