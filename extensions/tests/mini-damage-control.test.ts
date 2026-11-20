@@ -1281,6 +1281,55 @@ section("WP7 end-to-end appendix — F1 probe rows through the REAL gate (answer
 }
 
 {
+  // ── R2 WIDENED-REGEX PINS (design §9 — r4recheck §3's smallest fix, riding with the
+  // broker round). The beyond-letter-grammar unset/empty expansion class is now elided
+  // at the three letter-name sites: positionals/specials ($1 $@ $* $# $? $! $-), ANY
+  // braced expansion (${E:-}, ${E-}, ${E:0}, ${E:0:0}, ${E:+x}, ${E^^}, ${E[@]}), and
+  // known-var OPERATOR spellings pre-expand (${HOME:-x}, ${HOME:0}). The 16 r4recheck
+  // rows land here as DENIED pins; benign controls stay ungated. DOCUMENTED FAIL-CLOSED
+  // OVER-BLOCK TRADE (stated per the regression plan): non-empty-expansion spellings
+  // such as ${#E} (length — executes as literal 0) also elide — deny is the safe
+  // direction, the same trade the N2 fix already made for set-nonempty elisions.
+  section("R2 — widened elision: beyond-letter-grammar forms (r4recheck P/O/K rows) DENIED");
+  const storeR2 = mkdtempSync(join(os.tmpdir(), "minidc-r2-widen-"));
+  const forms: [string, string][] = [
+    ["P1", 'cat $HOME/.pi/agent/mini-d$1c/someRepo/grants.yaml'],
+    ["P2", 'cat $HOME/.pi/agent/mini-d${1}c/someRepo/grants.yaml'],
+    ["P3", 'cat $HOME/.pi/agent/mini-d$@c/someRepo/grants.yaml'],
+    ["P4", 'cat $HOME/.pi/agent/mini-d$*c/someRepo/grants.yaml'],
+    ["O1", 'cat $HOME/.pi/agent/mini-d${E:-}c/someRepo/grants.yaml'],
+    ["O2", 'cat $HOME/.pi/agent/mini-d${E-}c/someRepo/grants.yaml'],
+    ["O3", 'cat $HOME/.pi/agent/mini-d${E:0}c/someRepo/grants.yaml'],
+    ["O4", 'cat $HOME/.pi/agent/mini-d${E:0:0}c/someRepo/grants.yaml'],
+    ["O5", 'cat $HOME/.pi/agent/mini-d${E:+x}c/someRepo/grants.yaml'],
+    ["O6", 'cat $HOME/.pi/agent/mini-d${E^^}c/someRepo/grants.yaml'],
+    ["O7", 'cat $HOME/.pi/agent/mini-d${E[@]}c/someRepo/grants.yaml'],
+    ["O8", 'echo forged > $HOME/.pi/agent/mini-d${E:-}c/someRepo/trail.jsonl'],
+    ["O9", 'cat ~/.pi/agent/mini-d${E:-}c-rules.yaml'],
+    ["O10", 'cat $HOME/.pi/a${E:-}gent/mini-dc/someRepo/grants.yaml'],
+    ["K2", 'cat ${HOME:-x}/.pi/agent/mini-d${E:-}c/someRepo/grants.yaml'],
+    ["K3", 'cat ${HOME:0}/.pi/agent/mini-d${1}c/someRepo/grants.yaml'],
+  ];
+  for (const [tag, cmd] of forms) {
+    const h = await drive({ command: cmd, env: WORKER_ENV, mode: "json", storeDir: storeR2 });
+    check(`R2 widen ${tag}: beyond-grammar elision reconstructs a protected path — DENIED`,
+      R(h).block === true && (R(h).reason ?? "").includes("privileged mini-dc store/rules"));
+    cleanupHarness(h);
+  }
+  // benign controls — no over-tightening beyond the documented trade
+  const b1 = await drive({ command: 'cat ${E:-}dir/notes.txt', env: WORKER_ENV, mode: "json", storeDir: storeR2 });
+  check("R2 benign: operator-form unset-var NON-store path still passes", R(b1).block === false);
+  cleanupHarness(b1);
+  const b2 = await drive({ command: 'cat $HOME/mini-d$1c-notes.txt', env: WORKER_ENV, mode: "json", storeDir: storeR2 });
+  check("R2 benign: positional elision in a NON-store filename still passes", R(b2).block === false);
+  cleanupHarness(b2);
+  const b3 = await drive({ command: 'cat $HOME/.pi/agent/${E:-}notes.txt', env: WORKER_ENV, mode: "json", storeDir: storeR2 });
+  check("R2 benign: elision inside .pi/agent but NOT the store still passes", R(b3).block === false);
+  cleanupHarness(b3);
+  rmSync(storeR2, { recursive: true, force: true });
+}
+
+{
   section("AF1 — D-net-first: D-shaped bash asks with NO rule match (2026-11-17 both-desk alignment finding)");
   // ddd↔TNT live-smoke finding: `git -C <dir> push` passed UNGATED — the plain-push rule regex
   // missed the -C form and the token D-net only ran after a rule match. The net now fires
