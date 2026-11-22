@@ -1,0 +1,289 @@
+# ~/.pi/agent/mini-dc-rules.yaml — GLOBAL SAFETY FLOOR (Decision 0002 Part D)
+# Projects can ADD rules via .pi/mini-dc-rules.yaml but cannot REMOVE these (deny-additive).
+# This file prevents the fail-closed default from stranding operators.
+#
+# === Policy (how to read each rule) ===
+#   BLOCK  = no `ask` field → hard-block, no confirm dialog. For IRREVERSIBLE / catastrophic ops.
+#   ASK    = `ask: true`     → confirm dialog (ctx.ui.select). For reversible-but-write ops.
+# Ordering matters: bashToolPatterns are first-match-wins (`break` on first hit), so
+#   more-specific / more-severe patterns MUST precede catch-alls (e.g. `rm -rf` BLOCK before
+#   `rm -f` ASK; `git push --force` BLOCK before `git push` ASK).
+#
+# === Matcher semantics (verified 2026-07-10) — IMPORTANT ===
+#   bashToolPatterns: matched via `new RegExp(pattern).test(command)` — full regex, robust.
+#   zeroAccessPaths:  matched via minimatch glob (supports *, ?, **, ~).
+#                     dot: true is enabled, so .env, .ssh, etc. are matched.
+#                     Patterns must be true globs; suffix-form substrings no longer work.
+#
+# === Source ===
+# Curated from our own prior set + disler `damage-control-rules.yaml` (cloud-native + git-history
+# enrichment). See SYSTEM-COMPARISON-OURS-vs-DISLER.md §8 #1–2.
+
+bashToolPatterns:
+  # --- rm family: recursive BLOCK (hard), force-only ASK (confirm). Recursive rules FIRST. ---
+  - pattern: '\brm\s+(-\S+\s+)*-[^\s-]*[rR][^\s-]*'
+    reason: rm with recursive flags (-r/-R) — hard block
+  - pattern: '\brm\s+--recursive\b'
+    reason: rm --recursive — hard block
+  - pattern: '\brm\s+(-\S+\s+)*-[^\s-]*f[^\s-]*'
+    reason: rm with force flag (-f, non-recursive) — confirm before delete
+    ask: true
+  - pattern: '\brm\s+--force\b'
+    reason: rm --force (non-recursive) — confirm before delete
+    ask: true
+  - pattern: '\bsudo\s+rm\b'
+    reason: sudo rm
+
+  # --- git: history destruction (BLOCK) + reversible writes (ASK). Force/delete BEFORE catch-alls. ---
+  - pattern: '\bgit\s+reset\s+--hard\b'
+    reason: git reset --hard (loses uncommitted work)
+  - pattern: '\bgit\s+push\s+.*--force(?!-with-lease)'
+    reason: git push --force (use --force-with-lease)
+  - pattern: '\bgit\s+push\s+(-[^\s]*)*-f\b'
+    reason: git push -f (use --force-with-lease)
+  - pattern: '\bgit\s+push\s+\S+\s+--delete\b'
+    reason: git push --delete (deletes remote branch)
+    ask: true
+  - pattern: '\bgit\s+push\s+\S+\s+:\S'
+    reason: git push <remote> :branch (old remote-delete syntax)
+    ask: true
+  - pattern: '\bgit\s+push\b'
+    reason: git push (writes to remote) — confirm before pushing
+    ask: true
+  - pattern: '\bgit\s+clean\s+(-[^\s]*)*-[fd]'
+    reason: git clean with force/directory flags
+  - pattern: '\bgit\s+filter-branch\b'
+    reason: git filter-branch (rewrites history)
+  - pattern: '\bgit\s+stash\s+clear\b'
+    reason: git stash clear (deletes ALL stashes)
+  - pattern: '\bgit\s+reflog\s+expire\b'
+    reason: git reflog expire (destroys recovery mechanism)
+  - pattern: '\bgit\s+gc\s+.*--prune=now'
+    reason: git gc --prune=now (can lose dangling commits)
+  - pattern: '\bgit\s+checkout\s+--\s*\.'
+    reason: Discards all uncommitted changes
+    ask: true
+  - pattern: '\bgit\s+restore\s+\.'
+    reason: Discards all uncommitted changes
+    ask: true
+  - pattern: '\bgit\s+stash\s+drop\b'
+    reason: Permanently deletes a stash
+    ask: true
+  - pattern: '\bgit\s+branch\s+(-[^\s]*)*-D'
+    reason: Force-deletes branch (even if unmerged) — recoverable via reflog while unexpired
+    ask: true
+  - pattern: '\bgit\s+commit\b'
+    reason: git commit (writes history) — confirm before committing
+    ask: true
+
+  # --- SQL: destructive schema/data ops (BLOCK) ---
+  - pattern: '\bDROP\s+TABLE\b'
+    reason: DROP TABLE
+  - pattern: '\bDROP\s+DATABASE\b'
+    reason: DROP DATABASE
+  - pattern: '\bDROP\s+SCHEMA\b'
+    reason: DROP SCHEMA
+  - pattern: '\bTRUNCATE\s+TABLE\b'
+    reason: TRUNCATE TABLE
+  - pattern: '\bDELETE\s+FROM\s+\w+\s*;'
+    reason: DELETE without WHERE clause
+  - pattern: 'DELETE\s+\*\s+FROM'
+    reason: DELETE * FROM (will delete ALL rows)
+
+  # --- filesystem / device / permissions / process nukes (BLOCK) ---
+  - pattern: '\bchmod\s+(-[^\s]+\s+)*777\b'
+    reason: chmod 777 (world writable)
+  - pattern: '\bchown\s+-[Rr].*\broot\b'
+    reason: recursive chown involving root
+  - pattern: '\bmkfs\.'
+    reason: filesystem format command
+  - pattern: '\bdd\s+.*of=/dev/'
+    reason: dd writing to device
+  - pattern: '\bkill\s+-9\s+-1\b'
+    reason: kill -9 -1 (kills all processes)
+  - pattern: '\bkillall\s+-9\b'
+    reason: killall -9
+  - pattern: '\bpkill\s+-9\b'
+    reason: pkill -9
+  - pattern: '\bhistory\s+-c\b'
+    reason: clearing shell history
+
+  # --- AWS destructive (BLOCK) ---
+  - pattern: '\baws\s+s3\s+rm\s+.*--recursive'
+    reason: aws s3 rm --recursive (deletes all objects)
+  - pattern: '\baws\s+s3\s+rb\s+.*--force'
+    reason: aws s3 rb --force (force-removes bucket)
+  - pattern: '\baws\s+ec2\s+terminate-instances\b'
+    reason: aws ec2 terminate-instances
+  - pattern: '\baws\s+rds\s+delete-db-instance\b'
+    reason: aws rds delete-db-instance
+  - pattern: '\baws\s+cloudformation\s+delete-stack\b'
+    reason: aws cloudformation delete-stack (deletes infrastructure)
+  - pattern: '\baws\s+dynamodb\s+delete-table\b'
+    reason: aws dynamodb delete-table
+  - pattern: '\baws\s+eks\s+delete-cluster\b'
+    reason: aws eks delete-cluster
+  - pattern: '\baws\s+lambda\s+delete-function\b'
+    reason: aws lambda delete-function
+  - pattern: '\baws\s+iam\s+delete-role\b'
+    reason: aws iam delete-role
+  - pattern: '\baws\s+iam\s+delete-user\b'
+    reason: aws iam delete-user
+
+  # --- GCP destructive (BLOCK) ---
+  - pattern: '\bgcloud\s+projects\s+delete\b'
+    reason: gcloud projects delete (DELETES ENTIRE PROJECT)
+  - pattern: '\bgcloud\s+compute\s+instances\s+delete\b'
+    reason: gcloud compute instances delete
+  - pattern: '\bgcloud\s+sql\s+instances\s+delete\b'
+    reason: gcloud sql instances delete
+  - pattern: '\bgcloud\s+container\s+clusters\s+delete\b'
+    reason: gcloud container clusters delete (GKE)
+  - pattern: '\bgcloud\s+storage\s+rm\s+.*-r'
+    reason: gcloud storage rm -r (recursive delete)
+  - pattern: '\bgcloud\s+functions\s+delete\b'
+    reason: gcloud functions delete
+  - pattern: '\bgcloud\s+iam\s+service-accounts\s+delete\b'
+    reason: gcloud iam service-accounts delete
+  - pattern: '\bgcloud\s+run\s+services\s+delete\b'
+    reason: gcloud run services delete (deletes Cloud Run service)
+  - pattern: '\bgcloud\s+run\s+jobs\s+delete\b'
+    reason: gcloud run jobs delete (deletes Cloud Run job)
+  - pattern: '\bgcloud\s+services\s+disable\b'
+    reason: gcloud services disable (disables GCP APIs)
+  - pattern: '\bgcloud\s+iam\s+roles\s+delete\b'
+    reason: gcloud iam roles delete (deletes IAM role)
+
+  # --- Firebase destructive (BLOCK) ---
+  - pattern: '\bfirebase\s+projects:delete\b'
+    reason: firebase projects:delete (deletes entire project)
+  - pattern: '\bfirebase\s+firestore:delete\s+.*--all-collections'
+    reason: firebase firestore:delete --all-collections (wipes all data)
+  - pattern: '\bfirebase\s+database:remove\b'
+    reason: firebase database:remove (wipes Realtime DB)
+  - pattern: '\bfirebase\s+hosting:disable\b'
+    reason: firebase hosting:disable
+  - pattern: '\bfirebase\s+functions:delete\b'
+    reason: firebase functions:delete
+
+  # --- Vercel / Netlify / Wrangler destructive (BLOCK) ---
+  - pattern: '\bvercel\s+remove\s+.*--yes'
+    reason: vercel remove --yes (removes deployment)
+  - pattern: '\bvercel\s+projects\s+rm\b'
+    reason: vercel projects rm (deletes project)
+  - pattern: '\bvercel\s+env\s+rm\b'
+    reason: vercel env rm (removes env variables)
+  - pattern: '\bvercel\s+domains\s+rm\b'
+    reason: vercel domains rm (removes custom domain)
+  - pattern: '\bvercel\s+rm\b'
+    reason: vercel rm (removes deployment)
+  - pattern: '\bnetlify\s+sites:delete\b'
+    reason: netlify sites:delete (deletes entire site)
+  - pattern: '\bnetlify\s+functions:delete\b'
+    reason: netlify functions:delete
+  - pattern: '\bwrangler\s+delete\b'
+    reason: wrangler delete (deletes Worker)
+  - pattern: '\bwrangler\s+r2\s+bucket\s+delete\b'
+    reason: wrangler r2 bucket delete
+  - pattern: '\bwrangler\s+kv:namespace\s+delete\b'
+    reason: wrangler kv:namespace delete
+  - pattern: '\bwrangler\s+d1\s+delete\b'
+    reason: wrangler d1 delete (deletes database)
+  - pattern: '\bwrangler\s+queues\s+delete\b'
+    reason: wrangler queues delete
+
+# zeroAccessPaths — minimatch glob on read/write/edit paths. dot: true enabled.
+# Patterns MUST be true globs; suffix-form substrings no longer match. zeroAccess ALWAYS hard-blocks.
+zeroAccessPaths:
+  # --- env / direnv ---
+  - "**/.env*"
+  - "**/.envrc"
+
+  # --- SSH / cloud creds / key dirs ---
+  - "**/.ssh/**"
+  - "**/.aws/**"
+  - "**/.gnupg/**"
+  - "**/.config/gcloud/**"
+  - "**/.azure/**"
+  - "**/.docker/**"
+  - "**/.kube/**"
+  - "**/kubeconfig"
+
+  # --- private keys / certs ---
+  - "**/*.pem"
+  - "**/*.p12"
+  - "**/*.pfx"
+  - "**/id_rsa"
+  - "**/id_ecdsa"
+  - "**/id_ed25519"
+  - "**/id_dsa"
+
+  # --- credential / service-account JSON ---
+  - "**/credentials.json"
+  - "**/*serviceAccount*.json"
+  - "**/*service-account*.json"
+  - "**/firebase-adminsdk*.json"
+  - "**/serviceAccountKey.json"
+
+  # --- Terraform state ---
+  - "**/*.tfstate*"
+  - "**/.terraform/**"
+
+  # --- deploy-platform local dirs ---
+  - "**/.vercel/**"
+  - "**/.netlify/**"
+  - "**/.supabase/**"
+
+  # --- net-auth files ---
+  - "**/.netrc"
+  - "**/.npmrc"
+  - "**/.pypirc"
+  - "**/.git-credentials"
+
+  # --- DB dumps ---
+  - "**/dump.sql"
+  - "**/backup.sql"
+  - "**/*.dump"
+
+# readOnlyPaths — minimatch glob; blocks write/edit (reads ALLOWED). Hard-block, no ask.
+# Protects generated/external artifacts the agent should never overwrite.
+readOnlyPaths:
+  # --- dependency lockfiles (regenerated by tooling, not hand-edited) ---
+  - "**/package-lock.json"
+  - "**/yarn.lock"
+  - "**/pnpm-lock.yaml"
+  - "**/bun.lockb"
+  - "**/uv.lock"
+  - "**/poetry.lock"
+  - "**/Gemfile.lock"
+  - "**/Pipfile.lock"
+  - "**/Cargo.lock"
+  - "**/go.sum"
+  - "**/composer.lock"
+  - "**/npm-shrinkwrap.json"
+  - "**/flake.lock"
+  - "**/*.lock"
+
+  # --- system directories (absolute; OS-owned) ---
+  - "/etc/**"
+  - "/usr/**"
+  - "/bin/**"
+  - "/sbin/**"
+  - "/boot/**"
+
+  # --- build output (regenerated; never hand-edited) ---
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/.next/**"
+  - "**/.nuxt/**"
+  - "**/.output/**"
+
+  # --- minified bundles (generated; editing them is always wrong) ---
+  - "**/*.min.js"
+  - "**/*.min.css"
+
+  # --- language caches / venvs (generated) ---
+  - "**/__pycache__/**"
+  - "**/.venv/**"
+  - "**/venv/**"
+  - "**/target/**"
