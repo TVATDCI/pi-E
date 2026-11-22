@@ -663,3 +663,8 @@ export function writeRulesViaBroker(content: string): boolean {
   return r !== null && r.ok === true;
 }
 
+// Library module (imported by mini-damage-control.ts + tests), not a standalone
+// extension. The no-op default factory satisfies the extension loader's default-
+// export contract — same pattern as background-helpers.ts.
+export default function () {}
+
