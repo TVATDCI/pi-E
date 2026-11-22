@@ -1,0 +1,19 @@
+# minidc-mounts.service — fd-bound mount helper (design §4.6.2 P5 step 2)
+# install.sh substitutes the placeholder variables at P5 and refuses to install any
+# file that still carries one (fail-closed).
+[Unit]
+Description=mini-dc broker mounts (fd-bound helper)
+After=local-fs.target
+Before=minidc-broker.service
+ConditionPathExists=@BACKING_ROOT@/store
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=90
+ExecStart=@MOUNT_HELPER@
+ExecStop=@MOUNT_HELPER@ --stop
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

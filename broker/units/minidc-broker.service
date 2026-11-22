@@ -1,0 +1,26 @@
+# minidc-broker.service — the broker daemon (design §4.6.2 P5 step 1)
+# install.sh substitutes the placeholder variables at P5 and refuses to install any
+# file that still carries one (fail-closed). Ordering-only dependency on the mounts
+# unit — NO Requires: backing-only independence (a mounts failure never blocks the
+# broker; §4.6.4).
+[Unit]
+Description=mini-dc broker daemon
+After=minidc-mounts.service
+
+[Service]
+Type=notify
+User=minidc-broker
+Group=minidc-broker
+RuntimeDirectory=minidc-broker
+RuntimeDirectoryMode=0755
+TimeoutStartSec=60
+TimeoutStopSec=30
+ExecStart=@NODE_BIN@ --experimental-strip-types @LIB_DIR@/broker/minidc-broker.ts --root @BACKING_ROOT@ --socket @RUN_DIR@/socket --control-socket @RUN_DIR@/control.sock
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@BACKING_ROOT@/store @BACKING_ROOT@/rules @BACKING_ROOT@/state/runtime
+ReadOnlyPaths=@BACKING_ROOT@/state
+
+[Install]
+WantedBy=multi-user.target

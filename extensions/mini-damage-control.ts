@@ -49,6 +49,21 @@ import { join, relative, isAbsolute, sep, dirname, resolve as pathResolve } from
 import * as os from "node:os";
 import { createHash, randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
+// R2 broker round (design gate-r2-amend11): the broker client — mode observation + tuple
+// law + the synchronous bridge. LEGACY sessions never touch it (direct-file law unchanged);
+// BROKER sessions swap the store/rules internals BEHIND THESE UNCHANGED SIGNATURES.
+import {
+  initBrokerClient,
+  brokerClientActive,
+  lastObservation,
+  readGlobalRulesViaBroker,
+  appendTrailViaBroker,
+  readTrailViaBroker,
+  readGrantsViaBroker,
+  createGrantViaBroker,
+  revokeGrantViaBroker,
+  brokerPaths,
+} from "./minidc-broker-client.ts";
 import {
   matchesKey,
   Key,
@@ -119,6 +134,29 @@ const GLOBAL_RULES_PATH = join(
   "mini-dc-rules.yaml",
 );
 
+// ── R2: mode-derived global rules paths (§4.6.5 dual-path law) ───────────────
+// broker-mode: the rules DIRECTORY mount path; legacy-mode: the legacy filename,
+// UNCHANGED (byte-pinned). Both forms are protected targets in BOTH modes (Tier 0).
+function globalRulesPaths(): string[] {
+  const p = brokerPaths();
+  return [p.legacyRulesPath, p.attestedRulesPath, join(p.attestedRulesPath, "rules.yaml")];
+}
+// Broker-mode state, set ONCE at session_start by the §4.6.5a observation (never
+// runtime-switchable by the extension — §4.7). UNAVAILABLE/CONFLICT sessions deny bash
+// via rules=null BEFORE any project load (§4.2/§6) and never connect/register.
+let brokerMode = false;
+let modeDegradedReason: string | null = null; // UNAVAILABLE/CONFLICT fixed-error text
+
+/** Fix-round finding 3: the DIRECT-FILE store law runs ONLY for LEGACY sessions
+ *  (and the never-observed pre-init window, which is today's default law). A
+ *  degraded session (UNAVAILABLE/CONFLICT) NEVER touches files directly — its
+ *  evidence rows are lost-evidence-tolerated per §6, exactly like broker-down —
+ *  never a silent direct-file fallback behind the wall's back. */
+function legacyFileLaw(): boolean {
+  const obs = lastObservation();
+  return obs === null || obs.state === "LEGACY";
+}
+
 // AF1 round (2026-11-17): test seam — the harness points the RULES-LOADING global path at a
 // scratch fixture so no test outcome depends on the desk's real global rules file (same
 // discipline as setStoreRootForTesting). Only the session_start load consults this override;
@@ -130,11 +168,18 @@ export function setGlobalRulesPathForTesting(path: string | null): void {
 }
 
 function loadRulesLayer(filepath: string): Rules | null {
-  if (!existsSync(filepath)) return null;
   try {
-    const raw = yamlParse(
-      readFileSync(filepath, "utf8"),
-    ) as Partial<Rules> | null;
+    return parseRulesLayer(readFileSync(filepath, "utf8"));
+  } catch {
+    return null; // absent or unreadable → treat as absent (fail-closed for that layer)
+  }
+}
+
+/** Parse a rules layer from CONTENT (R2: broker read-rules serves content; the client
+ *  parses + validates — §4.2). Parse failure ⇒ null (unavailable, never a guess). */
+export function parseRulesLayer(text: string): Rules | null {
+  try {
+    const raw = yamlParse(text) as Partial<Rules> | null;
     if (!raw) return null;
     const patterns: Rule[] = (raw.bashToolPatterns ?? []).map((r) => ({
       pattern: r.pattern,
@@ -432,8 +477,20 @@ function withDirLock<T>(dir: string, name: string, fn: () => T): T {
   }
 }
 
-/** Append one trail entry. Best-effort evidence [C8]: failures never block the gate. */
+/** Append one trail entry. Best-effort evidence [C8]: failures never block the gate.
+ *  R2: broker-mode routes through the client — the ORIGIN is derived centrally here
+ *  (actor==="gate" ⇔ origin=gate, §4.4.4: every gate row flows through this one point)
+ *  and the server stamps the actor (seat rows: claim grade; gate rows: verbatim). */
 export function appendTrail(slug: string, entry: TrailEntry): boolean {
+  if (!legacyFileLaw()) {
+    // broker-mode desks (healthy OR degraded) route through the client; a degraded
+    // session's bridge is absent ⇒ the op's degraded return (evidence lost per §6)
+    try {
+      return appendTrailViaBroker(slug, entry);
+    } catch {
+      return false; // degraded — best-effort tolerated, never a hang
+    }
+  }
   try {
     const dir = storeDirFor(slug);
     mkdirSync(dir, { recursive: true });
@@ -447,8 +504,16 @@ export function appendTrail(slug: string, entry: TrailEntry): boolean {
 }
 
 /** Read the trail. Returns null on corruption — PRIOR composes as ABSENT (degradation law:
- *  absent/corrupt trail = absent line), never a guessed partial history. */
+ *  absent/corrupt trail = absent line), never a guessed partial history. R2: broker-mode
+ *  reads ride the registered connection (worker: own slug — the server enforces). */
 export function readTrail(slug: string): TrailEntry[] | null {
+  if (!legacyFileLaw()) {
+    try {
+      return readTrailViaBroker(slug);
+    } catch {
+      return null;
+    }
+  }
   try {
     const raw = readFileSync(trailPathFor(slug), "utf8");
     const out: TrailEntry[] = [];
@@ -690,7 +755,7 @@ function tokenBasedDForm(command: string): string | null {
   // removal cannot synthesize a token that isn't there. Shared by every D family below.
   const restDeEnv = rawTokens
     .slice(1)
-    .map((t) => t.replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, ""))
+    .map((t) => elideExpansions(expandKnownVarOperators(t)))
     .map(normalizeShellToken)
     .filter(Boolean);
   const variants = [rest, restDeEnv];
@@ -1025,6 +1090,21 @@ export function buildDecisionHeader(input: {
 // ═════════════════════════════════════════════════════════════════════════════
 
 export function loadGrants(slug: string): Grant[] {
+  if (!legacyFileLaw()) {
+    try {
+      const rows = readGrantsViaBroker(slug);
+      if (rows === null) return []; // degraded ⇒ no grants honored (fail-closed)
+      return rows.filter(
+        (g) =>
+          !!g &&
+          typeof g.id === "string" &&
+          typeof g.pattern === "string" &&
+          g["class-filter"] === "R",
+      ) as Grant[];
+    } catch {
+      return [];
+    }
+  }
   try {
     const raw = yamlParse(readFileSync(grantsFileFor(slug), "utf8")) as
       | { grants?: Grant[] }
@@ -1045,6 +1125,9 @@ export function loadGrants(slug: string): Grant[] {
 }
 
 function saveGrants(slug: string, grants: Grant[]): boolean {
+  // R2 broker-mode: grants mutate ONLY through create-grant/revoke-grant ops (server-
+  // enforced Q3 law); the bulk write path never runs there.
+  if (!legacyFileLaw()) return false;
   const dir = storeDirFor(slug);
   mkdirSync(dir, { recursive: true });
   return withDirLock(dir, "grants", () => {
@@ -1066,8 +1149,24 @@ export function createGrant(input: {
   if (seat === "firstmate" && input.via !== "surface") {
     return { error: "firstmate creates R-class grants via the answer surface only (Q3)" };
   }
-  const grants = loadGrants(slug);
   const now = input.now ?? new Date();
+  if (!legacyFileLaw()) {
+    // R2: the store write routes through the broker op; the server re-enforces the Q3
+    // grade law and stamps creator-seat from the connection's claim (never client-supplied).
+    const r = createGrantViaBroker(slug, pattern.trim());
+    if ("error" in r) return { error: r.error };
+    const fresh = loadGrants(slug).find((g) => g.id === r.id);
+    return (
+      fresh ?? {
+        id: r.id,
+        "created-at": now.toISOString(),
+        "creator-seat": seat,
+        pattern: pattern.trim(),
+        "class-filter": "R" as const,
+      }
+    );
+  }
+  const grants = loadGrants(slug);
   const grant: Grant = {
     id: `g-${now.getTime().toString(36)}-${randomBytes(3).toString("hex")}`,
     "created-at": now.toISOString(),
@@ -1081,6 +1180,9 @@ export function createGrant(input: {
 }
 
 export function revokeGrant(slug: string, id: string): boolean {
+  if (!legacyFileLaw()) {
+    return revokeGrantViaBroker(slug, id);
+  }
   const grants = loadGrants(slug);
   const next = grants.filter((g) => g.id !== id);
   if (next.length === grants.length) return false;
@@ -1089,13 +1191,13 @@ export function revokeGrant(slug: string, id: string): boolean {
 
 /** Grant patterns are PREFIX globs (`<head> *`, gate-derived); minimatch honored for
  *  hand-authored richer globs. Only R asks can ever match — never-D is structural. */
-export function matchGrant(
-  slug: string,
+export function matchGrantFromList(
+  grants: Grant[],
   command: string,
   cls: DecisionClass,
 ): Grant | null {
   if (cls !== "R") return null;
-  for (const g of loadGrants(slug)) {
+  for (const g of grants) {
     const prefix = g.pattern.replace(/ \*$/, "");
     if (command === prefix || command.startsWith(`${prefix} `)) return g;
     try {
@@ -1105,6 +1207,30 @@ export function matchGrant(
     }
   }
   return null;
+}
+
+export function matchGrant(
+  slug: string,
+  command: string,
+  cls: DecisionClass,
+): Grant | null {
+  return matchGrantFromList(loadGrants(slug), command, cls);
+}
+
+/** N1 (§4.5, the exact wording): the session's grant cache decides only RELEVANCE.
+ *  Before any grant-matched auto-proceed the client synchronously re-fetches the
+ *  slug's grants and re-matches the FRESH list — no grant-matched ask whose validation
+ *  BEGINS after the revocation commit will auto-proceed. Broker unreachable at
+ *  validation time ⇒ the grant is NOT honored (dialog/park — fail-closed trade). */
+export function revalidateGrantFresh(
+  slug: string,
+  cachedMatch: Grant,
+  command: string,
+  cls: DecisionClass,
+): boolean {
+  const fresh = loadGrants(slug); // broker-mode: a live read-grants roundtrip
+  const still = matchGrantFromList(fresh, command, cls);
+  return still !== null && still.id === cachedMatch.id;
 }
 
 /** Gate-derived grant pattern from the ACTUAL command (never asker text): git →
@@ -1692,6 +1818,20 @@ function underStorePrefix(p: string, storeReal: string): boolean {
 // N1 (2026-11-17 recheck): bash words like `$HOME/.pi/...` and `${TMPDIR}/...` carry env
 // refs the OS expands at execution — expand the KNOWN location vars before analysis
 // (arbitrary `$VAR` values are unknowable at gate time; that residual stays documented).
+// ── R2 widening (design §9, r4recheck §3 fix — rides with the broker round) ──
+// The unset/empty-expansion class BEYOND letter-named grammar now elides too:
+// positionals/specials ($1 $@ $* $# $? $! $-), ANY braced expansion (${E:-}, ${E:0},
+// ${E^^}, ${E[@]}, …), and known-var OPERATOR spellings pre-expand (${HOME:-x} → $HOME).
+// Documented fail-closed over-block trade: non-empty-expansion spellings like ${#E}
+// (length — executes as literal 0) also elide; deny is the safe direction, same trade
+// the N2 fix already made for set-nonempty elisions.
+const EXPANSION_ELISION_RE = /\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]/g;
+function elideExpansions(s: string): string {
+  return s.replace(EXPANSION_ELISION_RE, "");
+}
+function expandKnownVarOperators(s: string): string {
+  return s.replace(/\$\{(HOME|TMPDIR)([^}]*)\}/g, "$$$1");
+}
 function expandShellEnvVars(s: string): string {
   const home = envSource().HOME || os.homedir();
   const tmp = envSource().TMPDIR || os.tmpdir();
@@ -1789,21 +1929,70 @@ export default function (pi: ExtensionAPI) {
         rules.zeroAccessPaths.length +
         rules.readOnlyPaths.length
       : 0;
+    // R2 status law (§4.2/§4.6.5a/§4.7): the state is reported honestly — the fixed
+    // UNAVAILABLE/CONFLICT texts, the broker/legacy mode notes, and today's legacy line
+    // for usable-legacy desks (byte-pinned behavior preserved).
+    if (modeDegradedReason) {
+      const note =
+        modeDegradedReason === "conflict"
+          ? "install-mode conflict (run sudo install.sh --repair-mode)"
+          : "rules unavailable — broker unreachable/invalid, session unregistered, install-mode conflict or unresolvable, mounts unhealthy, or mounts service not active";
+      return `🛡️ mini-dc: DENY-BASH (${note}) · ${grantsCount} grants · ${sessionScopeCount()} scopes`;
+    }
     const base = rules
       ? `🛡️ mini-dc: ${count} rules (${rulesSource}, ${mode})`
       : `🛡️ mini-dc: DENY-BASH (no rules, ${mode})`;
-    return `${base} · ${grantsCount} grants · ${sessionScopeCount()} scopes`;
+    const modeNote = brokerMode
+      ? " · broker"
+      : lastObservation()?.marker === "legacy"
+        ? " · legacy mode — Tier-0 only, no broker wall"
+        : "";
+    return `${base}${modeNote} · ${grantsCount} grants · ${sessionScopeCount()} scopes`;
   };
 
   pi.on("session_start", async (_event, ctx) => {
-    // Part A: load global floor + project override, merge deny-additive
-    const globalRules = loadRulesLayer(globalRulesPathOverride ?? GLOBAL_RULES_PATH);
-    const projectPath = join(ctx.cwd, ".pi", "mini-dc-rules.yaml");
-    const projectRules = loadRulesLayer(projectPath);
+    // ── R2 (§4.6.5a): the mode observation runs FIRST — tri-state probes, before any
+    // tuple selection and before ANY registration attempt by this session's own client.
+    // UNAVAILABLE/CONFLICT ⇒ rules=null BEFORE any project load (the project layer is
+    // not consulted for enablement) ⇒ Part B denies bash for the session; the session's
+    // own client never connects, never registers, starts no background loop (the
+    // scoped pin). LEGACY ⇒ today's direct-file law, byte-unchanged.
+    const obs = await initBrokerClient(envSource());
+    brokerMode = obs.state === "BROKER";
+    modeDegradedReason =
+      obs.state === "UNAVAILABLE" ? (obs.reason ?? "unavailable")
+      : obs.state === "CONFLICT" ? "conflict"
+      : null;
 
-    rules = mergeRules(globalRules, projectRules);
+    let globalRules: Rules | null = null;
+    let globalAbsent = false;
+    if (brokerMode) {
+      const r = readGlobalRulesViaBroker();
+      if (r.state === "present") {
+        globalRules = parseRulesLayer(r.content); // parse/validation failure ⇒ unavailable
+        if (!globalRules) {
+          modeDegradedReason = modeDegradedReason ?? "rules-parse-failed";
+        }
+      } else if (r.state === "absent") {
+        globalAbsent = true; // broker-confirmed absence (ENOENT-only, gates healthy)
+      } else {
+        // unavailable — authorization refusal included: refusal is unavailability, never absence
+        modeDegradedReason = modeDegradedReason ?? `broker:${r.reason}`;
+      }
+    } else if (!modeDegradedReason) {
+      globalRules = loadRulesLayer(globalRulesPathOverride ?? GLOBAL_RULES_PATH);
+    }
 
-    if (!rules) {
+    // Part A (legacy law): load global floor + project override, merge deny-additive.
+    // Degraded sessions keep rules=null BEFORE the project load (§4.2 — the project layer
+    // is not consulted for enablement when the global floor is unavailable).
+    const projectRules = modeDegradedReason ? null : loadRulesLayer(join(ctx.cwd, ".pi", "mini-dc-rules.yaml"));
+
+    rules = modeDegradedReason ? null : mergeRules(globalRules, projectRules);
+
+    if (modeDegradedReason) {
+      rulesSource = "none";
+    } else if (!rules) {
       rulesSource = "none";
     } else if (globalRules && projectRules) {
       rulesSource = "merged";
@@ -1824,7 +2013,9 @@ export default function (pi: ExtensionAPI) {
         rules.zeroAccessPaths.length +
         rules.readOnlyPaths.length
       : 0;
-    if (rules) {
+    if (obs.error && (obs.state === "UNAVAILABLE" || obs.state === "CONFLICT")) {
+      ctx.ui.notify(obs.error, "error");
+    } else if (rules) {
       ctx.ui.notify(`🛡️ mini-dc: ${count} rules (${rulesSource})`, "info");
     } else {
       ctx.ui.notify(
@@ -1833,6 +2024,7 @@ export default function (pi: ExtensionAPI) {
       );
     }
     ctx.ui.setStatus("mini-dc", statusText());
+    void globalAbsent;
   });
 
   pi.registerCommand("dc-mode", {
@@ -1918,12 +2110,23 @@ export default function (pi: ExtensionAPI) {
         try { return realpathSync(r); } catch { return r; }
       });
       const rulesReal = pathResolve(GLOBAL_RULES_PATH);
+      // R2: the mode-derived rules surfaces are protected in BOTH modes — every legacy
+      // form retained, the new directory forms added (a vladi plant at the legacy path
+      // is inert in broker mode but stays lexically guarded; pinned as a fixture).
+      const rulesReals = [rulesReal, ...globalRulesPaths().map((gp) => pathResolve(gp))];
       const rulesForms = [
         rulesReal,
         GLOBAL_RULES_PATH,
         "~/.pi/agent/mini-dc-rules.yaml",
         "$HOME/.pi/agent/mini-dc-rules.yaml",
         "${HOME}/.pi/agent/mini-dc-rules.yaml",
+        "~/.pi/agent/mini-dc-rules",
+        "$HOME/.pi/agent/mini-dc-rules",
+        "${HOME}/.pi/agent/mini-dc-rules",
+        ".pi/agent/mini-dc-rules",
+        "$HOME/.pi/agent/mini-dc-rules/rules.yaml",
+        "${HOME}/.pi/agent/mini-dc-rules/rules.yaml",
+        "mini-dc-rules/rules.yaml",
       ];
       const storeRefForms = [
         ...roots,
@@ -1945,11 +2148,13 @@ export default function (pi: ExtensionAPI) {
         const candidates = [p, expandTilde(p), join(ctx.cwd, p)];
         // Lexical net + realpath-of-nearest-existing-ancestor net per protected root, plus
         // the global rules file as a protected target in its own right (N1).
-        const lexical = candidates.some((c) => roots.some((r) => c.startsWith(r)) || c === rulesReal);
+        const lexical = candidates.some(
+          (c) => roots.some((r) => c.startsWith(r)) || rulesReals.some((rr) => c === rr || c.startsWith(rr + sep)),
+        );
         const viaReal = candidates.some((c) => {
           const resolved = realpathNearest(c);
           if (!resolved) return false;
-          return rootReal.some((rr) => underStorePrefix(resolved, rr)) || resolved === rulesReal;
+          return rootReal.some((rr) => underStorePrefix(resolved, rr)) || rulesReals.some((rr) => resolved === rr || resolved.startsWith(rr + sep));
         });
         if (lexical || viaReal) {
           violationWhat = `privileged mini-dc store/rules path: ${p}`;
@@ -1975,32 +2180,34 @@ export default function (pi: ExtensionAPI) {
               const tok = expandShellEnvVars(expandTilde(rawVariant));
               const norm = pathResolve(isAbsolute(tok) ? tok : join(ctx.cwd, tok));
               if (rootReal.some((rr) => underStorePrefix(norm, rr)) || roots.some((r) => norm.startsWith(r + sep) || norm === r)) return true;
-              if (norm === rulesReal) return true;
+              if (rulesReals.some((rr) => norm === rr || norm.startsWith(rr + sep))) return true;
               const resolved = realpathNearest(norm);
-              if (resolved && (rootReal.some((rr) => underStorePrefix(resolved, rr)) || resolved === rulesReal)) return true;
+              if (resolved && (rootReal.some((rr) => underStorePrefix(resolved, rr)) || rulesReals.some((rr) => resolved === rr || resolved.startsWith(rr + sep)))) return true;
               if (GLOB_CHARS.test(tok)) {
                 return rootReal.some((rr) => globTokenTouchesStore(tok, rr, ctx.cwd));
               }
               return false;
             });
           });
-          // N2 (recheck round 3): unset/empty-var mid-name elision (mini-d${E}c with E unset)
-          // reconstructs protected paths at execution. Expand KNOWN vars first, then elide
-          // any remaining $VAR/`${VAR}` segments, then strip quotes (quote boundaries end
-          // var names — elision on the raw token, mirroring the O1-fold discipline). This
-          // intentionally over-blocks set-nonempty elisions: fail-closed, same trade as O1.
+          // N2 (recheck round 3) + R2 widening (design §9): unset/empty-var mid-name elision
+          // (mini-d${E}c, AND the beyond-letter-grammar class — mini-d$1c, mini-d${E:-}c,
+          // mini-d$@c, ${HOME:-x}/…): expand KNOWN vars + operator spellings first, then
+          // elide the whole unset/empty expansion class, then strip quotes. Fail-closed
+          // over-block on set-nonempty spellings — the documented trade (r4recheck §3).
           if (!tokenLevel) {
             for (const rawTok of tokens) {
               const elided = expandTilde(
-                expandShellEnvVars(rawTok).replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, "").replace(/['"]/g, ""),
+                expandShellEnvVars(
+                  elideExpansions(expandShellEnvVars(expandKnownVarOperators(rawTok))),
+                ).replace(/['"]/g, ""),
               );
               if (elided === rawTok || !elided.includes("/")) continue;
               const tok = expandShellEnvVars(expandTilde(elided)); // idempotent second pass
               const norm = pathResolve(isAbsolute(tok) ? tok : join(ctx.cwd, tok));
               if (rootReal.some((rr) => underStorePrefix(norm, rr)) || roots.some((r) => norm.startsWith(r + sep) || norm === r)) { tokenLevel = true; break; }
-              if (norm === rulesReal) { tokenLevel = true; break; }
+              if (rulesReals.some((rr) => norm === rr || norm.startsWith(rr + sep))) { tokenLevel = true; break; }
               const resolved = realpathNearest(norm);
-              if (resolved && (rootReal.some((rr) => underStorePrefix(resolved, rr)) || resolved === rulesReal)) { tokenLevel = true; break; }
+              if (resolved && (rootReal.some((rr) => underStorePrefix(resolved, rr)) || rulesReals.some((rr) => resolved === rr || resolved.startsWith(rr + sep)))) { tokenLevel = true; break; }
             }
           }
         }
@@ -2008,10 +2215,11 @@ export default function (pi: ExtensionAPI) {
         if (!lexical && !tokenLevel) {
           // Space-quote split net: a protected path torn apart by quoted whitespace still
           // lands in the quote-stripped, whitespace-free command (N1: env + tilde forms of
-          // the store AND the rules file included; N2: $VAR-segment-elided flat form too —
-          // greedy, backstop-only, the token net above is the precise fix).
-          const flat = cmd.replace(/['"\\]/g, "").replace(/\s+/g, "");
-          const flatDeEnv = flat.replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, "");
+          // the store AND the rules file included; N2 + R2: the whole unset/empty expansion
+          // class elides from the flat form too — greedy, backstop-only, the token net
+          // above is the precise fix).
+          const flat = expandKnownVarOperators(cmd).replace(/['"\\]/g, "").replace(/\s+/g, "");
+          const flatDeEnv = elideExpansions(flat);
           const forms = storeRefForms.concat(rulesForms).map((form) => form.replace(/['"\\]/g, "").replace(/\s+/g, ""));
           squashed = forms.some((form) => flat.includes(form) || (flatDeEnv !== flat && flatDeEnv.includes(form)));
         }
@@ -2185,7 +2393,11 @@ export default function (pi: ExtensionAPI) {
           return { block: false };
         }
         const grant = matchGrant(slug, command, clsInfo.cls);
-        if (grant) {
+        if (grant && revalidateGrantFresh(slug, grant, command, clsInfo.cls)) {
+          // N1 (§4.5, exact wording): the cache decided RELEVANCE; the fresh re-fetch and
+          // re-match above are the auto-proceed gate — a grant whose validation BEGINS
+          // after the revocation commit never auto-proceeds; broker unreachable at
+          // validation ⇒ the grant is NOT honored ⇒ the ask dialogs (fail-closed trade).
           appendTrail(slug, {
             v: 1,
             ts: new Date().toISOString(),
