@@ -237,7 +237,7 @@ function main(): void {
     check("ledger 0600 root-only class", modeOf(LEDGER) === 0o600);
     check("units written with substituted paths", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes(T + "/var/lib/minidc-broker") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("@BACKING_ROOT@"));
     check("mounts unit carries ExecStop --stop + TimeoutStopSec=90", fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("ExecStop=") && fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("TimeoutStopSec=90"));
-    check("broker unit: Type=notify + TimeoutStartSec=60 + TimeoutStopSec=30 + no Requires", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Type=notify") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Requires="));
+    check("broker unit: Type=simple + TimeoutStartSec=60 + TimeoutStopSec=30 + no Requires", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Type=simple") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Requires="));
     const ledgerDoc = JSON.parse(fs.readFileSync(LEDGER, "utf8")) as { "created-stubs"?: string[]; "marker-pre"?: { present?: boolean } }; // cleanup F1: the marker-pre index
     // P7 (commit) DELETES the aside copies per the design — post-commit rollback is
     // "reinstall from the manifest copies inside the backing tree itself"

@@ -499,7 +499,7 @@ phase_p5_activate() {
 }
 
 brokerctl_status_ok() {
-  local ctl="$SCRIPT_DIR/minidc-brokerctl"
+  local ctl="$SCRIPT_DIR/minidc-brokerctl.ts"
   if [[ -n "$TEST_ROOT" ]]; then ctl="$STUB_BIN/minidc-brokerctl"; fi
   "$ctl" status --socket "$RUN_DIR/socket" >/dev/null 2>&1
 }

@@ -1,0 +1,8 @@
+{"v":1,"ts":"2026-11-17T14:07:59.487Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"dca3f542da58635a","cls":"G","decision":"deny","scope":"none","message":"This is a smoke test (deny only) That is the reason i denied."}
+{"v":1,"ts":"2026-11-17T14:23:52.262Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"92db3f953402da27","cls":"D","decision":"deny","scope":"none","message":"Some test 2. That is the reason i deny as planned"}
+{"v":1,"ts":"2026-11-17T14:25:25.975Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"21533244fdbdfda7","cls":"D","decision":"deny","scope":"none","message":"smoke test #3 denied as planned"}
+{"v":1,"ts":"2026-11-17T17:27:42.696Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"89b1e2861cc53633","cls":"D","decision":"proceed","scope":"once"}
+{"v":1,"ts":"2026-11-17T17:29:18.236Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"0c98d830ff427ce7","cls":"G","decision":"deny","scope":"none"}
+{"v":1,"ts":"2026-11-17T21:45:37.692Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"7c96919849fe57a0","cls":"D","decision":"proceed","scope":"once"}
+{"v":1,"ts":"2026-11-17T21:46:05.125Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"35535d8aa7a673aa","cls":"D","decision":"proceed","scope":"once"}
+{"v":1,"ts":"2026-11-18T15:17:29.342Z","actor":"captain","pane":"w2S:p1","task":null,"subject":"72418a077b3178e8","cls":"D","decision":"proceed","scope":"once"}

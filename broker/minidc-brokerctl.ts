@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --experimental-strip-types
 // broker/minidc-brokerctl — the thin CLI over the broker (design §7.2, §2 P4/P5).
 //   status                       — OPEN, unauthenticated, non-sensitive
 //   register --role <captain|firstmate> --pid <pid> --spawn-backend <b>
