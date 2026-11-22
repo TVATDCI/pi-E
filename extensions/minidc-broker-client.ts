@@ -20,7 +20,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
-import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
 // ═══════════════ paths + seams ════════════════════════════════════════════════
@@ -268,10 +268,10 @@ export interface BridgeResult<T = unknown> {
 // §4.4.7 sketch — a worker owning the async socket + main Atomics.wait — cannot
 // answer anything during the wait; pinned by a timeline probe: zero worker timer
 // ticks inside a 2 s main-thread wait). The design's own fallback discipline
-// applies (§4.4.5 names the execFileSync CLI bridge with its stated limits — made
+// applies (§4.4.5 names the per-op CLI bridge with its stated limits — made
 // primary here): every op spawns a short-lived helper PROCESS that connects,
 // registers (claim/consume), performs the op, and prints the response frame.
-// execFileSync carries a HARD kill-timeout (3.2 s) — never a hang. The session's
+// per-op helper carries a HARD timeout (3.2 s) — never a hang. The session's
 // kernel identity travels via env (MINIDC_SESSION_PID/STARTTIME — the client-
 // asserted model of D1d; /proc-verified server-side). Degradation law unchanged:
 // any failure ⇒ the op's degraded return per §6.
@@ -284,18 +284,22 @@ let observationState: ModeObservation | null = null;
 // enrollments minted over the owner's connection survive, and consumed workers
 // never re-enter unknown grade. Ops travel: main writes a request line to the
 // owner's stdin (async), the owner forwards over ITS registered connection, and
-// writes the response line to a FIFO; main blocks in readSync on the fifo fd —
-// the OWNER is a separate process, so the empirically-pinned Node stall (worker
-// threads freeze during main-thread blocking) cannot touch it. Owner death closes
-// the fifo (readSync EOF) — never a hang; a stuck-but-alive owner answers within
-// its own 3 s op budget or dies trying.
+// writes the response line to its STDOUT — an anonymous pipe only this process
+// holds (fix2: no name-enumerable fifo, no same-uid response injection); main
+// polls it with readSync — the OWNER is a separate process, so the empirically-
+// pinned Node stall (worker threads freeze during main-thread blocking) cannot
+// touch it. Owner death ⇒ pipe EOF (never a hang) and the NEXT op respawns it; a
+// stuck-but-alive owner answers within its own 3 s op budget or the call degrades.
 interface OwnerState {
   proc: ChildProcess;
-  fifoPath: string;
-  fifoFd: number | null;
+  outFd: number | null; // the stdout pipe fd (internal handle; anonymous pipe —
+  // NOT name-enumerable in /tmp: no same-uid process can inject a response line)
   dead: boolean;
 }
 let owner: OwnerState | null = null;
+// fix2 new-finding-2: owner respawn. A dead owner no longer degrades the session
+// forever — bridgeCall respawns once per call before degrading. Documented in the
+// report as the §6-consistent recovery (bounded: one respawn attempt per op).
 
 export function lastObservation(): ModeObservation | null {
   return observationState;
@@ -320,23 +324,26 @@ function selfStatOf(pid: number): string {
   }
 }
 
+let bridgeEnvs: Record<string, string | undefined> = {};
+
 function startBridge(env: Record<string, string | undefined>): void {
-  const fifoPath = join(os.tmpdir(), `minidc-owner-${process.pid}-${randomBytes(4).toString("hex")}.fifo`);
-  try { fs.unlinkSync(fifoPath); } catch { /* absent */ }
-  execFileSync("mkfifo", ["-m", "600", fifoPath]); // Node has no mkfifo API — the binary, once per session
+  // fix2 new-finding-1: NO named fifo — responses ride the owner's STDOUT (an
+  // anonymous pipe): not name-enumerable anywhere, so no same-uid process can
+  // inject a fabricated response line. The fd comes from the internal handle
+  // (undocumented but stable); readSync on it works with EAGAIN poll-continue.
   const proc = spawn(process.execPath, ["-e", OWNER_SOURCE], {
-    stdio: ["pipe", "ignore", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
       MINIDC_SESSION_PID: String(process.pid),
       MINIDC_SESSION_STARTTIME: selfStatOf(process.pid),
-      MINIDC_OWNER_FIFO: fifoPath,
       MINIDC_SOCKET: brokerPaths().socketPath,
       ...(env["MINIDC_ENROLLMENT"] ? { MINIDC_ENROLLMENT: env["MINIDC_ENROLLMENT"] } : {}),
       ...(env["MINIDC_CLAIM_SECRET"] ? { MINIDC_CLAIM_SECRET: env["MINIDC_CLAIM_SECRET"] } : {}),
     },
   });
-  const st: OwnerState = { proc, fifoPath, fifoFd: null, dead: false };
+  const st: OwnerState = { proc, outFd: null, dead: false };
+  bridgeEnvs = env;
   proc.on("exit", () => { st.dead = true; });
   proc.stderr?.on("data", (d: Buffer) => {
     const m = /C:(ok|fail):(\S*)(?: S:(\S+))?/.exec(d.toString());
@@ -353,20 +360,22 @@ function startBridge(env: Record<string, string | undefined>): void {
       bridgeGradeValue = null;
     }
   });
-  // open the fifo read-end AFTER the owner holds the write end (owner opens r+ at
-  // startup — never blocks; EOF arrives when the owner and every writer dies)
-  const openDeadline = Date.now() + 3000;
-  for (;;) {
-    try {
-      st.fifoFd = fs.openSync(fifoPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
-      break;
-    } catch {
-      if (Date.now() > openDeadline) break;
-      sleepSyncMs(25);
-    }
-  }
+  // no 'data' listener on stdout: the stream stays paused, the fd stays ours alone
+  const handle = (proc.stdout as unknown as { _handle?: { fd?: number } | null })._handle;
+  st.outFd = typeof handle?.fd === "number" ? handle.fd : null;
   owner = st;
   bridgeReady = true;
+}
+
+/** fix2 new-finding-2: respawn the owner after death — the next op relaunches it
+ *  (fresh connect + claim) instead of degrading the session forever. */
+function ensureOwner(): OwnerState | null {
+  const st = owner;
+  if (st && !st.dead) return st;
+  if (!bridgeReady) return null;
+  try { st?.proc.kill("SIGKILL"); } catch { /* gone */ }
+  startBridge(bridgeEnvs);
+  return owner && !owner.dead ? owner : null;
 }
 
 function sleepSyncMs(ms: number): void {
@@ -402,16 +411,11 @@ export async function initBrokerClient(env: Record<string, string | undefined>):
  *  so the main thread's blocking read can never wedge. Exported for direct testing. */
 export const OWNER_SOURCE = `
 const net = require("node:net");
-const fs = require("node:fs");
 const sockPath = process.env.MINIDC_SOCKET;
-const fifoPath = process.env.MINIDC_OWNER_FIFO;
 const pid = Number(process.env.MINIDC_SESSION_PID || 0);
 const starttime = process.env.MINIDC_SESSION_STARTTIME || "";
 let enrollment = process.env.MINIDC_ENROLLMENT || "";
 const claimSecret = process.env.MINIDC_CLAIM_SECRET || "";
-// open the fifo O_RDWR first: never blocks, and it keeps a writer alive for the
-// main thread's read fd even between responses (EOF only when WE die)
-const fifo = fs.openSync(fifoPath, "r+");
 let sock = null;
 let connected = false;
 let registered = false;
@@ -421,8 +425,10 @@ const pending = new Map();
 let backoffN = 0;
 let stopped = false;
 
+// fix2 new-finding-1: responses ride STDOUT — an anonymous pipe, not a
+// name-enumerable fifo; only the parent holds the read end
 function writeResp(obj) {
-  try { fs.writeSync(fifo, JSON.stringify(obj) + "\\n"); } catch (e) { /* reader gone */ }
+  try { process.stdout.write(JSON.stringify(obj) + "\\n"); } catch (e) { /* reader gone */ }
 }
 function send(op, args, cb) {
   if (!sock || !connected) { cb({ ok: false, error: "E_UNAVAILABLE", reason: "owner-disconnected" }); return; }
@@ -480,7 +486,8 @@ function connect() {
   });
 }
 function reClaim() {
-  send("register", { mode: "claim", pid, starttime }, (f) => {
+  // fix2 finding1: EVERY pre-pinned claim carries the secret — re-claims too
+  send("register", { mode: "claim", pid, starttime, ...(claimSecret ? { secret: claimSecret } : {}) }, (f) => {
     if (f.ok === true) {
       registered = true;
       const r = f.result || {};
@@ -492,7 +499,7 @@ function reClaim() {
 const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", (line) => {
-  if (line.trim() === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} try { fs.closeSync(fifo); } catch (e2) {} process.exit(0); }
+  if (line.trim() === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} process.exit(0); }
   let req; try { req = JSON.parse(line); } catch (e) { writeResp({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }); return; }
   send(req.op, req.args, (f) => writeResp(f));
 });
@@ -514,20 +521,24 @@ export function bridgeCall(
   args: Record<string, unknown>,
   timeoutMs = 3200,
 ): BridgeResult | null {
-  const st = owner;
-  if (!bridgeReady || !st || st.dead || st.fifoFd === null) return null;
+  if (!bridgeReady) return null;
+  // fix2 new-finding-2: a dead owner RESPAWNS here (one attempt per call) — the
+  // session recovers on the next op instead of degrading forever
+  const st0 = owner;
+  const st = st0 && !st0.dead && st0.outFd !== null ? st0 : ensureOwner();
+  if (!st || st.outFd === null) return null;
   try {
     st.proc.stdin?.write(`${JSON.stringify({ op, args })}\n`);
-    // poll the owner's fifo — the OWNER is a separate process (immune to the
-    // Node main-thread stall); owner death closes the fifo ⇒ readSync returns EOF.
-    // The fd is O_NONBLOCK: EAGAIN means "not yet" — poll on, bounded by the deadline.
+    // poll the owner's STDOUT pipe (fix2: anonymous, not name-enumerable — no
+    // same-uid response injection); the OWNER is a separate process (immune to
+    // the Node main-thread stall); owner death ⇒ readSync returns EOF.
     const deadline = Date.now() + timeoutMs;
     let line = "";
     const chunk = Buffer.alloc(1 << 16);
     for (;;) {
       let n: number;
       try {
-        n = fs.readSync(st.fifoFd, chunk, 0, chunk.length, null);
+        n = fs.readSync(st.outFd, chunk, 0, chunk.length, null);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "EAGAIN") {
           if (Date.now() > deadline) return null; // budget spent — degraded
@@ -555,13 +566,16 @@ export function bridgeCall(
   }
 }
 
+/** test introspection: the live owner process (kill it to pin the respawn law). */
+export function ownerProcForTest(): ChildProcess | null {
+  return owner ? owner.proc : null;
+}
+
 export function shutdownBrokerClient(): void {
   const st = owner;
   if (st) {
     try { st.proc.stdin?.write("shutdown\n"); } catch { /* gone */ }
     setTimeout(() => { try { st.proc.kill("SIGKILL"); } catch { /* gone */ } }, 250).unref?.();
-    if (st.fifoFd !== null) { try { fs.closeSync(st.fifoFd); } catch { /* gone */ } }
-    try { fs.unlinkSync(st.fifoPath); } catch { /* absent */ }
     owner = null;
   }
   bridgeReady = false;

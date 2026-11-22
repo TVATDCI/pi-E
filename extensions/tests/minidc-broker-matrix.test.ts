@@ -431,7 +431,7 @@ async function main(): Promise<void> {
 
   // ═══ fix-round finding 1: wrong-connector/right-secret DENIED rows ═══
   {
-    section("claim-secret is one-shot and instance-bound (finding 1)");
+    section("claim-secret required on EVERY pre-pinned claim (fix2 finding 1)");
     const root = new C(CTL);
     const kidA = spawnKid();
     const kidB = spawnKid(); // a DIFFERENT live instance — the wrong connector
@@ -442,33 +442,46 @@ async function main(): Promise<void> {
     const w1 = await wrong.call("register", { mode: "claim", pid: kidB.pid, starttime: kidB.starttime, secret });
     check("wrong-connector/right-secret claim REFUSED (secret does not override the instance pin)",
       w1.ok === false && (w1 as { error: string }).error === "E_DENIED_UNREGISTERED");
-    // right connector, right secret: claims — and the secret dies with its use
+    await wrong.close();
+    // THE THIEF ROW (round-one's row here was tautological — it accepted the
+    // thief's success with "|| grade === captain"). Under fix2 the closable half is
+    // pinned as a DENIAL and the unclosable half is pinned HONESTLY as the
+    // documented D1d residual: WITHOUT the secret, a same-uid process asserting
+    // the victim's world-readable pid+starttime NEVER claims (that is the fix —
+    // identity alone bought the row before); WITH a captured secret AND the
+    // victim pin it still claims (no SO_PEERCRED in Node — the daemon cannot see
+    // the connector's pid; the residual is bounded to secret-holders, exactly as
+    // D1b documents). No tautology: both sides asserted explicitly.
+    const thiefNoSecret = new C(SOCK);
+    const tns = await thiefNoSecret.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime });
+    check("thief WITHOUT the secret DENIED even asserting the victim pin (identity alone never claims)",
+      tns.ok === false && (tns as { error: string }).error === "E_DENIED_UNREGISTERED");
+    await thiefNoSecret.close();
+    // no-secret re-claim DENIED — the round-one one-shot law is DELETED: secret-hash
+    // is never nulled, so pid+starttime alone never claims a pre-pinned row
     const right = new C(SOCK);
     const r1 = await right.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime, secret });
-    check("right-connector/right-secret claims (captain)", r1.ok === true && (r1.result as { grade: string }).grade === "captain");
+    check("right connector + right secret claims (captain)", r1.ok === true && (r1.result as { grade: string }).grade === "captain");
     await right.close();
     await sleep(120);
-    // the ONE-SHOT law: a captured secret is worthless after its first use — only
-    // the SAME instance (pid+starttime) re-claims; a thief holding the spent secret
-    // and asserting the victim's identity is refused by the tombstone+pin
+    const noSecret = new C(SOCK);
+    const ns = await noSecret.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime });
+    check("no-secret re-claim DENIED (identity alone never claims a pre-pinned row)",
+      ns.ok === false && (ns as { error: string }).error === "E_DENIED_UNREGISTERED");
+    await noSecret.close();
     const reuse = new C(SOCK);
     const rr = await reuse.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime, secret });
-    check("secret is ONE-SHOT: after first use the row re-claims by identity only (secret ignored)",
+    check("re-claim WITH the secret succeeds (secret persists — never tombstoned)",
       rr.ok === true && (rr.result as { grade: string }).grade === "captain");
     await reuse.close();
-    const thief = new C(SOCK);
-    const tt = await thief.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime, secret: secret });
-    check("same-instance claim still identity-gated (a spent secret never claims another row)",
-      tt.ok === false || (tt.result as { grade: string } | undefined)?.grade === "captain");
-    // a SECOND pre-pinned row for kidB: the spent secret must not claim it
+    // a SECOND pre-pinned row for kidB: A's secret must not claim it
     const reg2 = (await root.call("register", { mode: "plain", role: "firstmate", pid: kidB.pid, "spawn-backend": "b" })) as { ok: boolean; result?: { "claim-secret"?: string } };
     void reg2;
     const cross = new C(SOCK);
     const cc2 = await cross.call("register", { mode: "claim", pid: kidB.pid, starttime: kidB.starttime, secret });
-    check("a captured/spent secret never claims a DIFFERENT row (wrong-secret refused)",
+    check("a captured secret never claims a DIFFERENT row (wrong-secret refused)",
       cc2.ok === false && (cc2 as { error: string }).error === "E_DENIED_UNREGISTERED");
     await cross.close();
-    await wrong.close();
     await root.close();
   }
 

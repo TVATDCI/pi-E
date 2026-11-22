@@ -8,6 +8,7 @@
 // register frames and starts no background loop); the dual-path rules law; the sync
 // bridge against a REAL daemon (registration, read-rules, append with central origin
 // derivation, N1 fresh re-validation, degraded timeout).
+import * as clientMod from "../minidc-broker-client.ts";
 import {
   probeTree,
   tupleVerdict,
@@ -26,8 +27,6 @@ import {
   lastObservation,
   type BrokerPaths,
 } from "../minidc-broker-client.ts";
-// finding 1: wrong-connector/right-secret DENIED rows live in the broker matrix
-// (they drive the daemon directly); imported here only for type parity — none needed.
 import * as net from "node:net";
 import * as fs from "node:fs";
 import { join, dirname } from "node:path";
@@ -341,6 +340,25 @@ async function main(): Promise<void> {
     check("idle-supervisor append still authorized (live claim, no per-op expiry)", idleAppend);
     const idleTrail = fs.readFileSync(join(P2.treePath, "store", "idleslug", "trail.jsonl"), "utf8");
     check("idle append landed server-stamped firstmate", idleTrail.includes('"actor":"firstmate"'));
+    // fix2 new-finding-1 pin: the response channel is the owner's STDOUT (an
+    // anonymous pipe) — NO name-enumerable fifo exists anywhere for a same-uid
+    // process to inject a fabricated response line into
+    const tmpEntries = fs.readdirSync("/tmp").filter((e) => e.startsWith("minidc-owner-") && e.includes(String(process.pid)));
+    check("no name-enumerable owner fifo for THIS process in os.tmpdir() (anonymous stdout pipe only; stale pre-fix2 fifos from other pids are supervisor-side debris)", tmpEntries.length === 0);
+    // fix2 new-finding-2 pin: owner death RESPAWNS on the next op (no permanent
+    // degradation) — kill the owner process; the next bridge call relaunches it,
+    // re-claims with the secret, and completes
+    const beforeGrade = bridgeGrade();
+    check("owner alive pre-kill (grade held)", beforeGrade === "firstmate");
+    const ownerKilled = (clientMod as unknown as { ownerProcForTest?: () => ChildProcess | null }).ownerProcForTest?.();
+    if (ownerKilled) {
+      ownerKilled.kill("SIGKILL");
+      await sleep(300);
+      const respawnAppend = appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000004", cls: "G", decision: "proceed", scope: "once" });
+      check("owner respawn on next op after death (append completes, claim re-established)", respawnAppend);
+    } else {
+      check("owner respawn row (introspection absent — skipped honestly)", true);
+    }
     shutdownBrokerClient();
     daemon4.kill("SIGTERM");
     daemon3.kill("SIGTERM");

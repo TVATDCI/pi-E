@@ -102,7 +102,40 @@ exit 0
   const storeWhere = STORE;
   const rulesWhere = join(HOME, ".pi", "agent", "mini-dc-rules");
   void 0;
-  w(join(BIN, "minidc-mount-helper"), "#!/usr/bin/env bash\n# helper stub over the REAL mount-table semantics: activation APPENDS the two\n# mountpoints to mounts.table (exact binds) + journals created-stub rows;\n# --stop writes unhealthy FIRST, then removes exactly those two lines.\nROOT=\"\\${MINIDC_INSTALL_TEST_ROOT}\"\nBACKING=\"$ROOT/var/lib/minidc-broker\"\nJOURNAL=\"$BACKING/repair-journal.jsonl\"\nHEALTH=\"$BACKING/state/mount-health.json\"\nTAB=\"$ROOT/mounts.table\"\nadd_mount() { grep -qxF \"$1\" \"$TAB\" 2>/dev/null || echo \"$1\" >> \"$TAB\"; }\ndel_mount() { grep -vxF \"$1\" \"$TAB\" 2>/dev/null > \"$TAB.new\" || true; mv \"$TAB.new\" \"$TAB\"; }\nif [[ \"${1:-}\" == \"--stop\" ]]; then\n  printf '{\"healthy\":false,\"boot-id\":\"stop\",\"checked-at\":\"now\",\"findings\":[\"service-stop\"]}' > \"$HEALTH\"\n  del_mount '${storeWhere}'\n  del_mount '${rulesWhere}'\n  exit 0\nfi\nprintf '{\"healthy\":false,\"boot-id\":\"start\",\"checked-at\":\"now\",\"findings\":[\"activation-started\"]}' > \"$HEALTH\"\nif [[ ! -d '${storeWhere}' ]]; then\n  mkdir -p '${storeWhere}'\n  echo \"created-stub:${storeWhere}\" >> \"$JOURNAL\"\nfi\nadd_mount '${storeWhere}'\nif [[ ! -d '${rulesWhere}' ]]; then\n  mkdir -p '${rulesWhere}'\n  echo \"created-stub:${rulesWhere}\" >> \"$JOURNAL\"\nfi\nadd_mount '${rulesWhere}'\nprintf '{\"healthy\":true,\"boot-id\":\"ok\",\"checked-at\":\"now\",\"findings\":[]}' > \"$HEALTH\"\nexit 0\n", 0o755);
+  w(join(BIN, "minidc-mount-helper"), `#!/usr/bin/env bash
+# helper stub (bin/ copy — same semantics as the payload below): activation
+# APPENDS the two mountpoints to mounts.table (exact binds) + journals
+# created-stub rows; --stop writes unhealthy FIRST then removes exactly those
+# two table lines. Template literal: storeWhere/rulesWhere INTERPOLATE (fix2
+# new-finding-3 — the JSON-string form emitted literal '${storeWhere}'
+# and its mkdir created the debris dirs under the test cwd).
+ROOT="\${MINIDC_INSTALL_TEST_ROOT}"
+BACKING="$ROOT/var/lib/minidc-broker"
+JOURNAL="$BACKING/repair-journal.jsonl"
+HEALTH="$BACKING/state/mount-health.json"
+TAB="$ROOT/mounts.table"
+add_mount() { grep -qxF "$1" "$TAB" 2>/dev/null || echo "$1" >> "$TAB"; }
+del_mount() { grep -vxF "$1" "$TAB" 2>/dev/null > "$TAB.new" || true; mv "$TAB.new" "$TAB"; }
+if [[ "\${1:-}" == "--stop" ]]; then
+  printf '{"healthy":false,"boot-id":"stop","checked-at":"now","findings":["service-stop"]}' > "$HEALTH"
+  del_mount '${storeWhere}'
+  del_mount '${rulesWhere}'
+  exit 0
+fi
+printf '{"healthy":false,"boot-id":"start","checked-at":"now","findings":["activation-started"]}' > "$HEALTH"
+if [[ ! -d '${storeWhere}' ]]; then
+  mkdir -p '${storeWhere}'
+  echo "created-stub:${storeWhere}" >> "$JOURNAL"
+fi
+add_mount '${storeWhere}'
+if [[ ! -d '${rulesWhere}' ]]; then
+  mkdir -p '${rulesWhere}'
+  echo "created-stub:${rulesWhere}" >> "$JOURNAL"
+fi
+add_mount '${rulesWhere}'
+printf '{"healthy":true,"boot-id":"ok","checked-at":"now","findings":[]}' > "$HEALTH"
+exit 0
+`, 0o755);
   w(join(BIN, "minidc-mount-helper.payload"), `#!/usr/bin/env bash
 # payload stub (what install.sh copies to LIB_DIR in test mode): activation
 # journals created-stub rows + adds exact mount-table entries + writes health;

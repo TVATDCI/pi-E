@@ -302,7 +302,9 @@ phase_p3_move_aside() {
   # manifest verify (sha256 match) — never trust the copy alone
   verify_manifest "$staging/store" || DIE "P3: manifest verification failed (staging copy corrupt)"
   local aside="$HOME_OF/.pi/agent/.mini-dc.migrated-$TXID"
-  mv "$STORE_HOME" "$aside"
+  # fix2 finding7: CHECKED aside move — an unchecked failure would strand the
+  # originals between staging and aside with the ledger naming neither
+  mv "$STORE_HOME" "$aside" || DIE "P3: aside move failed — originals intact at source; abort"
   json_set "$LEDGER" "asides" "[\"$aside\"]"
   # rules file (skipped entirely when manifest rules-sha null — legitimately absent)
   local rulesSha; rulesSha="$(json_get "$LEDGER" "manifest.rules-sha" | tr -d '"')"
@@ -417,6 +419,12 @@ snapshot_originals() {
 # restore ownership+modes from the ledger snapshot (non-destructive: entries are
 # already back at their true paths; only uid/gid/mode are applied)
 restore_originals() {
+  # fix2 finding7: EVERY chown/chmod is CHECKED — a swallowed failure could leave
+  # restored entries broker-owned/0660 (unreadable to their owner; the end-state
+  # check's root-side ls cannot catch that). ENOENT on the path is tolerated (the
+  # entry list is the P0 snapshot; a missing path is surfaced by the end-state
+  # check's readability assertion); every other failure aborts the rollback
+  # BEFORE further steps, with the ledger and tree intact.
   node -e '
     const fs = require("fs"), path = require("path");
     const store = process.argv[1];
@@ -424,12 +432,21 @@ restore_originals() {
     const snap = ledger["original-snapshot"] || {};
     for (const [rel, meta] of Object.entries(snap)) {
       const p = path.join(store, rel);
+      let st;
+      try { st = fs.lstatSync(p); } catch (e) {
+        if (e.code === "ENOENT") continue; // missing path — end-state check surfaces it
+        process.stderr.write("restore-originals: lstat failed " + rel + ": " + e.message + "\n");
+        process.exit(1);
+      }
       try {
-        fs.chownSync(p, meta.uid, meta.gid);
-        fs.chmodSync(p, meta.mode);
-      } catch (e) { /* restored path missing — surfaced by the end-state check */ }
+        if (st.uid !== meta.uid || st.gid !== meta.gid) fs.chownSync(p, meta.uid, meta.gid);
+        if ((st.mode & 0o7777) !== meta.mode) fs.chmodSync(p, meta.mode);
+      } catch (e) {
+        process.stderr.write("restore-originals: chown/chmod failed " + rel + ": " + e.message + "\n");
+        process.exit(1);
+      }
     }
-  ' "$STORE_HOME" "$LEDGER"
+  ' "$STORE_HOME" "$LEDGER" || DIE "rollback step 7: original ownership/mode restore FAILED — abort before discard AND before the ledger unlink (ledger intact)"
 }
 
 phase_p5_activate() {
@@ -466,15 +483,17 @@ phase_p5_activate() {
   mirror_created_stubs
   # step 5: start and AWAIT the broker (unit poll + status-frame probe, 30 s deadline)
   "$SYSTEMCTL" start --no-block minidc-broker.service
-  local waited=0 state
-  while (( waited < 30 )); do
+  # fix2 finding6: ELAPSED-time deadline (the sleep-count loop ran 7.5 s of a 30 s budget)
+  local rstart state
+  rstart="$(date +%s)"
+  while :; do
     state="$("$SYSTEMCTL" show -p ActiveState --value minidc-broker.service 2>/dev/null || echo unreadable)"
     if [[ "$state" == "active" ]] && brokerctl_status_ok; then break; fi
-    sleep 0.25; waited=$((waited + 1))
+    if (( $(date +%s) - rstart >= 30 )); then
+      DIE "P5: broker not ready within 30 s — aborting at P5"
+    fi
+    sleep 0.25
   done
-  if (( waited >= 30 )); then
-    DIE "P5: broker not ready within 30 s — aborting at P5"
-  fi
   phase_complete P5
   LOG "P5 complete (mounts active, stubs mirrored, broker ready)"
 }

@@ -1194,20 +1194,16 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
         if (candidates.length === 0) return err(f.id, "E_DENIED_UNREGISTERED");
         for (const e of candidates) {
           if (e.kind === "pre-pinned") {
-            // finding 1 fix: the claim-secret is ONE-SHOT. First claim consumes it
-            // (tombstoned); later same-instance re-claims ride the row's pid+starttime
-            // pin alone. A captured secret therefore buys exactly ONE fail-closed
-            // displacement — the same bounded residual shape the design accepts for
-            // enrollment tokens — and never a standing 12h bearer. (Connector-level
-            // authentication is unreachable in Node: Linux exposes socket-peer pids
-            // only via SO_PEERCRED, which Node does not implement; the row-pin +
-            // one-shot secret is the smallest mechanism that satisfies the finding.)
-            if (e["secret-hash"] !== null) {
-              if (typeof secret !== "string" || !hashMatches(secret, e["secret-hash"])) {
-                audit("claim-refused", { "entitlement-id": e["entitlement-id"], why: "secret-mismatch", pid: pin.pid });
-                continue; // wrong/missing secret against a live secret-slot — never claims
-              }
-              e["secret-hash"] = null; // one-shot: the secret dies at its first successful use
+            // fix2 finding1: the claim-secret is required on EVERY pre-pinned claim —
+            // first AND re-claim. secret-hash is never nulled: a re-claim on
+            // pid+starttime alone (world-readable /proc facts) would let any same-uid
+            // process take a voided captain/firstmate claim after daemon restart or
+            // owner death; the wrapper env carries the secret per D1b, so re-claims
+            // ride it too. (Connector-level authentication is unreachable in Node:
+            // SO_PEERCRED is not implemented; secret+pin is the smallest mechanism.)
+            if (typeof secret !== "string" || !hashMatches(secret, e["secret-hash"])) {
+              audit("claim-refused", { "entitlement-id": e["entitlement-id"], why: "secret-required-every-claim", pid: pin.pid });
+              continue; // missing/wrong secret — never claims, first or re-claim
             }
           } else {
             // enrollment re-claim: same-instance (pid+starttime) match is the credential;
