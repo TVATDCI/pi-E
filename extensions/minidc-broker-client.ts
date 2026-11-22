@@ -20,7 +20,8 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 // ═══════════════ paths + seams ════════════════════════════════════════════════
 export interface BrokerPaths {
@@ -214,7 +215,9 @@ export async function observeInstallMode(): Promise<ModeObservation> {
     }
     if (sock.kind === "live") {
       const frame = await fetchStatusFrame(p.socketPath);
-      if (frame.ok) return settle(marker, frame["attested-mode"], "absent"); // daemon-confirmed
+      // finding 3 fix: a live socket IS a broker observable (socket-OR-tree law) —
+      // passing "absent" here admitted legacy tuples over a live broker
+      if (frame.ok) return settle(marker, frame["attested-mode"], "present"); // daemon-confirmed
       return {
         state: "UNAVAILABLE", marker, attestation: null, observables: "absent",
         error: MODE_UNAVAILABLE_ERROR(frame.why), reason: `unavailable:${frame.why}`,
@@ -274,22 +277,38 @@ export interface BridgeResult<T = unknown> {
 // any failure ⇒ the op's degraded return per §6.
 let bridgeReady = false;
 let bridgeGradeValue: string | null = null;
-let sessionEnvs: Record<string, string | undefined> = {};
-let consumedEnrollment = false;
 let observationState: ModeObservation | null = null;
+// the persistent OWNER process (fix-round finding 2): one long-lived child that
+// connects ONCE, registers (consume-or-claim), and KEEPS the connection open —
+// the claim stays LIVE between ops (idle supervisors stay authorized), pending
+// enrollments minted over the owner's connection survive, and consumed workers
+// never re-enter unknown grade. Ops travel: main writes a request line to the
+// owner's stdin (async), the owner forwards over ITS registered connection, and
+// writes the response line to a FIFO; main blocks in readSync on the fifo fd —
+// the OWNER is a separate process, so the empirically-pinned Node stall (worker
+// threads freeze during main-thread blocking) cannot touch it. Owner death closes
+// the fifo (readSync EOF) — never a hang; a stuck-but-alive owner answers within
+// its own 3 s op budget or dies trying.
+interface OwnerState {
+  proc: ChildProcess;
+  fifoPath: string;
+  fifoFd: number | null;
+  dead: boolean;
+}
+let owner: OwnerState | null = null;
 
 export function lastObservation(): ModeObservation | null {
   return observationState;
 }
 export function brokerClientActive(): boolean {
-  return bridgeReady;
+  return bridgeReady && owner !== null && !owner.dead;
 }
 
 export function bridgeGrade(): string | null {
   return bridgeGradeValue;
 }
 export function bridgeConnected(): boolean {
-  return bridgeReady;
+  return brokerClientActive();
 }
 
 function selfStatOf(pid: number): string {
@@ -302,10 +321,57 @@ function selfStatOf(pid: number): string {
 }
 
 function startBridge(env: Record<string, string | undefined>): void {
-  sessionEnvs = { ...env };
-  sessionEnvs["MINIDC_SESSION_PID"] = String(process.pid);
-  sessionEnvs["MINIDC_SESSION_STARTTIME"] = selfStatOf(process.pid);
+  const fifoPath = join(os.tmpdir(), `minidc-owner-${process.pid}-${randomBytes(4).toString("hex")}.fifo`);
+  try { fs.unlinkSync(fifoPath); } catch { /* absent */ }
+  execFileSync("mkfifo", ["-m", "600", fifoPath]); // Node has no mkfifo API — the binary, once per session
+  const proc = spawn(process.execPath, ["-e", OWNER_SOURCE], {
+    stdio: ["pipe", "ignore", "pipe"],
+    env: {
+      ...process.env,
+      MINIDC_SESSION_PID: String(process.pid),
+      MINIDC_SESSION_STARTTIME: selfStatOf(process.pid),
+      MINIDC_OWNER_FIFO: fifoPath,
+      MINIDC_SOCKET: brokerPaths().socketPath,
+      ...(env["MINIDC_ENROLLMENT"] ? { MINIDC_ENROLLMENT: env["MINIDC_ENROLLMENT"] } : {}),
+      ...(env["MINIDC_CLAIM_SECRET"] ? { MINIDC_CLAIM_SECRET: env["MINIDC_CLAIM_SECRET"] } : {}),
+    },
+  });
+  const st: OwnerState = { proc, fifoPath, fifoFd: null, dead: false };
+  proc.on("exit", () => { st.dead = true; });
+  proc.stderr?.on("data", (d: Buffer) => {
+    const m = /C:(ok|fail):(\S*)(?: S:(\S+))?/.exec(d.toString());
+    if (!m) return;
+    if (m[1] === "ok") {
+      bridgeGradeValue = m[2] ?? null;
+      if (m[3] && !process.env["MINIDC_SURFACE_SECRET"]) {
+        // export the supervisor's surface-secret + identity for its own tool-children
+        process.env["MINIDC_SURFACE_SECRET"] = m[3] as string;
+        process.env["MINIDC_PID"] = String(process.pid);
+        process.env["MINIDC_STARTTIME"] = selfStatOf(process.pid);
+      }
+    } else {
+      bridgeGradeValue = null;
+    }
+  });
+  // open the fifo read-end AFTER the owner holds the write end (owner opens r+ at
+  // startup — never blocks; EOF arrives when the owner and every writer dies)
+  const openDeadline = Date.now() + 3000;
+  for (;;) {
+    try {
+      st.fifoFd = fs.openSync(fifoPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      break;
+    } catch {
+      if (Date.now() > openDeadline) break;
+      sleepSyncMs(25);
+    }
+  }
+  owner = st;
   bridgeReady = true;
+}
+
+function sleepSyncMs(ms: number): void {
+  const buf = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buf), 0, 0, ms);
 }
 
 /** Session init: observation FIRST (the law), then — only on a usable BROKER mode —
@@ -316,66 +382,123 @@ export async function initBrokerClient(env: Record<string, string | undefined>):
   observationState = await observeInstallMode();
   if (observationState.state === "BROKER") {
     startBridge(env);
+    // bounded registration wait: ops fired before the owner's register round-trip
+    // would land as unknown-grade; wait for the grade marker (or a 2 s budget —
+    // a failed registration leaves every op failing closed per §4.3.1 either way)
+    const t0 = Date.now();
+    while (bridgeGradeValue === null && owner !== null && !owner.dead && Date.now() - t0 < 2000) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
   }
   return observationState;
 }
 
-/** The helper source — plain CJS, no TS, no secrets inside (they ride env). Exported
- *  for direct testing. */
-export const HELPER_SOURCE = `
+/** The OWNER source — the persistent registration owner (fix-round finding 2).
+ *  Plain CJS; no secrets inline (they ride env). Connects ONCE, registers (consume
+ *  first when a token is present, else claim), keeps the connection open for the
+ *  session's life, reconnects with bounded backoff + identity re-claim on socket
+ *  loss, and serves op frames line-by-line: stdin line in → broker frame out →
+ *  response line written to the fifo. Every op answers within 3 s (its own budget)
+ *  so the main thread's blocking read can never wedge. Exported for direct testing. */
+export const OWNER_SOURCE = `
 const net = require("node:net");
-const sockPath = process.argv[2] && process.argv[2].startsWith("/") ? process.argv[2] : process.argv[1];
-const op = sockPath === process.argv[1] ? process.argv[2] : process.argv[3];
-const argsRaw = sockPath === process.argv[1] ? process.argv[3] : process.argv[4];
-const args = JSON.parse(argsRaw || "{}");
+const fs = require("node:fs");
+const sockPath = process.env.MINIDC_SOCKET;
+const fifoPath = process.env.MINIDC_OWNER_FIFO;
 const pid = Number(process.env.MINIDC_SESSION_PID || 0);
 const starttime = process.env.MINIDC_SESSION_STARTTIME || "";
+let enrollment = process.env.MINIDC_ENROLLMENT || "";
 const claimSecret = process.env.MINIDC_CLAIM_SECRET || "";
-const enrollment = process.env.MINIDC_ENROLLMENT || "";
-const s = net.connect(sockPath, () => {
-  if (!enrollment && !claimSecret) { s.write(JSON.stringify({ id: 2, op, args }) + "\\n"); return; }
-  const claimArgs = enrollment
-    ? { mode: "consume", token: enrollment, pid, starttime }
-    : { mode: "claim", pid, starttime, secret: claimSecret };
-  s.write(JSON.stringify({ id: 1, op: "register", args: claimArgs }) + "\\n");
-});
+// open the fifo O_RDWR first: never blocks, and it keeps a writer alive for the
+// main thread's read fd even between responses (EOF only when WE die)
+const fifo = fs.openSync(fifoPath, "r+");
+let sock = null;
+let connected = false;
+let registered = false;
 let buf = "";
-let opSent = false;
-let claimTries = 0;
-function done(x) { try { process.stdout.write(JSON.stringify(x)); } catch (e2) {} try { s.destroy(); } catch (e3) {} process.exit(0); }
-s.on("data", (d) => {
-  buf += d.toString();
-  let i;
-  while ((i = buf.indexOf("\\n")) >= 0) {
-    const line = buf.slice(0, i); buf = buf.slice(i + 1);
-    if (!line.trim()) continue;
-    let f; try { f = JSON.parse(line); } catch (e) { continue; }
-    if (f.id === 1 && !opSent) {
-      if (f.ok === true) {
-        process.stderr.write("C:ok:" + (f.result && f.result.grade ? f.result.grade : "?"));
-        if (f.result && f.result["surface-secret"]) process.stderr.write(" S:" + f.result["surface-secret"]);
-        process.stderr.write("\\n");
-      } else if (f.retryable === true && claimTries < 2) {
-        claimTries++;
-        setTimeout(() => {
-          const again = process.env.MINIDC_ENROLLMENT && process.env.MINIDC_ENROLLMENT_STATE !== "consumed"
-            ? { mode: "consume", token: process.env.MINIDC_ENROLLMENT, pid, starttime }
-            : { mode: "claim", pid, starttime, secret: claimSecret };
-          s.write(JSON.stringify({ id: 1, op: "register", args: again }) + "\\n");
-        }, 300);
-        continue;
-      } else {
-        process.stderr.write("C:fail:" + (f.error || "?") + "\\n");
-      }
-      opSent = true;
-      s.write(JSON.stringify({ id: 2, op, args }) + "\\n");
-    } else if (f.id === 2) {
-      done(f);
+let nextId = 10;
+const pending = new Map();
+let backoffN = 0;
+let stopped = false;
+
+function writeResp(obj) {
+  try { fs.writeSync(fifo, JSON.stringify(obj) + "\\n"); } catch (e) { /* reader gone */ }
+}
+function send(op, args, cb) {
+  if (!sock || !connected) { cb({ ok: false, error: "E_UNAVAILABLE", reason: "owner-disconnected" }); return; }
+  const id = nextId++;
+  pending.set(id, cb);
+  setTimeout(() => { if (pending.has(id)) { pending.delete(id); cb({ ok: false, error: "E_UNAVAILABLE", reason: "owner-op-timeout" }); } }, 3000);
+  sock.write(JSON.stringify({ id, op, args }) + "\\n");
+}
+function register() {
+  const args = enrollment
+    ? { mode: "consume", token: enrollment, pid, starttime }
+    : { mode: "claim", pid, starttime, ...(claimSecret ? { secret: claimSecret } : {}) };
+  send("register", args, (f) => {
+    if (f.ok === true) {
+      registered = true;
+      enrollment = ""; // consumed: later re-claims ride identity
+      const r = f.result || {};
+      let line = "C:ok:" + (r.grade ? r.grade : "?");
+      if (r["surface-secret"]) line += " S:" + r["surface-secret"];
+      process.stderr.write(line + "\\n");
+    } else if (f.retryable === true) {
+      setTimeout(register, 500); // delay-budget retry (never a surfaced denial)
+    } else {
+      process.stderr.write("C:fail:" + (f.error || "?") + "\\n");
     }
-  }
+  });
+}
+function connect() {
+  if (stopped) return;
+  sock = net.connect(sockPath, () => {
+    connected = true;
+    buf = "";
+    backoffN = 0;
+    if (!registered) register(); else reClaim();
+  });
+  sock.on("data", (d) => {
+    buf += d.toString("utf8");
+    let i;
+    while ((i = buf.indexOf("\\n")) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      try {
+        const f = JSON.parse(line);
+        const cb = pending.get(f.id);
+        if (cb) { pending.delete(f.id); cb(f); }
+      } catch (e) { /* malformed */ }
+    }
+  });
+  sock.on("error", () => { connected = false; });
+  sock.on("close", () => {
+    connected = false;
+    registered = false; // the claim died with the socket — re-claim on reconnect
+    const wait = backoffN >= 4 ? 2000 : [250, 500, 1000, 2000][backoffN++];
+    setTimeout(() => { if (!connected && !stopped) connect(); }, wait);
+  });
+}
+function reClaim() {
+  send("register", { mode: "claim", pid, starttime }, (f) => {
+    if (f.ok === true) {
+      registered = true;
+      const r = f.result || {};
+      if (r["surface-secret"]) process.stderr.write("C:ok:" + (r.grade || "?") + " S:" + r["surface-secret"] + "\\n");
+    } else if (f.retryable === true) { setTimeout(reClaim, 500); }
+  });
+}
+// op pump: one JSON line per op from stdin; answer on the fifo
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  if (line.trim() === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} try { fs.closeSync(fifo); } catch (e2) {} process.exit(0); }
+  let req; try { req = JSON.parse(line); } catch (e) { writeResp({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }); return; }
+  send(req.op, req.args, (f) => writeResp(f));
 });
-s.on("error", (e) => done({ ok: false, error: "E_UNAVAILABLE", reason: "helper-socket:" + (e.code || "error") }));
-setTimeout(() => done({ ok: false, error: "E_UNAVAILABLE", reason: "helper-timeout" }), 2600);
+// the 15 s background re-claim loop (§4.4.6): rebinds after daemon restarts while idle
+setInterval(() => { if (!connected) return; if (!registered) reClaim(); }, 15000);
+connect();
 `;
 
 export interface BridgeResult<T = unknown> {
@@ -391,55 +514,56 @@ export function bridgeCall(
   args: Record<string, unknown>,
   timeoutMs = 3200,
 ): BridgeResult | null {
-  if (!bridgeReady) return null;
-  const env = { ...sessionEnvs };
-  if (consumedEnrollment) {
-    // the token is single-use — after its consumption every later op re-claims by identity
-    env["MINIDC_ENROLLMENT"] = "";
-    env["MINIDC_CLAIM_SECRET"] = env["MINIDC_CLAIM_SECRET"] ?? "";
-  }
+  const st = owner;
+  if (!bridgeReady || !st || st.dead || st.fifoFd === null) return null;
   try {
-    const run = spawnSync(process.execPath, ["-e", HELPER_SOURCE, "--", brokerPaths().socketPath, op, JSON.stringify(args)], {
-      encoding: "utf8",
-      timeout: timeoutMs,
-      killSignal: "SIGKILL",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...env },
-    });
-    // claim-state markers ride stderr (C:ok:<grade> [S:<surface-secret>] | C:fail:<err>)
-    const errTxt = (run.stderr ?? "").toString();
-    const marker = /C:(ok|fail):(\S*)(?: S:(\S+))?/.exec(errTxt);
-    if (marker) {
-      if (marker[1] === "ok") {
-        bridgeGradeValue = marker[2] ?? null;
-        if (marker[3]) {
-          // export the supervisor's surface-secret + session identity for its own
-          // tool-children (ancestry appends, D1c) — set-once per entitlement
-          if (!process.env["MINIDC_SURFACE_SECRET"]) {
-            process.env["MINIDC_SURFACE_SECRET"] = marker[3] as string;
-            process.env["MINIDC_PID"] = String(process.pid);
-            process.env["MINIDC_STARTTIME"] = selfStatOf(process.pid);
-          }
+    st.proc.stdin?.write(`${JSON.stringify({ op, args })}\n`);
+    // poll the owner's fifo — the OWNER is a separate process (immune to the
+    // Node main-thread stall); owner death closes the fifo ⇒ readSync returns EOF.
+    // The fd is O_NONBLOCK: EAGAIN means "not yet" — poll on, bounded by the deadline.
+    const deadline = Date.now() + timeoutMs;
+    let line = "";
+    const chunk = Buffer.alloc(1 << 16);
+    for (;;) {
+      let n: number;
+      try {
+        n = fs.readSync(st.fifoFd, chunk, 0, chunk.length, null);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "EAGAIN") {
+          if (Date.now() > deadline) return null; // budget spent — degraded
+          sleepSyncMs(2);
+          continue;
         }
-        if (sessionEnvs["MINIDC_ENROLLMENT"]) consumedEnrollment = true;
-      } else {
-        bridgeGradeValue = null;
+        if ((e as NodeJS.ErrnoException).code === "EINTR") continue;
+        throw e; // pipe gone
       }
-    }
-    if (run.error || run.status !== 0 || !run.stdout) return null; // timeout/crash ⇒ degraded
-    const trimmed = run.stdout.trim();
-    if (!trimmed) return null;
-    try {
-      return JSON.parse(trimmed) as BridgeResult;
-    } catch {
-      return null;
+      if (n <= 0) { st.dead = true; return null; } // EOF — owner died
+      line += chunk.toString("utf8", 0, n);
+      const i = line.indexOf("\n");
+      if (i >= 0) {
+        const raw = line.slice(0, i);
+        try {
+          return JSON.parse(raw) as BridgeResult;
+        } catch {
+          return null; // malformed — degraded, never a guess
+        }
+      }
+      if (Date.now() > deadline) return null; // owner overran its own budget — degraded
     }
   } catch {
-    return null; // helper timeout/crash/malformed ⇒ degraded, never a hang
+    return null; // pipe gone — degraded, never a hang
   }
 }
 
 export function shutdownBrokerClient(): void {
+  const st = owner;
+  if (st) {
+    try { st.proc.stdin?.write("shutdown\n"); } catch { /* gone */ }
+    setTimeout(() => { try { st.proc.kill("SIGKILL"); } catch { /* gone */ } }, 250).unref?.();
+    if (st.fifoFd !== null) { try { fs.closeSync(st.fifoFd); } catch { /* gone */ } }
+    try { fs.unlinkSync(st.fifoPath); } catch { /* absent */ }
+    owner = null;
+  }
   bridgeReady = false;
   bridgeGradeValue = null;
 }

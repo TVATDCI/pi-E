@@ -39,7 +39,7 @@ const JOURNAL = join(BACKING, "repair-journal.jsonl");
 const STATE = join(BACKING, "state");
 const UNIT_DIR = join(T, "etc", "systemd/system");
 const BIN = join(T, "bin");
-const MOUNTS = join(T, "mounts");
+const MOUNTS = join(T, "mounts.table"); // the real-semantics mount table (finding 9)
 
 function w(path: string, content: string, mode?: number): void {
   fs.mkdirSync(dirname(path), { recursive: true });
@@ -48,6 +48,9 @@ function w(path: string, content: string, mode?: number): void {
 }
 
 function stubs(): void {
+  // real-semantics mount table base: the root filesystem + /tmp (an ordinary parent
+  // mount — the containing-filesystem control finding 9 requires)
+  w(MOUNTS, "/\n/tmp\n");
   w(join(BIN, "systemctl"), `#!/usr/bin/env bash
 # test stub: state-driven ActiveState answers + call log
 LOG="\${MINIDC_INSTALL_TEST_ROOT}/systemctl.log"
@@ -85,22 +88,7 @@ case "$CMD" in
 esac
 exit 0
 `, 0o755);
-  w(join(BIN, "findmnt"), `#!/usr/bin/env bash
-# test stub: a mount exists iff $MOUNTS/<flag> is present
-for a in "$@"; do
-  case "$a" in
-    --target) : ;;
-    -n|-o|TARGET) : ;;
-    *) target="$a" ;;
-  esac
-done
-enc="$(echo "$target" | tr '/' '_')"
-if [[ -f "\${MINIDC_INSTALL_TEST_ROOT}/mounts/$enc" ]]; then
-  echo "TARGET  SOURCE  FSTYPE"
-  exit 0
-fi
-exit 1
-`, 0o755);
+  w(join(BIN, "findmnt"), "#!/usr/bin/env bash\n# real-semantics stub (finding 9): answers the DEEPEST mount at-or-above\n# --target, exactly what real findmnt answers - the containing filesystem\n# for ordinary paths, P itself when P is the mountpoint. The installer's\n# mounted_exactly() then pins exact-identity against BOTH shapes.\ntab=\"\${MINIDC_INSTALL_TEST_ROOT}/mounts.table\"\ntarget=\"\"\nfor a in \"$@\"; do\n  case \"$a\" in\n    --target|-n|-o|TARGET) : ;;\n    *) target=\"$a\" ;;\n  esac\ndone\n[[ -f \"$tab\" ]] || exit 1\nbest=\"\"\nwhile IFS= read -r m; do\n  [[ -z \"$m\" ]] && continue\n  if [[ \"$target\" == \"$m\" || \"$target\" == \"$m\"/* ]]; then\n    if (( ${#m} > ${#best} )); then best=\"$m\"; fi\n  fi\ndone < \"$tab\"\nif [[ -n \"$best\" ]]; then echo \"$best\"; exit 0; fi\nexit 1\n", 0o755);
   w(join(BIN, "fuser"), `#!/usr/bin/env bash
 exit 1
 `, 0o755);
@@ -113,42 +101,23 @@ exit 0
   // --stop writes unhealthy first and clears the mount flags
   const storeWhere = STORE;
   const rulesWhere = join(HOME, ".pi", "agent", "mini-dc-rules");
-  w(join(BIN, "minidc-mount-helper"), `#!/usr/bin/env bash
-ROOT="\${MINIDC_INSTALL_TEST_ROOT}"
-BACKING="$ROOT/var/lib/minidc-broker"
-JOURNAL="$BACKING/repair-journal.jsonl"
-HEALTH="$BACKING/state/mount-health.json"
-mount_flag() { echo "$1" | tr '/' '_'; }
-if [[ "\${1:-}" == "--stop" ]]; then
-  printf '{"healthy":false,"boot-id":"stop","checked-at":"now","findings":["service-stop"]}' > "$HEALTH"
-  rm -f "$ROOT/mounts/$(mount_flag '${storeWhere}')"
-  rm -f "$ROOT/mounts/$(mount_flag '${rulesWhere}')"
-  exit 0
-fi
-printf '{"healthy":false,"boot-id":"start","checked-at":"now","findings":["activation-started"]}' > "$HEALTH"
-if [[ ! -d '${storeWhere}' ]]; then
-  mkdir -p '${storeWhere}'
-  echo "created-stub:${storeWhere}" >> "$JOURNAL"
-fi
-touch "$ROOT/mounts/$(mount_flag '${storeWhere}')"
-if [[ ! -d '${rulesWhere}' ]]; then
-  mkdir -p '${rulesWhere}'
-  echo "created-stub:${rulesWhere}" >> "$JOURNAL"
-fi
-touch "$ROOT/mounts/$(mount_flag '${rulesWhere}')"
-printf '{"healthy":true,"boot-id":"ok","checked-at":"now","findings":[]}' > "$HEALTH"
-exit 0
-`, 0o755);
+  void 0;
+  w(join(BIN, "minidc-mount-helper"), "#!/usr/bin/env bash\n# helper stub over the REAL mount-table semantics: activation APPENDS the two\n# mountpoints to mounts.table (exact binds) + journals created-stub rows;\n# --stop writes unhealthy FIRST, then removes exactly those two lines.\nROOT=\"\\${MINIDC_INSTALL_TEST_ROOT}\"\nBACKING=\"$ROOT/var/lib/minidc-broker\"\nJOURNAL=\"$BACKING/repair-journal.jsonl\"\nHEALTH=\"$BACKING/state/mount-health.json\"\nTAB=\"$ROOT/mounts.table\"\nadd_mount() { grep -qxF \"$1\" \"$TAB\" 2>/dev/null || echo \"$1\" >> \"$TAB\"; }\ndel_mount() { grep -vxF \"$1\" \"$TAB\" 2>/dev/null > \"$TAB.new\" || true; mv \"$TAB.new\" \"$TAB\"; }\nif [[ \"${1:-}\" == \"--stop\" ]]; then\n  printf '{\"healthy\":false,\"boot-id\":\"stop\",\"checked-at\":\"now\",\"findings\":[\"service-stop\"]}' > \"$HEALTH\"\n  del_mount '${storeWhere}'\n  del_mount '${rulesWhere}'\n  exit 0\nfi\nprintf '{\"healthy\":false,\"boot-id\":\"start\",\"checked-at\":\"now\",\"findings\":[\"activation-started\"]}' > \"$HEALTH\"\nif [[ ! -d '${storeWhere}' ]]; then\n  mkdir -p '${storeWhere}'\n  echo \"created-stub:${storeWhere}\" >> \"$JOURNAL\"\nfi\nadd_mount '${storeWhere}'\nif [[ ! -d '${rulesWhere}' ]]; then\n  mkdir -p '${rulesWhere}'\n  echo \"created-stub:${rulesWhere}\" >> \"$JOURNAL\"\nfi\nadd_mount '${rulesWhere}'\nprintf '{\"healthy\":true,\"boot-id\":\"ok\",\"checked-at\":\"now\",\"findings\":[]}' > \"$HEALTH\"\nexit 0\n", 0o755);
   w(join(BIN, "minidc-mount-helper.payload"), `#!/usr/bin/env bash
+# payload stub (what install.sh copies to LIB_DIR in test mode): activation
+# journals created-stub rows + adds exact mount-table entries + writes health;
+# --stop writes unhealthy FIRST then removes exactly those two table lines.
 ROOT="\${MINIDC_INSTALL_TEST_ROOT}"
 BACKING="$ROOT/var/lib/minidc-broker"
 JOURNAL="$BACKING/repair-journal.jsonl"
 HEALTH="$BACKING/state/mount-health.json"
-mount_flag() { echo "$1" | tr '/' '_'; }
+TAB="$ROOT/mounts.table"
+add_mount() { grep -qxF "$1" "$TAB" 2>/dev/null || echo "$1" >> "$TAB"; }
+del_mount() { grep -vxF "$1" "$TAB" 2>/dev/null > "$TAB.new" || true; mv "$TAB.new" "$TAB"; }
 if [[ "\${1:-}" == "--stop" ]]; then
   printf '{"healthy":false,"boot-id":"stop","checked-at":"now","findings":["service-stop"]}' > "$HEALTH"
-  rm -f "$ROOT/mounts/$(mount_flag '${storeWhere}')"
-  rm -f "$ROOT/mounts/$(mount_flag '${rulesWhere}')"
+  del_mount '${storeWhere}'
+  del_mount '${rulesWhere}'
   exit 0
 fi
 printf '{"healthy":false,"boot-id":"start","checked-at":"now","findings":["activation-started"]}' > "$HEALTH"
@@ -156,12 +125,12 @@ if [[ ! -d '${storeWhere}' ]]; then
   mkdir -p '${storeWhere}'
   echo "created-stub:${storeWhere}" >> "$JOURNAL"
 fi
-touch "$ROOT/mounts/$(mount_flag '${storeWhere}')"
+add_mount '${storeWhere}'
 if [[ ! -d '${rulesWhere}' ]]; then
   mkdir -p '${rulesWhere}'
   echo "created-stub:${rulesWhere}" >> "$JOURNAL"
 fi
-touch "$ROOT/mounts/$(mount_flag '${rulesWhere}')"
+add_mount '${rulesWhere}'
 printf '{"healthy":true,"boot-id":"ok","checked-at":"now","findings":[]}' > "$HEALTH"
 exit 0
 `, 0o755);
@@ -277,8 +246,7 @@ function main(): void {
     for (const u of ["minidc-broker.service", "minidc-mounts.service"]) {
       w(join(T, "unitstate", u), "inactive\n");
     }
-    fs.rmSync(join(T, "mounts"), { recursive: true, force: true });
-    fs.mkdirSync(join(T, "mounts"), { recursive: true });
+    w(MOUNTS, "/\n/tmp\n"); // real semantics: only root-fs entries — both targets unmounted
     fs.rmSync(LEDGER);
     const fin = runInstall(["--rollback"]);
     check("pin (ii): no-ledger finalization runs (guards → sweep → assertions)", fin.status === 0);
@@ -291,8 +259,7 @@ function main(): void {
     for (const u of ["minidc-broker.service", "minidc-mounts.service"]) {
       w(join(T, "unitstate", u), "inactive\n");
     }
-    fs.rmSync(join(T, "mounts"), { recursive: true, force: true });
-    fs.mkdirSync(join(T, "mounts"), { recursive: true });
+    w(MOUNTS, "/\n/tmp\n");
     fs.rmSync(join(BACKING, "store"), { recursive: true, force: true }); // partial discard shape
     const fin2 = runInstall(["--repair-mode"]);
     check("pin (iii): mid-convergence residue swept by the finalization", fin2.status === 0 && !fs.existsSync(BACKING));
@@ -362,6 +329,36 @@ function main(): void {
     check("--repair-mode with a live ledger reconciles the marker to ledger truth (broker)", rep.status === 0 && readMarker() === "broker");
     check("repair never weakens a healthy broker install (tuple 1 intact)", fs.existsSync(join(BACKING, "store", "slugA")));
     runInstall(["--rollback"]);
+  }
+
+  // ═══ finding 9: real findmnt-semantics rows (exact identity vs containing fs) ═══
+  {
+    section("exact-mountpoint identity (finding 5/9: --target semantics)");
+    legacyDesk();
+    // ordinary paths sit on the ROOT filesystem — deepest-at-or-above is "/", never
+    // the target: P2 must PASS (unmounted) despite findmnt answering nonzero-exit-0 rows
+    const ordinary = runInstall();
+    check("ordinary paths (root-fs only) pass P2 — exact identity, not containment", ordinary.status === 0);
+    runInstall(["--rollback"]);
+    // exact bind at the store target: P2 must REFUSE
+    legacyDesk();
+    fs.appendFileSync(MOUNTS, STORE + "\n");
+    const bind = runInstall();
+    check("an exact bind at the store target refuses P2 (findmnt answers the target itself)", bind.status !== 0);
+    // containing-filesystem control: a mount on the PARENT (.pi/agent) must NOT trip
+    // the store check — deepest-at-or-above STORE is the parent, not STORE
+    legacyDesk();
+    fs.appendFileSync(MOUNTS, join(HOME, ".pi", "agent") + "\n");
+    const parentFs = runInstall();
+    check("parent-filesystem mount does NOT count as a store mount (deepest ≠ target)", parentFs.status === 0);
+    runInstall(["--rollback"]);
+    // finalization guard: an exact bind with no ledger must ABORT (residue named)
+    legacyDesk();
+    fs.rmSync(LEDGER, { force: true });
+    try { fs.rmSync(BACKING, { recursive: true, force: true }); } catch { /* absent */ }
+    fs.appendFileSync(MOUNTS, STORE + "\n");
+    const guard = runInstall(["--repair-mode"]);
+    check("finalization guard refuses an exact-bind mount (never force, residue named)", guard.status !== 0);
   }
 
   // ═══ code-shape pins (the design's ordering laws, asserted on the source) ═══

@@ -91,20 +91,25 @@ static void iso_now(char *out, size_t n) {
            tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec / 1000000);
 }
 
-static void journal_row(const char *action, const char *a, const char *b) {
+/* finding 8 fix: EVERY journal write is CHECKED — a stub created without its
+ * ground-truth row (open/write/fsync failure) aborts the activation: the rollback
+ * consumes exactly the journaled stub set, so an unrecorded stub would strand. */
+static int journal_row(const char *action, const char *a, const char *b) {
   char ts[64];
   iso_now(ts, sizeof ts);
   char line[1024];
   int len = snprintf(line, sizeof line,
                      "{\"ts\":\"%s\",\"action\":\"%s\",\"a\":\"%s\",\"b\":\"%s\"}\n",
                      ts, action, a ? a : "", b ? b : "");
-  if (len <= 0) return;
+  if (len <= 0) return -1;
   /* O_APPEND — the P4-created journal; the helper NEVER creates it (finding 1 of #10) */
   int fd = open(g_journal_path(), O_WRONLY | O_APPEND | O_NOFOLLOW, 0600);
-  if (fd < 0) return; /* best-effort evidence; the health record is the gate */
-  if (write(fd, line, (size_t)len) < 0) { /* journaled best-effort */ }
-  fsync(fd);
+  if (fd < 0) return -1;
+  ssize_t wrote = write(fd, line, (size_t)len);
+  int sync_rc = fsync(fd);
   close(fd);
+  if (wrote != (ssize_t)len || sync_rc != 0) return -1;
+  return 0;
 }
 
 /* atomic health write: temp inside state/ + rename (root temp+rename discipline) */
@@ -213,15 +218,24 @@ static int attach(const char *backing_path, const char *where_path, char *err_ou
     snprintf(err_out, err_n, "walk-failed(%s)", strerror(errno));
     return -1;
   }
+  /* finding 8: journal rows for created stubs and asides are CHECKED — a stub
+   * without its ground-truth row aborts (the rollback consumes exactly the
+   * journaled set; an unrecorded stub would strand), and an unjournaled aside is
+   * unauditable evidence. */
+  char stubnote[600];
+  snprintf(stubnote, sizeof stubnote, "created-stub:%s", where_path);
   if (type == 0) {
     if (mkdirat(parent, leaf, 0755) != 0) {
       close(parent);
       snprintf(err_out, err_n, "stub-mkdir-failed(%s)", strerror(errno));
       return -1;
     }
-    journal_row("created-stub", where_path, "");
-    char note[600]; snprintf(note, sizeof note, "created-stub:%s", where_path);
-    journal_row("created-stub-row", note, ""); /* grep-able row for the ledger mirror */
+    if (journal_row("created-stub", where_path, "") != 0 ||
+        journal_row("created-stub-row", stubnote, "") != 0) {
+      close(parent);
+      snprintf(err_out, err_n, "journal-write-failed(created-stub)");
+      return -1;
+    }
   } else if (type == S_IFLNK || type == S_IFREG) {
     /* move the ENTRY aside (its target never read, never followed) */
     char aside[512];
@@ -236,15 +250,22 @@ static int attach(const char *backing_path, const char *where_path, char *err_ou
         return -1;
       }
     }
-    journal_row("aside-moved", where_path, aside);
+    if (journal_row("aside-moved", where_path, aside) != 0) {
+      close(parent);
+      snprintf(err_out, err_n, "journal-write-failed(aside-moved)");
+      return -1;
+    }
     if (mkdirat(parent, leaf, 0755) != 0) {
       close(parent);
       snprintf(err_out, err_n, "post-aside-stub-failed(%s)", strerror(errno));
       return -1;
     }
-    journal_row("created-stub", where_path, "");
-    char note[600]; snprintf(note, sizeof note, "created-stub:%s", where_path);
-    journal_row("created-stub-row", note, "");
+    if (journal_row("created-stub", where_path, "") != 0 ||
+        journal_row("created-stub-row", stubnote, "") != 0) {
+      close(parent);
+      snprintf(err_out, err_n, "journal-write-failed(created-stub)");
+      return -1;
+    }
   } else if (type != S_IFDIR) {
     close(parent);
     snprintf(err_out, err_n, "where-type-unexpected");
@@ -271,11 +292,20 @@ static int attach(const char *backing_path, const char *where_path, char *err_ou
         }
         close(bfd);
       }
-      /* mismatched: unmount, then the full attach path runs again */
+      /* mismatched: unmount, then the full attach path runs again — finding 8:
+       * the detach is CHECKED; a failed detach ABORTS (reattaching over a live
+       * wrong mount is never attempted) */
       int tfd = openat(parent, leaf, O_PATH | O_DIRECTORY | O_NOFOLLOW);
       if (tfd >= 0) {
 #ifdef SYS_move_mount
-        syscall(SYS_move_mount, tfd, "", AT_FDCWD, "", MOVE_MOUNT_F_EMPTY_PATH);
+        if (syscall(SYS_move_mount, tfd, "", AT_FDCWD, "", MOVE_MOUNT_F_EMPTY_PATH) != 0 &&
+            errno != EINVAL && errno != ENOENT) {
+          close(tfd);
+          close(parent);
+          close(bfd);
+          snprintf(err_out, err_n, "revalidate-detach-failed(%s)", strerror(errno));
+          return -1;
+        }
 #endif
         close(tfd);
       }
@@ -353,19 +383,32 @@ static int attach(const char *backing_path, const char *where_path, char *err_ou
   close(parent);
   close(clone_fd);
   if (bad) {
-    /* immediate detach at the fd-anchored point + journal + caller marks unhealthy */
+    /* immediate detach at the fd-anchored point + journal + caller marks unhealthy —
+     * finding 8: the detach is CHECKED; if it fails the error names BOTH problems
+     * (the bad attach AND the failed detach) so the operator knows the mount lingers */
     int tfd = open_path_no_follow(where_path, O_PATH | O_DIRECTORY);
+    int detach_failed = 0;
     if (tfd >= 0) {
 #ifdef SYS_move_mount
-      syscall(SYS_move_mount, tfd, "", AT_FDCWD, "", MOVE_MOUNT_F_EMPTY_PATH);
+      if (syscall(SYS_move_mount, tfd, "", AT_FDCWD, "", MOVE_MOUNT_F_EMPTY_PATH) != 0 &&
+          errno != EINVAL && errno != ENOENT) {
+        detach_failed = 1;
+      }
 #endif
       close(tfd);
     }
     journal_row("detach-after-detect", where_path, why);
-    snprintf(err_out, err_n, "post-attach-validation(%s)", why);
+    snprintf(err_out, err_n, detach_failed
+      ? "post-attach-validation(%s)+DETACH-FAILED-MOUNT-LINGERS"
+      : "post-attach-validation(%s)", why);
     return -1;
   }
-  journal_row("attached", where_path, backing_path);
+  if (journal_row("attached", where_path, backing_path) != 0) {
+    /* finding 8: the attach evidence row is required — an unjournaled healthy
+     * attach still aborts (health stays false-pending; the service fails loudly) */
+    snprintf(err_out, err_n, "journal-write-failed(attached)");
+    return -1;
+  }
   return 0;
 }
 

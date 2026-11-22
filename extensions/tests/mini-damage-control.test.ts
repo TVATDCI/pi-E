@@ -54,6 +54,7 @@ import miniDc, {
   type Seat,
   type TrailEntry,
 } from "../mini-damage-control.ts";
+import { setBrokerPathsForTesting } from "../minidc-broker-client.ts";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -217,6 +218,17 @@ function makeHarness(opts: DriveOpts): HarnessWithRun {
   );
   // Seams MUST be pointed at this harness's scratch BEFORE seeding/grants — otherwise the
   // seed lands in the previous test's (deleted) store. Never the real agent home.
+  // Fix-round finding 10: BrokerPaths TOO — every session_start probes the mode, and
+  // production-default paths would read the LIVE marker/tree/socket. Hermetic scratch
+  // probes (a scratch "tree absent + socket not-live + marker absent" ⇒ tuple 18
+  // LEGACY) keep the suite host-independent and inside the no-live-read scope.
+  setBrokerPathsForTesting({
+    treePath: join(tmp, "scratch-broker-tree"),
+    socketPath: join(tmp, "scratch-broker.sock"),
+    markerPath: join(tmp, "scratch-install-mode"),
+    attestedRulesPath: join(tmp, "scratch-rules-dir"),
+    legacyRulesPath: join(tmp, "scratch-global-rules.yaml"),
+  });
   setEnvSourceForTesting(opts.env ?? WORKER_ENV);
   setStoreRootForTesting(store);
   if (opts.seedEntries?.length) {

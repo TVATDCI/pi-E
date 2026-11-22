@@ -471,6 +471,7 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
 
   // ── persistence: atomic replacement (D2: strict paths, umask 0007, O_EXCL temps) ──
   function atomicWrite(path: string, content: string): void {
+    if (!verifyDirComponents(path)) throw new Error("unverified components");
     const dir = dirname(path);
     const tmp = join(dir, `.tmp-${process.pid}-${randomBytes(4).toString("hex")}`);
     const fd = fs.openSync(tmp, "wx", 0o660); // O_EXCL — refuses pre-planted temps
@@ -503,7 +504,9 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
     const boot = currentBootId();
     let cleared = false;
     try {
-      const doc = JSON.parse(fs.readFileSync(registrationsPath, "utf8")) as RegistrationsFile;
+      const docTxt = readVerified(registrationsPath);
+      if (docTxt === null) throw new Error("registrations unreadable or unverified");
+      const doc = JSON.parse(docTxt) as RegistrationsFile;
       if (doc["boot-id"] === boot) {
         const kept: Entitlement[] = [];
         for (const row of doc.entitlements ?? []) {
@@ -681,17 +684,61 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
     return o as TrailEntryFrame;
   }
 
+  // verified no-follow opens (finding 4: backing-only/no-follow realized). Node
+  // lacks openat/*at(): every protected open VERIFIES each directory component
+  // (lstat: real directory, never a symlink) and opens the final component with
+  // O_NOFOLLOW - a pre-planted symlink can redirect nothing.
+  function verifyDirComponents(p: string): boolean {
+    try {
+      let cur = "/";
+      for (const seg of p.split("/").filter(Boolean).slice(0, -1)) {
+        cur = cur + "/" + seg;
+        const st = fs.lstatSync(cur);
+        if (!st.isDirectory() || st.isSymbolicLink()) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function openVerified(p: string, flags: number): number | null {
+    if (!p.startsWith("/") || !verifyDirComponents(p)) return null;
+    try {
+      return fs.openSync(p, flags | fs.constants.O_NOFOLLOW);
+    } catch {
+      return null;
+    }
+  }
+  /** null = clean ENOENT (absence); THROWS on refusal (symlink plant / verification
+   *  failure) — callers map a throw to unavailable, never to absence. */
+  function readVerified(p: string): string | null {
+    // the file's own clean ENOENT short-circuits as ABSENCE (parents may not exist
+    // yet — a fresh slug dir is legal); every other miss path is a REFUSED read
+    let fd: number;
+    try {
+      fd = fs.openSync(p, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw e; // ELOOP (symlink final), EACCES, … — refusal, not absence
+    }
+    try {
+      if (!verifyDirComponents(p)) throw new Error("unverified components");
+      return fs.readFileSync(fd, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
   function readTrailFile(slug: string): { entries: TrailEntryFrame[] } | { err: BrokerError } {
     const dir = slugDirOf(slug);
     if (!dir) return { err: "E_INVALID" };
-    const p = join(dir, "trail.jsonl");
-    let raw: string;
+    let raw: string | null;
     try {
-      raw = fs.readFileSync(p, "utf8");
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return { entries: [] };
-      return { err: "E_UNAVAILABLE" };
+      raw = readVerified(join(dir, "trail.jsonl"));
+    } catch {
+      return { err: "E_UNAVAILABLE" }; // refusal (symlink plant / verification failure)
     }
+    if (raw === null) return { entries: [] }; // clean ENOENT -> no history
     const entries: TrailEntryFrame[] = [];
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
@@ -706,10 +753,19 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
     const dir = slugDirOf(slug);
     if (!dir) return false;
     try {
+      // verified slug-dir creation: the existing components are verified BEFORE mkdir
+      if (!verifyDirComponents(dir)) return false;
       fs.mkdirSync(dir, { recursive: true });
       return withDirLock(dir, "trail", () => {
-        fs.appendFileSync(join(dir, "trail.jsonl"), `${JSON.stringify(entry)}\n`, "utf8");
-        return true;
+        const fd = openVerified(join(dir, "trail.jsonl"),
+          fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT);
+        if (fd === null) return false;
+        try {
+          fs.writeFileSync(fd, `${JSON.stringify(entry)}\n`, "utf8");
+          return true;
+        } finally {
+          fs.closeSync(fd);
+        }
       });
     } catch {
       return false; // best-effort evidence [C8] — failures never block the gate
@@ -719,20 +775,21 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
   function readGrantsFile(slug: string): { grants: GrantRow[] } | { err: BrokerError } {
     const dir = slugDirOf(slug);
     if (!dir) return { err: "E_INVALID" };
+    let raw: string | null;
     try {
-      const raw = fs.readFileSync(join(dir, "grants.yaml"), "utf8");
-      const parsed = parseGrantsYaml(raw);
-      // corrupt/absent → no grants honored (fail-closed — matches the extension's law)
-      return parsed ?? { grants: [] };
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return { grants: [] };
-      return { grants: [] };
+      raw = readVerified(join(dir, "grants.yaml"));
+    } catch {
+      return { grants: [] }; // refusal -> no grants honored (fail-closed)
     }
+    if (raw === null) return { grants: [] }; // clean ENOENT
+    const parsed = parseGrantsYaml(raw);
+    return parsed ?? { grants: [] };
   }
   function writeGrantsFile(slug: string, grants: GrantRow[]): boolean {
     const dir = slugDirOf(slug);
     if (!dir) return false;
     try {
+      if (!verifyDirComponents(dir)) return false;
       fs.mkdirSync(dir, { recursive: true });
       return withDirLock(dir, "grants", () => {
         atomicWrite(join(dir, "grants.yaml"), emitGrantsYaml(grants));
@@ -748,7 +805,9 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
   function rulesGate(): GateFailure | null {
     let health: { healthy?: unknown; "boot-id"?: unknown } | null = null;
     try {
-      health = JSON.parse(fs.readFileSync(mountHealthPath, "utf8")) as typeof health;
+      const healthTxt = readVerified(mountHealthPath);
+      if (healthTxt === null) throw new Error("health unreadable or unverified");
+      health = JSON.parse(healthTxt) as typeof health;
     } catch {
       return { error: "E_UNAVAILABLE", reason: "mount-health:unreadable" };
     }
@@ -769,7 +828,9 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
     backends: Record<string, { "server-pid": number; "server-starttime": string }[]>;
   } {
     try {
-      const raw = JSON.parse(fs.readFileSync(certifiedPath, "utf8")) as {
+      const certTxt = readVerified(certifiedPath);
+      if (certTxt === null) return { backends: {} }; // unreadable/unverified -> empty set (fail-closed)
+      const raw = JSON.parse(certTxt) as {
         backends?: { backend: string; generations?: unknown[] }[];
       };
       const out: Record<string, { "server-pid": number; "server-starttime": string }[]> = {};
@@ -950,9 +1011,9 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
       let rulesReason = gate ? gate.reason : "";
       if (!gate) {
         try {
-          fs.readFileSync(rulesFile, "utf8");
-          rulesState = "present";
-          rulesReason = "";
+          const stTxt = readVerified(rulesFile);
+          if (stTxt === null) { rulesState = "absent"; rulesReason = ""; }
+          else { rulesState = "present"; rulesReason = ""; }
         } catch (e) {
           if ((e as NodeJS.ErrnoException).code === "ENOENT") rulesState = "absent";
           else { rulesState = "unavailable"; rulesReason = "rules-read-error"; }
@@ -960,7 +1021,8 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
       }
       let attestedMode = "absent";
       try {
-        const a = JSON.parse(fs.readFileSync(attestationPath, "utf8")) as { "install-mode"?: unknown };
+        const attTxt = readVerified(attestationPath);
+        const a = attTxt === null ? {} : JSON.parse(attTxt) as { "install-mode"?: unknown };
         attestedMode = typeof a["install-mode"] === "string" ? a["install-mode"] : "absent";
       } catch { attestedMode = "absent"; }
       let slugs = 0;
@@ -971,7 +1033,7 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
         "rules-state": rulesState,
         ...(rulesReason ? { "rules-reason": rulesReason } : {}),
         "mount-health": (() => {
-          try { return JSON.parse(fs.readFileSync(mountHealthPath, "utf8")); } catch { return { healthy: false, "boot-id": null, "checked-at": null, findings: ["unreadable"] }; }
+          try { const t = readVerified(mountHealthPath); return t === null ? { healthy: false, "boot-id": null, "checked-at": null, findings: ["unreadable"] } : JSON.parse(t); } catch { return { healthy: false, "boot-id": null, "checked-at": null, findings: ["unreadable"] }; }
         })(),
         "mounts-unit-state": mountsUnitState(),
         "certified-backends": readCertifiedBackends().backends,
@@ -1132,9 +1194,20 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
         if (candidates.length === 0) return err(f.id, "E_DENIED_UNREGISTERED");
         for (const e of candidates) {
           if (e.kind === "pre-pinned") {
-            if (typeof secret !== "string" || !hashMatches(secret, e["secret-hash"])) {
-              audit("claim-refused", { "entitlement-id": e["entitlement-id"], why: "secret-mismatch", pid: pin.pid });
-              continue; // fail-closed: no secret ⇒ no claim — never falls through to error echo
+            // finding 1 fix: the claim-secret is ONE-SHOT. First claim consumes it
+            // (tombstoned); later same-instance re-claims ride the row's pid+starttime
+            // pin alone. A captured secret therefore buys exactly ONE fail-closed
+            // displacement — the same bounded residual shape the design accepts for
+            // enrollment tokens — and never a standing 12h bearer. (Connector-level
+            // authentication is unreachable in Node: Linux exposes socket-peer pids
+            // only via SO_PEERCRED, which Node does not implement; the row-pin +
+            // one-shot secret is the smallest mechanism that satisfies the finding.)
+            if (e["secret-hash"] !== null) {
+              if (typeof secret !== "string" || !hashMatches(secret, e["secret-hash"])) {
+                audit("claim-refused", { "entitlement-id": e["entitlement-id"], why: "secret-mismatch", pid: pin.pid });
+                continue; // wrong/missing secret against a live secret-slot — never claims
+              }
+              e["secret-hash"] = null; // one-shot: the secret dies at its first successful use
             }
           } else {
             // enrollment re-claim: same-instance (pid+starttime) match is the credential;
@@ -1230,7 +1303,9 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
       if (gate) return err(f.id, gate.error, { reason: gate.reason });
       let raw: string;
       try {
-        raw = fs.readFileSync(rulesFile, "utf8");
+        const rulesTxt = readVerified(rulesFile);
+        if (rulesTxt === null) return ok(f.id, { state: "absent" }); // ENOENT-only absence
+        raw = rulesTxt;
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "ENOENT") return ok(f.id, { state: "absent" }); // ENOENT-only absence
         return err(f.id, "E_UNAVAILABLE", { reason: "rules-read-error" });
@@ -1420,11 +1495,18 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
         c.entitlement = null;
         persist();
       }
-      // minter-death law (§4.4.1): pending enrollments minted by this connection die
-      const orphans = entitlements.filter(
-        (e) => e.kind === "enrollment" && e.state === "pending" && e["minted-by"] === c.id,
-      );
-      for (const o of orphans) dropEntitlement(o, "minter-death");
+      // minter-death law (§4.4.1) — finding 2 scope fix: pending enrollments minted
+      // by this connection die, EXCEPT root-control mints. A control-socket exit is
+      // the sudo CLI's normal lifecycle (mint-then-exit), not an unexpected minter
+      // death; the root trust anchor replaces the long-lived supervisor connection
+      // the design's law presumes. Daemon restart still kills every pending
+      // enrollment (§4.4.0 step 4) — unchanged.
+      if (!c.control) {
+        const orphans = entitlements.filter(
+          (e) => e.kind === "enrollment" && e.state === "pending" && e["minted-by"] === c.id,
+        );
+        for (const o of orphans) dropEntitlement(o, "minter-death");
+      }
     });
     socket.on("error", () => { /* close follows */ });
   }

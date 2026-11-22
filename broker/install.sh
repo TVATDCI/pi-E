@@ -115,14 +115,26 @@ json_get() { # file key → prints value or nothing (dotted path)
 }
 
 # bounded poll: poll_unit <unit> <want-state> <deadline-seconds>
+# finding 6 fix: ELAPSED-TIME deadlines (the prior loop counted 0.25 s sleeps as whole
+# seconds — every wait ran 4x short). Accept any terminal state in WANT via "|".
 poll_unit() {
-  local unit="$1" want="$2" deadline="$3" waited=0 state
-  while (( waited < deadline )); do
+  local unit="$1" want="$2" deadline="$3" state start
+  start="$(date +%s)"
+  while :; do
     state="$("$SYSTEMCTL" show -p ActiveState --value "$unit" 2>/dev/null || echo unreadable)"
-    if [[ "$state" == "$want" ]]; then return 0; fi
-    sleep 0.25; waited=$((waited + 1))
+    if [[ "|$want|" == *"|$state|"* ]]; then return 0; fi
+    if (( $(date +%s) - start >= deadline )); then return 1; fi
+    sleep 0.25
   done
-  return 1
+}
+
+# finding 5 fix: EXACT mountpoint identity. "findmnt --target P" reports the
+# CONTAINING filesystem for any ordinary path — unusable for mount checks. P is
+# mounted iff the deepest mount at-or-above P is P itself.
+mounted_exactly() {
+  local target
+  target="$("$FINDMNT" -n -o TARGET --target "$1" 2>/dev/null)"
+  [[ -n "$target" && "$target" == "$1" ]]
 }
 
 # ─── ledger phases ────────────────────────────────────────────────────────────
@@ -258,6 +270,8 @@ EOF
     process.stdout.write(JSON.stringify({ slugs, "rules-sha": rulesSha }));
   ' "$STORE_HOME" "$LEGACY_RULES")"
   json_set "$LEDGER" "manifest" "$manifest"
+  # finding 7: snapshot originals (uid/gid/mode per entry) BEFORE any move
+  json_set "$LEDGER" "original-snapshot" "$(snapshot_originals)"
   phase_complete P0
   LOG "P0 complete (txid $TXID, marker-pre=$marker)"
 }
@@ -274,8 +288,8 @@ phase_p1_quiesce() {
 
 phase_p2_mounts_absent() {
   phase_intent P2
-  if "$FINDMNT" --target "$STORE_HOME" >/dev/null 2>&1 && [[ "$("$FINDMNT" -n -o TARGET --target "$STORE_HOME")" != "$STORE_HOME" ]]; then
-    DIE "P2: fresh install requires unmounted targets"
+  if mounted_exactly "$STORE_HOME" || mounted_exactly "$RULES_DIR_MOUNT"; then
+    DIE "P2: fresh install requires unmounted targets (exact mountpoint identity)"
   fi
   phase_complete P2
 }
@@ -325,12 +339,15 @@ phase_p4_backing_tree() {
   fi
   mkdir -p "$BACKING_ROOT/store" "$BACKING_ROOT/rules" "$STATE_DIR" "$STATE_DIR/runtime"
   local staging="$BACKING_ROOT/.staging-$TXID"
+  # finding 7 fix: CHECKED complete-tree migration — no glob skips (dotentries were
+  # silently dropped), no ignored move failures. rsync -a carries hidden entries by
+  # construction and reports failures; the staging tree must be GONE afterwards.
   if [[ -d "$staging/store" ]]; then
-    mv "$staging/store"/* "$BACKING_ROOT/store/" 2>/dev/null || true
-    rmdir "$staging/store" 2>/dev/null || true
+    rsync -a "$staging/store/" "$BACKING_ROOT/store/" || DIE "P4: staging->backing migration failed (store)"
+    rm -rf --one-file-system "$staging/store" || DIE "P4: staging store removal failed after migration"
   fi
   if [[ -f "$staging/rules/rules.yaml" ]]; then
-    mv "$staging/rules/rules.yaml" "$BACKING_ROOT/rules/rules.yaml"
+    mv "$staging/rules/rules.yaml" "$BACKING_ROOT/rules/rules.yaml" || DIE "P4: rules migration failed"
     rmdir "$staging/rules" 2>/dev/null || true
   fi
   # root-owned 0640 state direct entries (certification empty set; attestation; health)
@@ -374,6 +391,45 @@ recursive_pass() { # per-type mode enforcement accompanies the (root) chown — 
   fi
   find "$dir" -type d -exec chmod 02770 {} +
   find "$dir" -type f -exec chmod 0660 {} +
+}
+
+# finding 7 fix: original ownership/mode SNAPSHOT at P0 (pre-move), persisted in the
+# ledger — the rollback's restoration applies it so restored originals are EXACTLY
+# what they were (never broker-owned, never mode-shifted).
+snapshot_originals() {
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const store = process.argv[1];
+    const out = {};
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        const st = fs.lstatSync(p);
+        out[path.relative(store, p)] = { uid: st.uid, gid: st.gid, mode: st.mode & 0o7777 };
+        if (e.isDirectory()) walk(p);
+      }
+    };
+    walk(store);
+    process.stdout.write(JSON.stringify(out));
+  ' "$STORE_HOME"
+}
+
+# restore ownership+modes from the ledger snapshot (non-destructive: entries are
+# already back at their true paths; only uid/gid/mode are applied)
+restore_originals() {
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const store = process.argv[1];
+    const ledger = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+    const snap = ledger["original-snapshot"] || {};
+    for (const [rel, meta] of Object.entries(snap)) {
+      const p = path.join(store, rel);
+      try {
+        fs.chownSync(p, meta.uid, meta.gid);
+        fs.chmodSync(p, meta.mode);
+      } catch (e) { /* restored path missing — surfaced by the end-state check */ }
+    }
+  ' "$STORE_HOME" "$LEDGER"
 }
 
 phase_p5_activate() {
@@ -480,33 +536,33 @@ do_rollback() {
   mirror_created_stubs
   # step 1 — stop the broker (45 s > unit TimeoutStopSec=30)
   "$SYSTEMCTL" stop --no-block minidc-broker.service
-  poll_unit minidc-broker.service inactive 45 || DIE "rollback step 1: broker still stopping at 45 s deadline — abort (re-run resumes idempotently)"
+  poll_unit minidc-broker.service "inactive|failed" 45 || DIE "rollback step 1: broker still stopping at 45 s deadline — abort (re-run resumes idempotently)"
   # step 2 — stop the mounts unit (runs its ExecStop; 120 s > unit TimeoutStopSec=90).
   # Already-inactive branch (prior crash / manual stop): invoke the helper --stop
   # directly ONCE (30 s timeout) for the same write-and-unmount discipline.
   local prestate
   prestate="$("$SYSTEMCTL" show -p ActiveState --value minidc-mounts.service 2>/dev/null || echo inactive)"
   if [[ "$prestate" == "inactive" || "$prestate" == "failed" ]]; then
-    if "$FINDMNT" --target "$STORE_HOME" >/dev/null 2>&1 || "$FINDMNT" --target "$RULES_DIR_MOUNT" >/dev/null 2>&1; then
+    if mounted_exactly "$STORE_HOME" || mounted_exactly "$RULES_DIR_MOUNT"; then
       timeout 30 "$MOUNT_HELPER" --stop || DIE "rollback step 2: direct helper --stop failed — abort"
     fi
   else
     "$SYSTEMCTL" stop --no-block minidc-mounts.service
-    if ! poll_unit minidc-mounts.service inactive 120; then
+    if ! poll_unit minidc-mounts.service "inactive|failed" 120; then
       DIE "rollback step 2: mounts still stopping at 120 s deadline — abort"
     fi
   fi
-  # step 3 — disable both (separate from stops; NO --now anywhere in the rollback)
-  "$SYSTEMCTL" disable minidc-broker.service minidc-mounts.service >/dev/null 2>&1 || true
+  # step 3 — disable both (separate from stops; NO --now anywhere in the rollback;
+  # finding 6 fix: bounded — a symlink operation, 15 s command timeout)
+  timeout 15 "$SYSTEMCTL" disable minidc-broker.service minidc-mounts.service >/dev/null 2>&1 || true
   # step 4 — verify both mountpoints unmounted (30 s deadline)
   local waited=0
-  while (( waited < 30 )); do
-    if ! "$FINDMNT" --target "$STORE_HOME" >/dev/null 2>&1 && ! "$FINDMNT" --target "$RULES_DIR_MOUNT" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.25; waited=$((waited + 1))
+  local mstart; mstart="$(date +%s)"
+  while :; do
+    if ! mounted_exactly "$STORE_HOME" && ! mounted_exactly "$RULES_DIR_MOUNT"; then break; fi
+    if (( $(date +%s) - mstart >= 30 )); then DIE "rollback step 4: mount still present at 30 s — abort (never force)"; fi
+    sleep 0.25
   done
-  if (( waited >= 30 )); then DIE "rollback step 4: mount still present at 30 s — abort (never force)"; fi
   # step 5 — dispose validated-empty helper-created stubs ONLY
   local stub
   while IFS= read -r stub; do
@@ -546,15 +602,18 @@ do_rollback() {
       DIE "rollback step 7: destination occupied: $STORE_HOME — abort before discard AND before the ledger unlink"
     fi
     cp -a "$BACKING_ROOT/store" "$STORE_HOME" || DIE "rollback step 7: post-commit restore from backing failed — abort before discard AND before the ledger unlink (ledger intact)"
-    # the rules file rides the same law
-    if [[ -f "$BACKING_ROOT/rules/rules.yaml" && ! -e "$LEGACY_RULES" ]]; then
-      cp -a "$BACKING_ROOT/rules/rules.yaml" "$LEGACY_RULES" || true
-    fi
   fi
-  # rules file restore (the P3 rules move rides the same transaction)
+  # finding 7 fix: rules restore BEFORE any backing removal, CHECKED, and only from
+  # a still-present backing copy — the abort-before-discard and ledger-first orderings
+  # stay intact (a failed restore aborts with the ledger and tree both present)
   local want2; want2="$(node -e 'const fs=require("fs");try{const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(String(d.manifest["rules-sha"]??"null"))}catch{process.stdout.write("null")}' "$LEDGER")"
-  if [[ "$want2" != "null" && -f "$BACKING_ROOT/rules/rules.yaml" ]]; then
-    mv "$BACKING_ROOT/rules/rules.yaml" "$LEGACY_RULES" || true
+  if [[ "$want2" != "null" && -f "$BACKING_ROOT/rules/rules.yaml" && ! -e "$LEGACY_RULES" ]]; then
+    cp -a "$BACKING_ROOT/rules/rules.yaml" "$LEGACY_RULES" || DIE "rollback step 7: rules restore failed — abort before discard AND before the ledger unlink (ledger intact)"
+  fi
+  # finding 7 fix: restored originals get their ORIGINAL ownership/modes (from the
+  # P0 snapshot) — never broker ownership, never mode drift
+  if [[ -d "$STORE_HOME" ]]; then
+    restore_originals
   fi
   # THE LEDGER UNLINK — first and sole mutating act of the discard phase
   rm -f -- "$LEDGER"
@@ -611,7 +670,7 @@ no_ledger_finalization() {
       DIE "finalization guard: unit $unit is ACTIVE ($unitstate) — refuse (this is not this path's shape; resolver: --rollback after stopping)"
     fi
   done
-  if "$FINDMNT" --target "$STORE_HOME" >/dev/null 2>&1 || "$FINDMNT" --target "$RULES_DIR_MOUNT" >/dev/null 2>&1; then
+  if mounted_exactly "$STORE_HOME" || mounted_exactly "$RULES_DIR_MOUNT"; then
     DIE "finalization guard: a mountpoint is still mounted — abort with the residue named (captain word; never force)"
   fi
   # 2. RESIDUE CLEANUP — convergent (journal remains included; idempotent fixed point)

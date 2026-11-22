@@ -26,6 +26,8 @@ import {
   lastObservation,
   type BrokerPaths,
 } from "../minidc-broker-client.ts";
+// finding 1: wrong-connector/right-secret DENIED rows live in the broker matrix
+// (they drive the daemon directly); imported here only for type parity — none needed.
 import * as net from "node:net";
 import * as fs from "node:fs";
 import { join, dirname } from "node:path";
@@ -281,6 +283,69 @@ async function main(): Promise<void> {
     daemon2.kill("SIGTERM");
     await sleep(300);
     check("lastObservation reflects the recovered state", lastObservation()?.state === "BROKER");
+
+    // ── fix-round finding 9: the missing acceptance sequences ─────────────────
+    // (a) WORKER consume→MULTIPLE-ops: the owner re-claims by identity after the
+    //     one-shot consume — no unknown-grade regression between ops
+    const daemon3: ChildProcess = spawn(process.execPath, [
+      "--experimental-strip-types", join(REPO, "broker", "minidc-broker.ts"),
+      "--root", paths.treePath, "--socket", paths.socketPath, "--control-socket", ctlSock, "--test-mode",
+    ], { stdio: ["ignore", "ignore", "ignore"] });
+    await waitForSocket(paths.socketPath, 5000);
+    const mintFrame = await new Promise<string>((res2) => {
+      const s = net.connect(ctlSock, () => s.write(`${JSON.stringify({ id: 1, op: "register", args: { mode: "enroll-worker", slug: "wslug", "spawn-backend": "b" } })}\n`));
+      let b2 = "";
+      s.on("data", (d) => { b2 += d.toString(); const i = b2.indexOf("\n"); if (i >= 0) { s.destroy(); res2(b2.slice(0, i)); } });
+    });
+    const wToken = ((JSON.parse(mintFrame) as { result: { token: string } }).result)["token"];
+    // (b) mint over a connection that then CLOSES (CLI exit) — the pending enrollment
+    //     survives a CONTROL-socket minter exit (root trust anchor) and consumes later
+    const obsW = await initBrokerClient({ MINIDC_ENROLLMENT: wToken });
+    check("worker consume registers via the owner (broker desk)", obsW.state === "BROKER");
+    const wTrail1 = appendTrailViaBroker("wslug", { v: 1, ts: new Date().toISOString(), actor: "worker", pane: null, task: null, subject: "0000000000000001", cls: "G", decision: "deny", scope: "none" });
+    const wRules = readGlobalRulesViaBroker();
+    const wTrail2 = appendTrailViaBroker("wslug", { v: 1, ts: new Date().toISOString(), actor: "worker", pane: null, task: null, subject: "0000000000000002", cls: "G", decision: "deny", scope: "none" });
+    check("consume→two-ops: BOTH appends + a read succeed (no unknown-grade regression)", wTrail1 && wTrail2 && wRules.state === "present");
+    check("worker grade held across ops (identity re-claim)", bridgeGrade() === "worker");
+    const wSlugScope = readGrantsViaBroker("other");
+    check("worker slug-scoping live through the owner (cross-slug denied ⇒ degraded null)", wSlugScope === null);
+    shutdownBrokerClient();
+    // (c) idle-supervisor append: a firstmate claim that has gone IDLE (owner alive,
+    //     no recent op) still appends — the persistent owner keeps the claim LIVE.
+    //     Fresh backing desk: the restarted daemon still carries this test process's
+    //     earlier captain row (one-role-per-instance would refuse a second mint).
+    const T2 = fs.mkdtempSync("/tmp/minidc-client-matrix-fm-");
+    const P2 = { ...paths, treePath: join(T2, "backing"), socketPath: join(T2, "socket"), markerPath: join(T2, "marker") };
+    fs.mkdirSync(join(P2.treePath, "state"), { recursive: true });
+    fs.mkdirSync(join(P2.treePath, "rules"), { recursive: true });
+    fs.writeFileSync(join(P2.treePath, "state", "mount-health.json"), JSON.stringify({ healthy: true, "boot-id": fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(), "checked-at": "", findings: [] }));
+    fs.writeFileSync(join(P2.treePath, "state", "install-attestation.json"), JSON.stringify({ "install-mode": "broker", "transaction-id": "t2", "attested-at": "" }));
+    fs.writeFileSync(join(P2.treePath, "rules", "rules.yaml"), "bashToolPatterns: []\n");
+    const CTL2 = join(T2, "control.sock");
+    const daemon4: ChildProcess = spawn(process.execPath, [
+      "--experimental-strip-types", join(REPO, "broker", "minidc-broker.ts"),
+      "--root", P2.treePath, "--socket", P2.socketPath, "--control-socket", CTL2, "--test-mode",
+    ], { stdio: ["ignore", "ignore", "ignore"] });
+    await waitForSocket(P2.socketPath, 5000);
+    setBrokerPathsForTesting(P2);
+    const regFm = await new Promise<string>((res2) => {
+      const s = net.connect(CTL2, () => s.write(`${JSON.stringify({ id: 1, op: "register", args: { mode: "plain", role: "firstmate", pid: process.pid, "spawn-backend": "b" } })}\n`));
+      let b3 = "";
+      s.on("data", (d) => { b3 += d.toString(); const i = b3.indexOf("\n"); if (i >= 0) { s.destroy(); res2(b3.slice(0, i)); } });
+    });
+    const fmSecret = ((JSON.parse(regFm) as { result: { "claim-secret": string } }).result)["claim-secret"];
+    const obsFm = await initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
+    check("supervisor claim registered via the owner", obsFm.state === "BROKER" && bridgeGrade() === "firstmate");
+    await sleep(1700); // idle gap — well past any per-op activity
+    const idleAppend = appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000003", cls: "G", decision: "proceed", scope: "once" });
+    check("idle-supervisor append still authorized (live claim, no per-op expiry)", idleAppend);
+    const idleTrail = fs.readFileSync(join(P2.treePath, "store", "idleslug", "trail.jsonl"), "utf8");
+    check("idle append landed server-stamped firstmate", idleTrail.includes('"actor":"firstmate"'));
+    shutdownBrokerClient();
+    daemon4.kill("SIGTERM");
+    daemon3.kill("SIGTERM");
+    await sleep(300);
+    fs.rmSync(T2, { recursive: true, force: true });
 
     // N1 fresh re-validation shape: fresh read-grants is a live roundtrip (degrades closed)
     const degraded = readGrantsViaBroker("clslug");

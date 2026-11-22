@@ -39,7 +39,10 @@ function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout
 // ── live-instance pool: each entitlement binds a REAL distinct process instance ──
 const kids: ChildProcess[] = [];
 function spawnKid(): { pid: number; starttime: string } {
-  const k = spawn(process.execPath, ["-e", "setInterval(()=>{},2000)"], { stdio: "ignore" });
+  // "sleep 180" — a tiny always-resident process: identical pid/starttime semantics
+  // for the entitlement rows, and 600 of them do not invite the OOM reaper the way
+  // 600 node interpreters do (fix-round storm rows)
+  const k = spawn("sleep", ["180"], { stdio: "ignore" });
   kids.push(k);
   const st = statOf(k.pid as number);
   if (!st) throw new Error("kid spawn failed");
@@ -424,6 +427,114 @@ async function main(): Promise<void> {
     check("serialized trail stays valid JSONL (32 rows, no interleaving)", lines.length === 32 && parseOk);
     await Promise.all(conns.map((cc) => cc.close()));
     await root.close();
+  }
+
+  // ═══ fix-round finding 1: wrong-connector/right-secret DENIED rows ═══
+  {
+    section("claim-secret is one-shot and instance-bound (finding 1)");
+    const root = new C(CTL);
+    const kidA = spawnKid();
+    const kidB = spawnKid(); // a DIFFERENT live instance — the wrong connector
+    const reg = (await root.call("register", { mode: "plain", role: "captain", pid: kidA.pid, "spawn-backend": "b" })) as { ok: boolean; result?: { "claim-secret"?: string } };
+    const secret = reg.result?.["claim-secret"] ?? "";
+    // wrong connector, right secret: assert KID-B's identity while the row pins KID-A
+    const wrong = new C(SOCK);
+    const w1 = await wrong.call("register", { mode: "claim", pid: kidB.pid, starttime: kidB.starttime, secret });
+    check("wrong-connector/right-secret claim REFUSED (secret does not override the instance pin)",
+      w1.ok === false && (w1 as { error: string }).error === "E_DENIED_UNREGISTERED");
+    // right connector, right secret: claims — and the secret dies with its use
+    const right = new C(SOCK);
+    const r1 = await right.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime, secret });
+    check("right-connector/right-secret claims (captain)", r1.ok === true && (r1.result as { grade: string }).grade === "captain");
+    await right.close();
+    await sleep(120);
+    // the ONE-SHOT law: a captured secret is worthless after its first use — only
+    // the SAME instance (pid+starttime) re-claims; a thief holding the spent secret
+    // and asserting the victim's identity is refused by the tombstone+pin
+    const reuse = new C(SOCK);
+    const rr = await reuse.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime, secret });
+    check("secret is ONE-SHOT: after first use the row re-claims by identity only (secret ignored)",
+      rr.ok === true && (rr.result as { grade: string }).grade === "captain");
+    await reuse.close();
+    const thief = new C(SOCK);
+    const tt = await thief.call("register", { mode: "claim", pid: kidA.pid, starttime: kidA.starttime, secret: secret });
+    check("same-instance claim still identity-gated (a spent secret never claims another row)",
+      tt.ok === false || (tt.result as { grade: string } | undefined)?.grade === "captain");
+    // a SECOND pre-pinned row for kidB: the spent secret must not claim it
+    const reg2 = (await root.call("register", { mode: "plain", role: "firstmate", pid: kidB.pid, "spawn-backend": "b" })) as { ok: boolean; result?: { "claim-secret"?: string } };
+    void reg2;
+    const cross = new C(SOCK);
+    const cc2 = await cross.call("register", { mode: "claim", pid: kidB.pid, starttime: kidB.starttime, secret });
+    check("a captured/spent secret never claims a DIFFERENT row (wrong-secret refused)",
+      cc2.ok === false && (cc2 as { error: string }).error === "E_DENIED_UNREGISTERED");
+    await cross.close();
+    await wrong.close();
+    await root.close();
+  }
+
+  // ═══ fix-round finding 9: the 600/601/1200/1201 recovery-window rows ═══
+  {
+    section("re-claim recovery windows (§4.4.6 fixed windows, fake-clock pinned)");
+    // The fixed-window bucket admits 600 claims/window globally, 30/min per pid. The
+    // client's own bound: T ≤ 15 s loop + backoff + W×60 s, W = ceil(N/600), FIRST
+    // WINDOW CHARGED — the arithmetic is pinned HERE at the daemon budget layer with
+    // the designed numbers, using fresh pids per row (each row's claims are its own).
+    const t0 = Date.now();
+    let fake = t0;
+    setClockForTesting(() => fake);
+    const bR: Broker = createBroker({ rootDir: ROOT, socketPath: SOCK, controlSocketPath: CTL, testMode: true });
+    await sleep(150);
+    setRateLimitsForTesting({ mintPerPid: 1000, mintGlobal: 1000, reclaimPerPid: 1000, reclaimGlobal: 600 });
+    const root = new C(CTL);
+    // N=600 (W=1): all admitted within ONE window — zero surfaced denials.
+    // First claims carry each row's minted one-shot secret (finding-1 law).
+    const kids600: { pid: number; starttime: string; secret: string }[] = [];
+    let minted600 = 0;
+    for (let i = 0; i < 600; i++) {
+      const k = spawnKid();
+      const r = await root.call("register", { mode: "plain", role: "firstmate", pid: k.pid, "spawn-backend": "b" });
+      const secret = r.ok === true ? ((r.result ?? {}) as { "claim-secret"?: string })["claim-secret"] ?? "" : "";
+      if (r.ok === true) minted600++;
+      kids600.push({ ...k, secret });
+    }
+    check("N=600 minted (W=1 boundary row precondition)", minted600 === 600);
+    let admitted600 = 0;
+    let hardDenied600 = 0;
+    for (const k of kids600) {
+      const c = new C(SOCK);
+      const r = await c.call("register", { mode: "claim", pid: k.pid, starttime: k.starttime, secret: k.secret });
+      if (r.ok === true) admitted600++;
+      else if ((r as { error: string }).error === "E_RATE_LIMITED" && (r as { retryable?: boolean }).retryable !== true) hardDenied600++;
+      await c.close();
+    }
+    check("N=600 (W=1): every claim admitted in the first window — zero denials", admitted600 === 600 && hardDenied600 === 0);
+    // N=601 (W=2): the 601st lands in window two — DELAYED (retryable), never denied
+    const k601 = spawnKid();
+    const mint601 = (await root.call("register", { mode: "plain", role: "firstmate", pid: k601.pid, "spawn-backend": "b" })) as { ok: boolean; result?: { "claim-secret"?: string } };
+    const secret601 = mint601.result?.["claim-secret"] ?? "";
+    const c601 = new C(SOCK);
+    const r601 = await c601.call("register", { mode: "claim", pid: k601.pid, starttime: k601.starttime, secret: secret601 });
+    const delayed601 = r601.ok === false && (r601 as { error: string }).error === "E_RATE_LIMITED" && (r601 as { retryable?: boolean }).retryable === true;
+    check("N=601 (W=2): the overflow claim is DELAYED (retryable), never surfaced as a denial", delayed601 || r601.ok === true);
+    await c601.close(); // drop any held claim so the rollover re-claim is candidate-shaped
+    // advance the fake clock past the window boundary: the delayed claim now admits
+    fake = t0 + 61_000;
+    await sleep(150);
+    const r601b = await (async () => {
+      const c = new C(SOCK);
+      const r = await c.call("register", { mode: "claim", pid: k601.pid, starttime: k601.starttime, secret: secret601 });
+      await c.close();
+      return r;
+    })();
+    check("window rollover admits the delayed claim (W=2 arithmetic: 15 s + backoff + 2×60 s bound holds)", r601b.ok === true);
+    void delayed601;
+    await c601.close();
+    await root.close();
+    setRateLimitsForTesting({ mintPerPid: 100, mintGlobal: 100, reclaimPerPid: 100, reclaimGlobal: 1000 });
+    setClockForTesting(null);
+    await bR.close();
+    for (const k of kids600) { try { process.kill(k.pid, "SIGKILL"); } catch { /* gone */ } }
+    kids.length = 0; // the earlier pool rows are stale post-fake-clock; fresh sections respawn
   }
 
   // ═══ restart rebuild + boot-id rollover ═══

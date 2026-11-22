@@ -147,6 +147,16 @@ function globalRulesPaths(): string[] {
 let brokerMode = false;
 let modeDegradedReason: string | null = null; // UNAVAILABLE/CONFLICT fixed-error text
 
+/** Fix-round finding 3: the DIRECT-FILE store law runs ONLY for LEGACY sessions
+ *  (and the never-observed pre-init window, which is today's default law). A
+ *  degraded session (UNAVAILABLE/CONFLICT) NEVER touches files directly — its
+ *  evidence rows are lost-evidence-tolerated per §6, exactly like broker-down —
+ *  never a silent direct-file fallback behind the wall's back. */
+function legacyFileLaw(): boolean {
+  const obs = lastObservation();
+  return obs === null || obs.state === "LEGACY";
+}
+
 // AF1 round (2026-11-17): test seam — the harness points the RULES-LOADING global path at a
 // scratch fixture so no test outcome depends on the desk's real global rules file (same
 // discipline as setStoreRootForTesting). Only the session_start load consults this override;
@@ -472,7 +482,9 @@ function withDirLock<T>(dir: string, name: string, fn: () => T): T {
  *  (actor==="gate" ⇔ origin=gate, §4.4.4: every gate row flows through this one point)
  *  and the server stamps the actor (seat rows: claim grade; gate rows: verbatim). */
 export function appendTrail(slug: string, entry: TrailEntry): boolean {
-  if (brokerMode && brokerClientActive()) {
+  if (!legacyFileLaw()) {
+    // broker-mode desks (healthy OR degraded) route through the client; a degraded
+    // session's bridge is absent ⇒ the op's degraded return (evidence lost per §6)
     try {
       return appendTrailViaBroker(slug, entry);
     } catch {
@@ -495,7 +507,7 @@ export function appendTrail(slug: string, entry: TrailEntry): boolean {
  *  absent/corrupt trail = absent line), never a guessed partial history. R2: broker-mode
  *  reads ride the registered connection (worker: own slug — the server enforces). */
 export function readTrail(slug: string): TrailEntry[] | null {
-  if (brokerMode && brokerClientActive()) {
+  if (!legacyFileLaw()) {
     try {
       return readTrailViaBroker(slug);
     } catch {
@@ -1078,7 +1090,7 @@ export function buildDecisionHeader(input: {
 // ═════════════════════════════════════════════════════════════════════════════
 
 export function loadGrants(slug: string): Grant[] {
-  if (brokerMode && brokerClientActive()) {
+  if (!legacyFileLaw()) {
     try {
       const rows = readGrantsViaBroker(slug);
       if (rows === null) return []; // degraded ⇒ no grants honored (fail-closed)
@@ -1115,7 +1127,7 @@ export function loadGrants(slug: string): Grant[] {
 function saveGrants(slug: string, grants: Grant[]): boolean {
   // R2 broker-mode: grants mutate ONLY through create-grant/revoke-grant ops (server-
   // enforced Q3 law); the bulk write path never runs there.
-  if (brokerMode && brokerClientActive()) return false;
+  if (!legacyFileLaw()) return false;
   const dir = storeDirFor(slug);
   mkdirSync(dir, { recursive: true });
   return withDirLock(dir, "grants", () => {
@@ -1138,7 +1150,7 @@ export function createGrant(input: {
     return { error: "firstmate creates R-class grants via the answer surface only (Q3)" };
   }
   const now = input.now ?? new Date();
-  if (brokerMode && brokerClientActive()) {
+  if (!legacyFileLaw()) {
     // R2: the store write routes through the broker op; the server re-enforces the Q3
     // grade law and stamps creator-seat from the connection's claim (never client-supplied).
     const r = createGrantViaBroker(slug, pattern.trim());
@@ -1168,7 +1180,7 @@ export function createGrant(input: {
 }
 
 export function revokeGrant(slug: string, id: string): boolean {
-  if (brokerMode && brokerClientActive()) {
+  if (!legacyFileLaw()) {
     return revokeGrantViaBroker(slug, id);
   }
   const grants = loadGrants(slug);
