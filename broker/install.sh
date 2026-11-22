@@ -776,7 +776,10 @@ main() {
         LOG "legacy mode selected (tuple 12; advisory marker only)"
         exit 0
       fi
-      DIE "--mode accepts broker|legacy (broker is the default full install)"
+      if [[ "${2:-}" != "broker" ]]; then
+        DIE "--mode accepts broker|legacy (broker is the default full install)"
+      fi
+      do_install
       ;;
     --rollback)
       do_rollback
