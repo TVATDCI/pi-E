@@ -8,7 +8,10 @@ Description=mini-dc broker daemon
 After=minidc-mounts.service
 
 [Service]
-Type=notify
+# Type=simple, not notify: Node 26's dgram has no AF_UNIX support ("Bad socket
+# type specified"), so sd_notify(READY) from the daemon cannot work — readiness
+# is proven by install.sh's brokerctl status poll instead.
+Type=simple
 User=minidc-broker
 Group=minidc-broker
 RuntimeDirectory=minidc-broker

@@ -499,7 +499,7 @@ phase_p5_activate() {
 }
 
 brokerctl_status_ok() {
-  local ctl="$SCRIPT_DIR/minidc-brokerctl"
+  local ctl="$SCRIPT_DIR/minidc-brokerctl.ts"
   if [[ -n "$TEST_ROOT" ]]; then ctl="$STUB_BIN/minidc-brokerctl"; fi
   "$ctl" status --socket "$RUN_DIR/socket" >/dev/null 2>&1
 }
@@ -776,7 +776,10 @@ main() {
         LOG "legacy mode selected (tuple 12; advisory marker only)"
         exit 0
       fi
-      DIE "--mode accepts broker|legacy (broker is the default full install)"
+      if [[ "${2:-}" != "broker" ]]; then
+        DIE "--mode accepts broker|legacy (broker is the default full install)"
+      fi
+      do_install
       ;;
     --rollback)
       do_rollback

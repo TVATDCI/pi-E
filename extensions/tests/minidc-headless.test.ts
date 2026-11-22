@@ -7,9 +7,27 @@
 // machine's global rules file. json/print are the DISPATCH-class locks (spawn children run
 // --mode json -p); rpc is a separate policy lock; tui is the interactive regression lock.
 import miniDc from "../mini-damage-control.ts";
+import { setBrokerPathsForTesting } from "../minidc-broker-client.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
+
+// Hermetic desk world: pin ALL broker-observation paths to scratch so assertions
+// are independent of the real desk's install state (uninstalled / mid-install /
+// broker-active). Absent marker, tree, socket and attested rules + a present
+// empty legacy global-rules file reproduce the clean legacy desk the
+// expectations were written against. Without this the suite breaks on any desk
+// where install.sh has started (marker written, legacy rules migrated aside).
+const DESK = mkdtempSync(join(os.tmpdir(), "minidc-desk-"));
+mkdirSync(join(DESK, ".pi"), { recursive: true });
+writeFileSync(join(DESK, ".pi", "mini-dc-rules.yaml"), "");
+setBrokerPathsForTesting({
+  treePath: join(DESK, "tree"),
+  socketPath: join(DESK, "socket"),
+  markerPath: join(DESK, ".pi", "mini-dc-install-mode"),
+  attestedRulesPath: join(DESK, ".pi", "mini-dc-rules"),
+  legacyRulesPath: join(DESK, ".pi", "mini-dc-rules.yaml"),
+});
 
 let pass = 0;
 let fail = 0;

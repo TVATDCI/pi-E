@@ -22,6 +22,7 @@
     "mini-damage-control.ts",
     "mini-purpose-gate.ts",
     "mini-task-tracker.ts",
+    "minidc-broker-client.ts",
     "operator-guard.ts",
     "orchestration-engine/index.ts",
     "persona-forge.ts",
