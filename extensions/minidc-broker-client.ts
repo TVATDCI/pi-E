@@ -584,15 +584,17 @@ export function shutdownBrokerClient(): void {
 
 // ── the gate-facing operations (degradation per §6: never a hang, never a guess) ──
 export interface BrokerTrailEntry {
-  v: number;
+  v: 1; // the schema version the wire validates (cleanup F1: literal to match TrailEntry)
   ts: string;
-  actor: string;
+  // cleanup F1: literal unions matching the wire's server-side validation —
+  // structurally assignable to the gate's TrailEntry
+  actor: "captain" | "firstmate" | "worker" | "gate";
   pane: string | null;
   task: string | null;
   subject: string;
-  cls: string;
-  decision: string;
-  scope: string;
+  cls: "D" | "R" | "G";
+  decision: "proceed" | "deny" | "park";
+  scope: "once" | "session" | "grant" | "none";
   message?: string;
 }
 export interface BrokerGrantRow {

@@ -67,7 +67,7 @@ function writeCertified(entries: { backend: string; pid: number; starttime: stri
 }
 
 interface Frame { id: number; op: string; args: Record<string, unknown>; }
-type Res = { id: number; ok: true; result: Record<string, unknown> } | { id: number; ok: false; error: string; retryable?: boolean; reason?: string };
+type Res = { id: number; ok: true; result: Record<string, unknown> } | { id: number; ok: false; error: string; retryable?: boolean; reason?: string; result?: undefined }; // cleanup F1: the result?: undefined arm lets .result access typecheck across the union (tests access it only after ok checks)
 
 class C {
   sock: net.Socket;

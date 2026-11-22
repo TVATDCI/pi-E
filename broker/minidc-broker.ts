@@ -681,7 +681,7 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
         return null; // unknown fields refused (entry-immutability discipline)
       }
     }
-    return o as TrailEntryFrame;
+    return o as unknown as TrailEntryFrame; // validated field-by-field above (cleanup F1: double-cast for the Record-to-interface step)
   }
 
   // verified no-follow opens (finding 4: backing-only/no-follow realized). Node
@@ -802,12 +802,15 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
 
   // ── rules gate (§4.2: mount-health + unit-state factor into EVERY rules read) ──
   interface GateFailure { error: "E_UNAVAILABLE"; reason: string }
+  interface MountHealthDoc { healthy?: unknown; "boot-id"?: unknown }
   function rulesGate(): GateFailure | null {
-    let health: { healthy?: unknown; "boot-id"?: unknown } | null = null;
+    // cleanup F1: the as-typeof-health form resolved against the NARROWED type
+    // (null), leaving health dead-typed - the named interface keeps it live
+    let health: MountHealthDoc | null = null;
     try {
       const healthTxt = readVerified(mountHealthPath);
       if (healthTxt === null) throw new Error("health unreadable or unverified");
-      health = JSON.parse(healthTxt) as typeof health;
+      health = JSON.parse(healthTxt) as MountHealthDoc | null;
     } catch {
       return { error: "E_UNAVAILABLE", reason: "mount-health:unreadable" };
     }
@@ -1132,7 +1135,10 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
       }
       if (mode === "consume") {
         // the one single-use act (§4.4.0): token → pin presenter → claim, atomically
-        if (registered && grade !== "root") return err(f.id, "E_INVALID"); // consume is the unknown-grade family
+        // cleanup F1: registered&& correlates grade to the 3-union, dead-typing the
+        // root compare; c.control IS the root determination (gradeOf) - same runtime
+        // law, types that reflect it
+        if (registered && !c.control) return err(f.id, "E_INVALID"); // consume is the unknown-grade family
         const token = f.args["token"];
         if (typeof token !== "string" || token.length < 32 || token.length > 128) return err(f.id, "E_INVALID");
         if (!mintBudgetOk(typeof f.args["pid"] === "number" ? (f.args["pid"] as number) : c.id)) {
@@ -1331,7 +1337,7 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
       if (!wireSlugOk(slug)) return err(f.id, "E_INVALID");
       if (!slugScopeOk(c, slug)) return err(f.id, "E_DENIED_SLUG");
       const r = readGrantsFile(slug);
-      return ok(f.id, { grants: r.grants });
+      return ok(f.id, { grants: "grants" in r ? r.grants : [] }); // cleanup F1: union guard (the err arm is unreachable here - slug pre-validated)
     }
 
     if (op === "append-trail") {
@@ -1383,11 +1389,12 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
       }
       const r = readGrantsFile(slug);
       const grants = ("grants" in r ? r.grants : []);
+      const gAll = gradeOf(c); // full runtime domain incl. root (cleanup F1)
       const id = `g-${now().toString(36)}-${randomBytes(3).toString("hex")}`;
       const row: GrantRow = {
         id,
         "created-at": new Date(now()).toISOString(),
-        "creator-seat": g === "root" ? "captain" : g,
+        "creator-seat": gAll === "firstmate" ? "firstmate" : "captain", // root/unknown stamp captain (worker denied above; cleanup F1 typed mapping)
         pattern: pattern.trim(),
         "class-filter": "R",
       };
@@ -1524,8 +1531,16 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
     const ns = process.env["NOTIFY_SOCKET"];
     if (!ns) return;
     try {
-      const sock = dgram.createSocket("unix_dgram");
-      sock.send(`READY=1\nMAIN_PID=${process.pid}\n`, () => sock.close());
+      // cleanup F1: this @types vintage's SocketType omits "unix_dgram" (Node runs
+      // it fine) — a typed cast on the LITERAL, the call otherwise unchanged
+      const sockType = "unix_dgram" as unknown as Parameters<typeof dgram.createSocket>[0];
+      const sock = dgram.createSocket(sockType);
+      // cleanup F1: @types' dgram send overloads lack the (msg, cb) shape for unix
+      // sockets - a structural shim keeps the runtime call byte-identical
+      type NotifySender = { send(m: string, cb: (err: Error | null) => void): unknown };
+      const sender = sock as unknown as NotifySender;
+      const notice = "READY=1\nMAIN_PID=" + String(process.pid) + "\n";
+      sender.send(notice, () => sock.close());
     } catch { /* Type=notify best-effort from Node; systemd degrades on timeout */ }
   }
 

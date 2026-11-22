@@ -180,6 +180,13 @@ function legacyDesk(withRules = true): void {
   stubs();
 }
 
+// cleanup F1: spawnSync's typing keeps stdout/stderr Buffer-typed unless the
+// encoding literal is carried through every call site — a typed accessor keeps
+// the string concatenations annotation-clean
+function so(x: string | Buffer | null): string {
+  return (x ?? "").toString();
+}
+
 function runInstall(args: string[] = []): ReturnType<typeof spawnSync> {
   return spawnSync("bash", [INSTALL, ...args], {
     encoding: "utf8",
@@ -215,7 +222,7 @@ function main(): void {
     section("fresh install: P0→P7 (ledger, P4 modes, journal, units, stubs, marker)");
     legacyDesk();
     const r = runInstall();
-    if (r.status !== 0) console.log("    install output:", (r.stdout ?? "") + (r.stderr ?? ""));
+    if (r.status !== 0) console.log("    install output:", so(r.stdout) + so(r.stderr));
     check("install exits 0", r.status === 0);
     const phases = ledgerPhases();
     check("all phases complete in the ledger", ["P0", "P3", "P4", "P5", "P6", "P7"].every((p) => phases[p] === "complete"));
@@ -231,7 +238,7 @@ function main(): void {
     check("units written with substituted paths", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes(T + "/var/lib/minidc-broker") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("@BACKING_ROOT@"));
     check("mounts unit carries ExecStop --stop + TimeoutStopSec=90", fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("ExecStop=") && fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("TimeoutStopSec=90"));
     check("broker unit: Type=notify + TimeoutStartSec=60 + TimeoutStopSec=30 + no Requires", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Type=notify") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Requires="));
-    const ledgerDoc = JSON.parse(fs.readFileSync(LEDGER, "utf8")) as { "created-stubs"?: string[] };
+    const ledgerDoc = JSON.parse(fs.readFileSync(LEDGER, "utf8")) as { "created-stubs"?: string[]; "marker-pre"?: { present?: boolean } }; // cleanup F1: the marker-pre index
     // P7 (commit) DELETES the aside copies per the design — post-commit rollback is
     // "reinstall from the manifest copies inside the backing tree itself"
     check("P7 deleted the aside rollback copies (post-commit law)", findAside() === null);
@@ -246,7 +253,7 @@ function main(): void {
   {
     section("rollback (ledger-driven): LEDGER-FIRST discard, restored end state");
     const r = runInstall(["--rollback"]);
-    if (r.status !== 0) console.log("    rollback output:", (r.stdout ?? "") + (r.stderr ?? ""));
+    if (r.status !== 0) console.log("    rollback output:", so(r.stdout) + so(r.stderr));
     check("rollback exits 0", r.status === 0);
     check("backing namespace ABSENT (clean end state)", !fs.existsSync(BACKING));
     check("NO ledger file exists anywhere after the completed rollback", !fs.existsSync(LEDGER));
@@ -319,12 +326,12 @@ function main(): void {
     fs.writeFileSync(MARKER, "broker");
     const r = runInstall();
     check("broker-valued marker at P0 ⇒ REFUSED (exit 3, nothing minted)", r.status === 3 && !fs.existsSync(LEDGER));
-    check("refusal names both resolvers", ((r.stderr ?? "") + (r.stdout ?? "")).includes("--repair-mode"));
+    check("refusal names both resolvers", (so(r.stderr) + so(r.stdout)).includes("--repair-mode"));
     legacyDesk();
     w(join(T, "etc", "sudoers.d", "plant"), "vladi ALL=(ALL) NOPASSWD: /usr/lib/minidc/minidc-brokerctl\n");
     const r2 = runInstall();
     check("planted NOPASSWD sudoers rule ⇒ install fails the assertion", r2.status !== 0);
-    check("NOPASSWD refusal names the law", ((r2.stderr ?? "") + (r2.stdout ?? "")).includes("NOPASSWD"));
+    check("NOPASSWD refusal names the law", (so(r2.stderr) + so(r2.stdout)).includes("NOPASSWD"));
   }
 
   // ═══ resume after a mid-install crash (P3 complete, P4 not) ═══
