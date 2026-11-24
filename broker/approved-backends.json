@@ -1,4 +1,15 @@
 {
   "version": 1,
-  "backends": []
+  "backends": [
+    {
+      "backend": "pi",
+      "exe-digests": [
+        "d931c649850ffa7155b8ceffb400dc916ef325866e509cc52ae36e33e8fbb9a9"
+      ],
+      "adapter-digests": [
+        "9e27eda4bf8e44acdd0a79df9cf99789c142221388375f56ea199981ad8e3044"
+      ],
+      "protocol-revision": 2
+    }
+  ]
 }
