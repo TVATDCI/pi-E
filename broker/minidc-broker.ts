@@ -598,11 +598,11 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
   }
 
   // ── persistence: atomic replacement (D2: strict paths, umask 0007, O_EXCL temps) ──
-  function atomicWrite(path: string, content: string): void {
+  function atomicWrite(path: string, content: string, mode = 0o660): void {
     if (!verifyDirComponents(path)) throw new Error("unverified components");
     const dir = dirname(path);
     const tmp = join(dir, `.tmp-${process.pid}-${randomBytes(4).toString("hex")}`);
-    const fd = fs.openSync(tmp, "wx", 0o660); // O_EXCL — refuses pre-planted temps
+    const fd = fs.openSync(tmp, "wx", mode); // O_EXCL — refuses pre-planted temps
     try {
       fs.writeFileSync(fd, content, "utf8");
       fs.fsyncSync(fd);
@@ -1696,7 +1696,7 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
       if (typeof content !== "string" || content.length > 1_000_000) return err(f.id, "E_INVALID");
       if (!validateRulesYaml(content)) return err(f.id, "E_INVALID"); // fail-closed validation
       try {
-        atomicWrite(rulesFile, content); // mkstemp-class O_EXCL 0660 + rename — atomic through both paths (§4.1.1)
+        atomicWrite(rulesFile, content, 0o664); // D4: rules are the readable safety floor — rewrites keep other-read (the installer's rules_pass plants 0664; the setgid rules dir steers the group); every other atomic write keeps the 0660 boundary
       } catch {
         return err(f.id, "E_UNAVAILABLE");
       }
