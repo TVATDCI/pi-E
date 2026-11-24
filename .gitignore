@@ -82,6 +82,16 @@ crashes.json
 # mini-dc gate runtime store — machine-local trail + grants, never committed
 # (storeRoot() is ~/.pi/agent/mini-dc, which IS this repo's root on the live agent home)
 /mini-dc/
+
+# ── R2 BROKER INSTALL RUNTIME STATE — desk-local, never tracked ─────────────
+# The approved digest list (broker/approved-backends.json) is TRACKED repo content
+# (changes only through captain-approved merged PRs). These install-runtime
+# artifacts are machine-local by design and must never land in the repo:
+# certified-backends.json (the certification store — certify is its sole writer),
+# installation-id (the desk-local 128-bit install identity), and append trails.
+**/certified-backends.json
+**/installation-id
+**/trail.jsonl
 .backpassrc.json
 .backpass/
 

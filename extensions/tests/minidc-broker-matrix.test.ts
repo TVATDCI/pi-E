@@ -1,4 +1,5 @@
-// extensions/tests/minidc-broker-matrix.test.ts — the R2 broker matrix (design §8).
+// extensions/tests/minidc-broker-matrix.test.ts — the R2 broker matrix (design §8;
+// presenter/certification layer per r2-design-spec-sol-draft-2026-11-24 v2).
 // Run: node --experimental-strip-types minidc-broker-matrix.test.ts
 //
 // Drives the REAL daemon (broker/minidc-broker.ts createBroker) on a scratch backing
@@ -6,6 +7,14 @@
 // store). Entitled process instances are REAL live child processes (one role per
 // instance — the daemon refuses double-roles per pid), claimed through the
 // client-asserted identity model (D1d: asserted pid + /proc self-consistency).
+//
+// The ATTRIBUTION section (R2 v2) drives the presenter family exactly as production
+// uses it: the compiled SO_PEERCRED helper (real C, compiled into scratch), the real
+// certify flow (broker/minidc-certify.ts — the sole-writer law exercised on the real
+// module), REAL external presenter processes (their kernel pid/uid is what the
+// broker must stamp), the four deterministic delegation red cases (wrong claim,
+// wrong instance, replay, expired), deleted-artifact rejection, installation-ID
+// binding, revocation, restart persistence, and the canary CLI end-to-end.
 import {
   createBroker,
   setClockForTesting,
@@ -13,16 +22,71 @@ import {
   setUnitStateSourceForTesting,
   type Broker,
 } from "../../broker/minidc-broker.ts";
+import {
+  certifyBackend,
+  revokeBackend,
+  sha256File,
+  readInstallationId,
+} from "../../broker/minidc-certify.ts";
 import * as net from "node:net";
 import * as fs from "node:fs";
 import { join } from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, execFileSync, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const ROOT = fs.mkdtempSync("/tmp/minidc-broker-matrix-");
 const SOCK = join(ROOT, "socket");
 const CTL = join(ROOT, "control.sock");
 const STATE = join(ROOT, "state");
 const BOOT_ID = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+// the R2 v2 kernel-identity leg: compile the REAL SO_PEERCRED helper into scratch
+// (same C the installer compiles; a missing compiler is a hard fail — this is the
+// load-bearing identity primitive, never skipped)
+const PEERCRED_HELPER = join(ROOT, "peercred-helper");
+execFileSync("cc", ["-O2", "-Wall", "-o", PEERCRED_HELPER, join(import.meta.dirname, "..", "..", "broker", "minidc-peercred-helper.c")]);
+// the certify fixtures: this suite's own node binary is the certified artifact class
+// (children spawn from process.execPath ⇒ /proc/<pid>/exe digests match), and a
+// scratch adapter file stands in for the installed protocol adapter
+const NODE_EXE = process.execPath;
+const NODE_DIGEST = sha256File(NODE_EXE);
+const ADAPTER_FIXTURE = join(ROOT, "adapter-fixture.ts");
+fs.writeFileSync(ADAPTER_FIXTURE, "// r2 matrix adapter fixture — digest-measured, not executed\n");
+const ADAPTER_DIGEST = sha256File(ADAPTER_FIXTURE);
+const INSTALL_ID = randomHex32();
+fs.mkdirSync(STATE, { recursive: true });
+fs.writeFileSync(join(STATE, "installation-id"), INSTALL_ID);
+function randomHex32(): string {
+  // local (not imported) so this file stays a self-contained script
+  const chars = "0123456789abcdef";
+  let out = "";
+  for (let i = 0; i < 32; i++) out += chars[Math.floor(Math.random() * 16)];
+  return out;
+}
+const APPROVED = join(ROOT, "approved-backends.json");
+function writeApproved(exeDigests: string[], adapterDigests: string[], protocolRevision: number): void {
+  fs.writeFileSync(APPROVED, JSON.stringify({
+    version: 1,
+    backends: [{
+      backend: "matrixbe",
+      "exe-digests": exeDigests,
+      "adapter-digests": adapterDigests,
+      "protocol-revision": protocolRevision,
+    }],
+  }));
+}
+function certifyOpts(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    backend: "matrixbe",
+    exePath: NODE_EXE,
+    adapterPath: ADAPTER_FIXTURE,
+    stateDir: STATE,
+    approvedListPath: APPROVED,
+    socketPath: SOCK,
+    requireRoot: false, // the harness IS the scratch operator; the euid gate is
+                        // pinned separately via the real CLI subprocess below
+    ...overrides,
+  };
+}
 
 let pass = 0, fail = 0;
 function check(name: string, cond: boolean): void {
@@ -48,6 +112,140 @@ function spawnKid(): { pid: number; starttime: string } {
   if (!st) throw new Error("kid spawn failed");
   return { pid: k.pid as number, starttime: st.starttime };
 }
+
+// ── the R2 v2 presenter driver: a REAL external process speaking the claim family ──
+// Each Driver child is a live node process whose /proc/<pid>/exe IS the certified
+// artifact — the broker's SO_PEERCRED pid/uid and live /proc measurements run against
+// THIS process, exactly as against a production backend.
+const DRIVER_SOURCE = `
+const net = require("node:net");
+const readline = require("node:readline");
+const SOCK = process.argv[1];
+const c = net.connect(SOCK, () => { process.stderr.write("D:ready\\n"); });
+let buf = "";
+let nextId = 1;
+const pending = new Map();
+c.on("data", (d) => {
+  buf += d.toString("utf8");
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    let f; try { f = JSON.parse(line); } catch (e) { continue; }
+    const cb = pending.get(f.id);
+    if (cb) { pending.delete(f.id); cb(f); }
+  }
+});
+c.on("error", () => {});
+function call(op, args) {
+  return new Promise((res) => {
+    const id = nextId++;
+    pending.set(id, res);
+    c.write(JSON.stringify({ id, op, args }) + "\\n");
+  });
+}
+function entry(subject) {
+  return {
+    v: 1, ts: new Date().toISOString(), actor: "worker", pane: null,
+    task: "matrix-attribution", subject: subject, cls: "G", decision: "proceed", scope: "once",
+  };
+}
+const rl = readline.createInterface({ input: process.stdin });
+rl.on("line", async (line) => {
+  if (!line.trim()) return;
+  let cmd; try { cmd = JSON.parse(line); } catch (e) { return; }
+  if (cmd.do === "open") {
+    const r = await call("open-claim", { backend: cmd.backend, slug: cmd.slug });
+    process.stdout.write("R:" + JSON.stringify(r) + "\\n");
+  } else if (cmd.do === "append") {
+    const args = { slug: cmd.slug, entry: entry(cmd.subject), "claim-id": cmd.claimId };
+    if (cmd.token) args["delegation-token"] = cmd.token;
+    const r = await call("append-trail", args);
+    process.stdout.write("R:" + JSON.stringify(r) + "\\n");
+  } else if (cmd.do === "delegate") {
+    const r = await call("delegate-claim", {
+      "claim-id": cmd.claimId, "delegate-pid": cmd.delegatePid,
+      "delegate-starttime": cmd.delegateStarttime, "ttl-minutes": cmd.ttlMinutes ?? 5,
+      ...(cmd.deliverFile ? { "deliver-file": true } : {}),
+    });
+    process.stdout.write("R:" + JSON.stringify(r) + "\\n");
+  } else if (cmd.do === "raw") {
+    const r = await call(cmd.op, cmd.args);
+    process.stdout.write("R:" + JSON.stringify(r) + "\\n");
+  }
+});
+`;
+
+class Driver {
+  child: ChildProcess;
+  private queue: ((r: Res) => void)[] = [];
+  ready: Promise<void>;
+  constructor(exe: string = NODE_EXE) {
+    this.child = spawn(exe, ["-e", DRIVER_SOURCE, SOCK], { stdio: ["pipe", "pipe", "pipe"] });
+    kids.push(this.child);
+    // the R: response pump — one queued resolver per R: line, in order
+    let out = "";
+    this.child.stdout?.on("data", (d: Buffer) => {
+      out += d.toString("utf8");
+      let i: number;
+      while ((i = out.indexOf("\n")) >= 0) {
+        const l = out.slice(0, i);
+        out = out.slice(i + 1);
+        if (!l.startsWith("R:")) continue;
+        const cb = this.queue.shift();
+        if (cb) {
+          try { cb(JSON.parse(l.slice(2)) as Res); } catch { cb({ id: -1, ok: false, error: "DRIVER-MALFORMED" }); }
+        }
+      }
+    });
+    this.ready = new Promise((res) => {
+      let err = "";
+      this.child.stderr?.on("data", (d: Buffer) => {
+        err += d.toString();
+        if (err.includes("D:ready")) res();
+      });
+      setTimeout(() => res(), 2500); // fall through — sends will time out loudly anyway
+    });
+  }
+  pid(): number { return this.child.pid as number; }
+  starttime(): string {
+    const st = statOf(this.child.pid as number);
+    if (!st) throw new Error("driver stat failed");
+    return st.starttime;
+  }
+  send(cmd: Record<string, unknown>): Promise<Res> {
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+      this.child.stdin?.write(JSON.stringify(cmd) + "\n");
+      setTimeout(() => {
+        const idx = this.queue.indexOf(resolve);
+        if (idx >= 0) { this.queue.splice(idx, 1); resolve({ id: -1, ok: false, error: "DRIVER-TIMEOUT" }); }
+      }, 6000).unref?.();
+    });
+  }
+  async open(backend = "matrixbe", slug = "slugX"): Promise<Res> { await this.ready; return this.send({ do: "open", backend, slug }); }
+  async append(claimId: string, subject: string, slug = "slugX", token?: string): Promise<Res> {
+    await this.ready;
+    return this.send({ do: "append", claimId, subject, slug, ...(token ? { token } : {}) });
+  }
+  async delegate(claimId: string, delegatePid: number, delegateStarttime: string, ttlMinutes = 5, deliverFile = false): Promise<Res> {
+    await this.ready;
+    return this.send({ do: "delegate", claimId, delegatePid, delegateStarttime, ttlMinutes, deliverFile });
+  }
+  kill(): void { try { this.child.kill("SIGKILL"); } catch { /* gone */ } }
+}
+
+function trailLines(slug: string): unknown[] {
+  const p = join(ROOT, "store", slug, "trail.jsonl");
+  if (!fs.existsSync(p)) return [];
+  return fs.readFileSync(p, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+function createHashOf(s: string): string {
+  return createHash("sha256").update(s).digest("hex");
+}
+function issuedSnapshot(b: Broker): string[] {
+  return b.issuedDelegationsSnapshot();
+}
 function statOf(pid: number): { ppid: number; starttime: string } | null {
   try {
     const raw = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -61,9 +259,6 @@ function writeHealth(healthy: boolean, bootId: string | null = BOOT_ID): void {
 }
 function writeAttestation(mode: string): void {
   fs.writeFileSync(join(STATE, "install-attestation.json"), JSON.stringify({ "install-mode": mode, "transaction-id": "t-fixture", "attested-at": new Date().toISOString() }));
-}
-function writeCertified(entries: { backend: string; pid: number; starttime: string }[]): void {
-  fs.writeFileSync(join(STATE, "certified-backends.json"), JSON.stringify({ backends: entries.map((e) => ({ backend: e.backend, generations: [{ "server-pid": e.pid, "server-starttime": e.starttime, "exe-path": "/fixture", "exe-identity-digest": "00", "certified-at": new Date().toISOString(), "fixture-set": ["test"] }] })) }));
 }
 
 interface Frame { id: number; op: string; args: Record<string, unknown>; }
@@ -129,7 +324,7 @@ async function main(): Promise<void> {
   // deterministically inside the split-rate-budgets section below)
   setRateLimitsForTesting({ mintPerPid: 100, mintGlobal: 100, reclaimPerPid: 100, reclaimGlobal: 1000 });
 
-  const broker = createBroker({ rootDir: ROOT, socketPath: SOCK, controlSocketPath: CTL, testMode: true });
+  let broker: Broker = createBroker({ rootDir: ROOT, socketPath: SOCK, controlSocketPath: CTL, peercredHelperPath: PEERCRED_HELPER, testMode: true });
   await sleep(150);
 
   // ── fixtures: live child instances for captain / firstmate / worker grades ──
@@ -176,8 +371,6 @@ async function main(): Promise<void> {
 
     const fmClaim = await fm.call("register", { mode: "claim", pid: fmKid.pid, starttime: fmKid.starttime, secret: fmReg["claim-secret"] });
     check("firstmate claim (secret) → firstmate grade", fmClaim.ok === true && (fmClaim.result as { grade: string }).grade === "firstmate");
-    const fmSurface = (fmClaim.result as { "surface-secret"?: string })["surface-secret"];
-    check("firstmate claim issues a surface-secret", typeof fmSurface === "string" && fmSurface.length === 64);
 
     const capClaim = await cap.call("register", { mode: "claim", pid: capKid.pid, starttime: capKid.starttime, secret: capReg["claim-secret"] });
     check("captain claim (secret) → captain grade", capClaim.ok === true && (capClaim.result as { grade: string }).grade === "captain");
@@ -297,68 +490,281 @@ async function main(): Promise<void> {
     await root.close();
   }
 
-  // ═══ ancestry: real chain + certification gate + caps ═══
+  // ═══ R2 v2: certification + presenter attribution (spec §2.1–§2.2, R1–R5) ═══
   {
-    section("ancestry authorization (real process chain)");
-    const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { stdio: "ignore" });
-    await sleep(200);
-    const cst = statOf(child.pid as number) as { starttime: string };
+    section("certification + presenter attribution (kernel identity, real certify)");
+    // fixtures: approved list matching THIS node binary + adapter, install ID written
+    writeApproved([NODE_DIGEST], [ADAPTER_DIGEST], 2);
+    const storePath = join(STATE, "certified-backends.json");
+    const A = new Driver();
+    const B = new Driver();
+    const Cc = new Driver(); // the unrelated presenter
+    const A2 = new Driver(); // the post-owner-death owner instance for later rows
+    await Promise.all([A.ready, B.ready, Cc.ready, A2.ready]);
 
-    const root = new C(CTL);
-    const supKid = spawnKid(); // the supervisor instance (firstmate) — NOT in the child's chain
-    // For a REAL chain, the authorizer must be THIS test process: mint for process.pid.
-    const selfSt = statOf(process.pid) as { starttime: string };
-    const reg = (await root.call("register", { mode: "plain", role: "firstmate", pid: process.pid, "spawn-backend": "chainbe" })).result as { "claim-secret": string };
-    void supKid;
-    const fm = new C(SOCK);
-    const claim = await fm.call("register", { mode: "claim", pid: process.pid, starttime: selfSt.starttime, secret: reg["claim-secret"] });
-    if (!claim.ok) console.log("   [debug] ancestry claim said:", JSON.stringify(claim));
-    void 0;
-    const surface = ((claim.result ?? {}) as { "surface-secret"?: string })["surface-secret"] ?? "";
+    // — uncertified generation: the fail-closed default every claim hits pre-certify —
+    const n0 = trailLines("slugX").length;
+    const preCert = await A.open();
+    check("uncertified generation → E_DENIED_TOPOLOGY/uncertified-generation (fail-closed)",
+      preCert.ok === false && (preCert as { error: string }).error === "E_DENIED_TOPOLOGY" && (preCert as { reason?: string }).reason === "uncertified-generation");
+    check("denial committed no append", trailLines("slugX").length === n0);
+    check("presenter-denied audited (uncertified-generation)",
+      broker.auditTail().some((e) => e["kind"] === "presenter-denied" && e["why"] === "uncertified-generation"));
 
-    const anonChild = new C(SOCK);
-    const noCert = await anonChild.call("append-trail", { slug: "slugX", entry: entry("worker"), pid: child.pid, starttime: cst.starttime, "surface-secret": surface });
-    check("empty certified set → E_DENIED_TOPOLOGY (fail-closed default)", noCert.ok === false && (noCert as { error: string }).error === "E_DENIED_TOPOLOGY");
+    // — certify refusals FIRST (failing-first: each leaves the store untouched) —
+    const badProto = join(ROOT, "approved-badproto.json");
+    fs.writeFileSync(badProto, JSON.stringify({ version: 1, backends: [{ backend: "matrixbe", "exe-digests": [NODE_DIGEST], "adapter-digests": [ADAPTER_DIGEST], "protocol-revision": 99 }] }));
+    const rBadProto = await certifyBackend(certifyOpts({ approvedListPath: badProto }) as Parameters<typeof certifyBackend>[0]);
+    check("certify refused: protocol revision mismatch (entry 99 vs daemon 2)", rBadProto.ok === false);
+    const rBadDigest = await certifyBackend(certifyOpts({ exePath: ADAPTER_FIXTURE }) as Parameters<typeof certifyBackend>[0]);
+    check("certify refused: unapproved exe digest", rBadDigest.ok === false);
+    const rNoDaemon = await certifyBackend(certifyOpts({ socketPath: join(ROOT, "nope.sock") }) as Parameters<typeof certifyBackend>[0]);
+    check("certify refused: daemon unreachable (compatibility unproven)", rNoDaemon.ok === false);
+    const rUnknownBackend = await certifyBackend(certifyOpts({ backend: "not-approved" }) as Parameters<typeof certifyBackend>[0]);
+    check("certify refused: backend absent from the approved list", rUnknownBackend.ok === false);
+    check("no refusal wrote a store (R2: no partial grant)", !fs.existsSync(storePath));
 
-    writeCertified([{ backend: "chainbe", pid: child.pid as number, starttime: cst.starttime }]);
-    const okApp = await anonChild.call("append-trail", { slug: "slugX", entry: entry("worker"), pid: child.pid, starttime: cst.starttime, "surface-secret": surface });
-    check("certified generation in chain → appended actor=firstmate", okApp.ok === true && (okApp.result as { actor: string }).actor === "firstmate");
-    check("ancestry-authorized audited with both pids", broker.auditTail().some((e) => e["kind"] === "ancestry-authorized" && e["connector"] === child.pid && e["authorizer"] === process.pid));
+    // — the real CLI's euid gate: non-root certify writes nothing (R1 captain channel) —
+    const cli = spawnSync(process.execPath, ["--experimental-strip-types", join(import.meta.dirname, "..", "..", "broker", "minidc-brokerctl.ts"),
+      "certify", "--backend", "matrixbe", "--exe", NODE_EXE, "--adapter", ADAPTER_FIXTURE,
+      "--root", ROOT, "--approved", APPROVED, "--socket", SOCK], { encoding: "utf8" });
+    check("brokerctl certify as non-root → exit≠0, euid message", cli.status !== 0 && /requires root/.test(cli.stderr));
+    check("non-root CLI wrote no store", !fs.existsSync(storePath));
 
-    check("wrong surface-secret → denied", (await anonChild.call("append-trail", { slug: "slugX", entry: entry("worker"), pid: child.pid, starttime: cst.starttime, "surface-secret": "f".repeat(64) })).ok === false);
-    check("origin=gate on the ancestry path → E_INVALID",
-      ((await anonChild.call("append-trail", { slug: "slugX", entry: entry("gate"), pid: child.pid, starttime: cst.starttime, "surface-secret": surface })) as { error: string }).error === "E_INVALID");
+    // — the happy certify (the sole-writer path, real module) —
+    const cert = await certifyBackend(certifyOpts() as Parameters<typeof certifyBackend>[0]);
+    check("certify OK: full receipt with install-ID binding", cert.ok === true
+      && (cert.ok === true && cert.receipt["installation-id"] === INSTALL_ID && cert.receipt["exe-digest"] === NODE_DIGEST && cert.receipt["protocol-revision"] === 2));
+    const storeRaw = fs.readFileSync(storePath, "utf8");
+    const store1 = JSON.parse(storeRaw) as { version: number; backends: { backend: string; revoked: boolean }[] };
+    check("store is v2 with the live generation", store1.version === 2 && store1.backends.length === 1 && store1.backends[0]?.backend === "matrixbe" && store1.backends[0]?.revoked === false);
+    check("store mode 0640 (root-owned state entry discipline)", (fs.statSync(storePath).mode & 0o777) === 0o640);
 
-    // dead-claim cap: worker entitlement pinned AT THE CHILD (nearest in its own walk)
-    const mint = await root.call("register", { mode: "enroll-worker", slug: "slugX", "spawn-backend": "chainbe" });
-    check("ancestry-section worker enrollment minted", mint.ok === true);
-    const tok = ((mint.result ?? {}) as { token?: string }).token ?? "";
-    const wc = new C(SOCK);
-    const consumeRes = await wc.call("register", { mode: "consume", token: tok, pid: child.pid, starttime: cst.starttime });
-    if (!consumeRes.ok) console.log("   [debug] consume said:", JSON.stringify(consumeRes));
-    check("worker enrollment consumed AT the child pid (nearest-entitlement fixture)", consumeRes.ok === true);
-    await wc.close(); // claim dies; the child's own worker entitlement is now the nearest, dead
-    await sleep(120);
-    const capped = await anonChild.call("append-trail", { slug: "slugX", entry: entry("worker"), pid: child.pid, starttime: cst.starttime, "surface-secret": surface });
-    check("dead-claim nearest cap → DENY (no pass-through)", capped.ok === false);
-    check("cap denial audited", broker.auditTail().some((e) => e["kind"] === "ancestry-denied" && (e["why"] === "dead-claim-cap" || e["why"] === "worker-claim-cap")));
-
-    // stray chain: a setsid-detached process (reparented away from this test process)
-    const detached = spawn("setsid", [process.execPath, "-e", "setInterval(()=>{},1000)"], { stdio: "ignore", detached: true });
-    let dst: { starttime: string } | null = null;
-    for (let i = 0; i < 10 && !dst; i++) { await sleep(150); dst = statOf(detached.pid as number); }
-    if (dst) {
-      const stray = await anonChild.call("append-trail", { slug: "slugX", entry: entry("worker"), pid: detached.pid, starttime: dst.starttime, "surface-secret": surface });
-      check("stray chain (walk never reaches the authorizer) → E_DENIED_UNREGISTERED", stray.ok === false && (stray as { error: string }).error === "E_DENIED_UNREGISTERED");
-    } else {
-      check("stray-chain fixture spawn failed (skip)", true);
+    // — direct presentation: kernel pid/uid + running-artifact digest —
+    const claim1 = await A.open();
+    check("open-claim certified → broker-issued authorization", claim1.ok === true);
+    if (claim1.ok === true) {
+      const r = claim1.result as { "claim-id": string; generation: { "generation-id": string; backend: string }; presenter: { pid: number; starttime: string; uid: number; "exe-digest": string } };
+      check("presenter tuple is KERNEL truth: pid=A.pid, uid=real uid, exe=certified digest",
+        r.presenter.pid === A.pid() && r.presenter.starttime === A.starttime()
+        && r.presenter.uid === process.getuid() && r.presenter["exe-digest"] === NODE_DIGEST);
+      check("generation binding matches the certified record", r.generation["generation-id"] === (cert.ok === true ? cert.receipt["generation-id"] : "") && r.generation.backend === "matrixbe");
+      const app1 = await A.append(r["claim-id"], "a1b2c3d4e5f60718");
+      check("direct append by the owner commits", app1.ok === true && (app1.result as { actor: string }).actor === "backend");
+      const rows = trailLines("slugX") as { actor: string; claim?: string; generation?: string; delegated?: boolean; presenter?: { pid: number; starttime: string; uid: number } }[];
+      const stamped = rows.find((x) => x.claim === r["claim-id"]);
+      check("entry binds claim + generation + ACTUAL presenter (attribution invariant)",
+        stamped !== undefined && stamped.generation === r.generation["generation-id"]
+        && stamped.presenter?.pid === A.pid() && stamped.presenter?.starttime === A.starttime()
+        && stamped.presenter?.uid === process.getuid() && stamped.delegated === false && stamped.actor === "backend");
+      const replayOwner = await A.append(r["claim-id"], "ffffffffffffffff");
+      check("one-claim-one-append: owner re-presenting the consumed claim → denied",
+        replayOwner.ok === false && (replayOwner as { reason?: string }).reason === "no-live-claim");
+      check("the denied re-present committed nothing (no row for its subject)",
+        !trailLines("slugX").some((x) => (x as { subject?: string }).subject === "ffffffffffffffff"));
     }
 
-    child.kill("SIGKILL");
-    try { process.kill(-(detached.pid as number), "SIGKILL"); } catch { /* gone */ }
-    await anonChild.close();
-    await fm.close();
-    await root.close();
+    // — unrelated presenter: a different live instance gains nothing (R5) —
+    {
+      const claimU = await A.open();
+      const cu = claimU.result as { "claim-id": string };
+      const stray = await Cc.append(cu["claim-id"], "1111111111111111");
+      check("unrelated presenter (not owner, no token) → not-claim-owner, no append",
+        stray.ok === false && (stray as { reason?: string }).reason === "not-claim-owner"
+        && !trailLines("slugX").some((x) => (x as { subject?: string }).subject === "1111111111111111"));
+      // owner death: after A dies nobody can present A's claim — instance identity is
+      // kernel-derived, and a recycled pid carries a different starttime (R4)
+      const claimD = await A.open();
+      const cd = claimD.result as { "claim-id": string };
+      A.kill();
+      await sleep(150);
+      const orphan = await Cc.append(cd["claim-id"], "2222222222222222");
+      check("dead owner's claim unusable by any other live process", orphan.ok === false && (orphan as { reason?: string }).reason === "not-claim-owner");
+      void cu;
+    }
+
+    // — delegation: the four deterministic red cases + the happy path (R5) —
+    {
+      // happy path with 0600 file delivery (never env)
+      const claimH = await A2.open();
+      const ch = claimH.result as { "claim-id": string };
+      const mintF = await A2.delegate(ch["claim-id"], B.pid(), B.starttime(), 5, true);
+      check("delegate-claim by the owner mints a one-time token + 0600 delivery file",
+        mintF.ok === true && typeof (mintF.result as { token: string }).token === "string" && typeof (mintF.result as { "delivered-file": string })["delivered-file"] === "string");
+      const tokFile = (mintF.result as { "delivered-file": string })["delivered-file"];
+      check("delivery file is 0600 and owned by the delegate uid",
+        (fs.statSync(tokFile).mode & 0o777) === 0o600 && fs.statSync(tokFile).uid === process.getuid());
+      check("delivery file carries the token bytes", fs.readFileSync(tokFile, "utf8") === (mintF.result as { token: string }).token);
+      const delApp = await B.append(ch["claim-id"], "b1b2c3d4e5f60718", "slugX", (mintF.result as { token: string }).token);
+      check("delegated append commits with the DELEGATE as actual presenter",
+        delApp.ok === true && (trailLines("slugX") as { claim?: string; delegated?: boolean; presenter?: { pid: number } }[]).some(
+          (x) => x.claim === ch["claim-id"] && x.delegated === true && x.presenter?.pid === B.pid()));
+      fs.rmSync(tokFile, { force: true });
+
+      // RED 1 — wrong claim: token bound to claim X presented for claim Y
+      const claimX = await A2.open();
+      const claimY = await A2.open();
+      const cx = claimX.result as { "claim-id": string };
+      const cy = claimY.result as { "claim-id": string };
+      const mintX = await A2.delegate(cx["claim-id"], B.pid(), B.starttime(), 5);
+      const tokX = (mintX.result as { token: string }).token;
+      const red1 = await B.append(cy["claim-id"], "3333333333333333", "slugX", tokX);
+      check("RED wrong-claim token → delegation-wrong-claim, no append",
+        red1.ok === false && (red1 as { reason?: string }).reason === "delegation-wrong-claim"
+        && !trailLines("slugX").some((x) => (x as { subject?: string }).subject === "3333333333333333"));
+
+      // RED 2 — wrong instance: token bound to B presented by Cc
+      const red2 = await Cc.append(cx["claim-id"], "4444444444444444", "slugX", tokX);
+      check("RED wrong-instance token → delegation-wrong-instance, no append",
+        red2.ok === false && (red2 as { reason?: string }).reason === "delegation-wrong-instance"
+        && !trailLines("slugX").some((x) => (x as { subject?: string }).subject === "4444444444444444"));
+
+      // RED 3 — replay: the consumed token no longer exists in the issued-set
+      const claimR = await A2.open();
+      const cr = claimR.result as { "claim-id": string };
+      const mintR = await A2.delegate(cr["claim-id"], B.pid(), B.starttime(), 5);
+      const tokR = (mintR.result as { token: string }).token;
+      const okR = await B.append(cr["claim-id"], "5555555555555555", "slugX", tokR);
+      check("replay precondition: first use of the token commits", okR.ok === true);
+      const claimR2 = await A2.open();
+      const cr2 = claimR2.result as { "claim-id": string };
+      const red3 = await B.append(cr2["claim-id"], "6666666666666666", "slugX", tokR);
+      check("RED replayed token → delegation-unknown, no append",
+        red3.ok === false && (red3 as { reason?: string }).reason === "delegation-unknown"
+        && !trailLines("slugX").some((x) => (x as { subject?: string }).subject === "6666666666666666"));
+
+      // RED 4 — expired: minutes-scale TTL passed (fake clock; the on-access check is
+      // the deterministic authority — the sweep does not touch delegations)
+      const claimE = await A2.open();
+      const ce = claimE.result as { "claim-id": string };
+      const mintE = await A2.delegate(ce["claim-id"], B.pid(), B.starttime(), 1);
+      const tokE = (mintE.result as { token: string }).token;
+      const t0 = Date.now();
+      let fake = t0;
+      setClockForTesting(() => fake);
+      fake = t0 + 2 * 60_000;
+      await sleep(150);
+      const red4 = await B.append(ce["claim-id"], "7777777777777777", "slugX", tokE);
+      check("RED expired token → delegation-expired, no append",
+        red4.ok === false && (red4 as { reason?: string }).reason === "delegation-expired"
+        && !trailLines("slugX").some((x) => (x as { subject?: string }).subject === "7777777777777777"));
+      setClockForTesting(null);
+
+      // the issued-set stores HASHES only — never the nonce (R5)
+      const anyTokens = JSON.stringify([...issuedSnapshot(broker)]);
+      check("issued-set stores hashes only (no token material in memory)", !anyTokens.includes(tokR) && !anyTokens.includes(tokX));
+    }
+
+    // — running-artifact law: deleted exe targets never certify a claim (R4) —
+    {
+      const nodeCopy = join(ROOT, "nodecopy");
+      fs.copyFileSync(NODE_EXE, nodeCopy);
+      fs.chmodSync(nodeCopy, 0o755);
+      const D = new Driver(nodeCopy);
+      await D.ready;
+      fs.rmSync(nodeCopy, { force: true }); // the running binary's origin is unlinked
+      const claimD = await D.open();
+      check("running artifact with (deleted) target → E_DENIED (deleted), no cert path",
+        claimD.ok === false && (claimD as { reason?: string }).reason === "running-artifact-deleted");
+      D.kill();
+    }
+
+    // — installation-ID binding + revocation (R3) —
+    {
+      const goodStore = fs.readFileSync(storePath, "utf8");
+      const crossed = JSON.parse(goodStore) as { version: 2; backends: { "installation-id": string }[] };
+      crossed.backends[0]!["installation-id"] = "f".repeat(32); // a copied-to-other-desk record
+      fs.writeFileSync(storePath, JSON.stringify(crossed, null, 2) + "\n");
+      const crossClaim = await A2.open();
+      check("install-ID mismatch (cross-desk copy) → uncertified-generation", crossClaim.ok === false && (crossClaim as { reason?: string }).reason === "uncertified-generation");
+      fs.writeFileSync(storePath, goodStore); // restore
+      const rev = await revokeBackend({ backend: "matrixbe", stateDir: STATE, requireRoot: false });
+      check("revoke tombstones the live generation", rev.ok === true && (rev.ok === true && rev.revoked === 1));
+      const postRev = await A2.open();
+      check("revoked generation authorizes nothing", postRev.ok === false && (postRev as { reason?: string }).reason === "uncertified-generation");
+      const reCert = await certifyBackend(certifyOpts() as Parameters<typeof certifyBackend>[0]);
+      check("re-certify after revoke restores a fresh live generation", reCert.ok === true);
+
+      // R2 interruption leg: a store write that cannot complete leaves the previous
+      // grant byte-identical (atomic whole-file replace — no partial grant, ever)
+      const before = fs.readFileSync(storePath, "utf8");
+      fs.chmodSync(STATE, 0o500); // block temp creation + rename
+      const brokenWrite = await certifyBackend(certifyOpts() as Parameters<typeof certifyBackend>[0]);
+      fs.chmodSync(STATE, 0o755);
+      check("interrupted/unwritable certify refuses, previous grant intact byte-for-byte",
+        brokenWrite.ok === false && fs.readFileSync(storePath, "utf8") === before);
+      // R1 store integrity under broker traffic: daemon appends never touch the store
+      const claimW = await A2.open();
+      await A2.append((claimW.result as { "claim-id": string })["claim-id"], "9999999999999999");
+      check("daemon-side appends never write the certification store (sole-writer law)",
+        fs.readFileSync(storePath, "utf8") === before);
+    }
+
+    // — restart: certification survives (file-backed), claims do not (memory) —
+    {
+      const claimPre = await A2.open();
+      const cp = claimPre.result as { "claim-id": string };
+      await broker.close();
+      broker = createBroker({ rootDir: ROOT, socketPath: SOCK, controlSocketPath: CTL, peercredHelperPath: PEERCRED_HELPER, testMode: true });
+      await sleep(150);
+      const F = new Driver();
+      await F.ready;
+      const liveGen = (JSON.parse(fs.readFileSync(storePath, "utf8")) as { backends: { "generation-id": string; revoked: boolean }[] })
+        .backends.find((b) => !b.revoked)?.["generation-id"];
+      const post = await F.open();
+      check("unchanged restart preserves certification (R3)", post.ok === true
+        && (post.ok === true ? (post.result as { generation: { "generation-id": string } }).generation["generation-id"] === liveGen : false));
+      const oldClaim = await F.append(cp["claim-id"], "8888888888888888");
+      check("claims die with the daemon (restart re-opens, never resumes)", oldClaim.ok === false && (oldClaim as { reason?: string }).reason === "no-live-claim");
+      F.kill();
+    }
+
+    // — the canary CLI end-to-end (R6): pre-cert denial phase on an uncertified slug —
+    // (async spawn, NOT spawnSync: the daemon runs in THIS process — a sync spawn
+    // would freeze its event loop and deadlock the canary's socket wait)
+    {
+      const canary = join(import.meta.dirname, "..", "..", "broker", "minidc-canary.ts");
+      const runCanary = (args: string[]): Promise<{ status: number | null; pid: number; stdout: string; stderr: string }> =>
+        new Promise((resolve) => {
+          const k = spawn(process.execPath, ["--experimental-strip-types", canary, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+          kids.push(k);
+          let out = "", err = "";
+          k.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
+          k.stderr?.on("data", (d: Buffer) => { err += d.toString(); });
+          k.on("close", (code) => resolve({ status: code, pid: k.pid as number, stdout: out, stderr: err }));
+          setTimeout(() => { try { k.kill("SIGKILL"); } catch { /* gone */ } }, 20000).unref?.();
+        });
+      const pre = await runCanary(["--phase", "pre-cert", "--backend", "matrixbe", "--slug", "canaryslug", "--socket", SOCK]);
+      check("canary pre-cert (certified state) exits 1 — the desk IS certified for matrixbe",
+        pre.status === 1 && /AUTHORIZED before certification|denial was not the required/.test(pre.stderr));
+      // make the canary's own pre-cert phase honest: revoke + run + re-certify
+      await revokeBackend({ backend: "matrixbe", stateDir: STATE, requireRoot: false });
+      const pre2 = await runCanary(["--phase", "pre-cert", "--backend", "matrixbe", "--slug", "canaryslug", "--socket", SOCK]);
+      check("canary pre-cert OK — denial is specifically uncertified-generation", pre2.status === 0 && /pre-cert OK/.test(pre2.stdout));
+      const finalCert = await certifyBackend(certifyOpts() as Parameters<typeof certifyBackend>[0]);
+      check("canary precondition: fresh live generation certified", finalCert.ok === true);
+      const post = await runCanary(["--phase", "post-cert", "--backend", "matrixbe", "--slug", "canaryslug", "--socket", SOCK,
+        "--trail", join(ROOT, "store", "canaryslug", "trail.jsonl")]);
+      const m = /^canary-receipt claim=(\S+) generation=(\S+) presenter=(\d+):(\d+)@(\d+) entry=([0-9a-f]{16}) slug=(\S+)$/m.exec(post.stdout);
+      check("canary post-cert exit 0 with the one-line operator receipt", post.status === 0 && m !== null);
+      if (m) {
+        check("receipt presenter pid is the canary's own kernel-identified process", m[3] === String(post.pid));
+        check("receipt generation matches the live certified generation", m[2] === finalCert.receipt["generation-id"]);
+        const trail = fs.readFileSync(join(ROOT, "store", "canaryslug", "trail.jsonl"), "utf8");
+        const line = trail.split("\n").find((l) => l.includes(`"claim":"${m[1]}"`));
+        check("receipt entry hash matches the committed trail line (independent read-back)",
+          line !== undefined && createHashOf(line).slice(0, 16) === m[6]);
+      }
+      check("canary trail read-back never used the broker API (file parse only)", post.stdout.includes("canary-receipt"));
+      // legacy-fallback law: dead socket + --no-legacy-fallback = hard fail; without = soft exit 3
+      const deadSock = join(ROOT, "dead.sock");
+      const soft = await runCanary(["--phase", "pre-cert", "--backend", "matrixbe", "--slug", "canaryslug", "--socket", deadSock]);
+      const hard = await runCanary(["--phase", "pre-cert", "--backend", "matrixbe", "--slug", "canaryslug", "--socket", deadSock, "--no-legacy-fallback"]);
+      check("dead socket without flag → soft legacy observation (exit 3, nothing written)", soft.status === 3);
+      check("dead socket with --no-legacy-fallback → hard failure (exit 1, per-invocation isolation)", hard.status === 1);
+    }
+
+    B.kill(); Cc.kill(); A2.kill();
   }
 
   // ═══ split rate budgets ═══

@@ -10,11 +10,13 @@
 // The socket/tree/marker paths are module seams (setBrokerPathsForTesting) — NOT
 // env-readable in production. A worker cannot redirect the client to a socket it owns.
 //
-// Deviations D1a–D1d (no SO_PEERCRED in Node v26) are documented in the daemon header
-// and the build report; their client-side consequences: claims carry a claim-secret
-// (MINIDC_CLAIM_SECRET, set by the launch wrapper), consumes carry the enrollment token
-// (MINIDC_ENROLLMENT), and supervisor connections export MINIDC_SURFACE_SECRET for
-// their own tool-children (ancestry appends).
+// Deviations D1a/D1b/D2/D4 (no SO_PEERCRED in Node v26 for the CLIENT's own model;
+// documented in the daemon header) have these client-side consequences: claims carry
+// a claim-secret (MINIDC_CLAIM_SECRET, set by the launch wrapper) and consumes carry
+// the enrollment token (MINIDC_ENROLLMENT). The R2 v2 presenter family
+// (open-claim / delegate-claim, kernel identity via the daemon's compiled helper)
+// replaces the old ancestry surface-secret export — supervisor tool-children with
+// append authority use presenter claims now, never environment variables.
 
 import * as net from "node:net";
 import * as fs from "node:fs";
@@ -346,16 +348,13 @@ function startBridge(env: Record<string, string | undefined>): void {
   bridgeEnvs = env;
   proc.on("exit", () => { st.dead = true; });
   proc.stderr?.on("data", (d: Buffer) => {
-    const m = /C:(ok|fail):(\S*)(?: S:(\S+))?/.exec(d.toString());
+    const m = /C:(ok|fail):(\S*)/.exec(d.toString());
     if (!m) return;
     if (m[1] === "ok") {
       bridgeGradeValue = m[2] ?? null;
-      if (m[3] && !process.env["MINIDC_SURFACE_SECRET"]) {
-        // export the supervisor's surface-secret + identity for its own tool-children
-        process.env["MINIDC_SURFACE_SECRET"] = m[3] as string;
-        process.env["MINIDC_PID"] = String(process.pid);
-        process.env["MINIDC_STARTTIME"] = selfStatOf(process.pid);
-      }
+      // R2 v2: no surface-secret export — the ancestry path is gone; supervisor
+      // tool-children that need to append go through the presenter family
+      // (open-claim / delegate-claim) with kernel identity, never env secrets
     } else {
       bridgeGradeValue = null;
     }
@@ -446,9 +445,7 @@ function register() {
       registered = true;
       enrollment = ""; // consumed: later re-claims ride identity
       const r = f.result || {};
-      let line = "C:ok:" + (r.grade ? r.grade : "?");
-      if (r["surface-secret"]) line += " S:" + r["surface-secret"];
-      process.stderr.write(line + "\\n");
+      process.stderr.write("C:ok:" + (r.grade ? r.grade : "?") + "\\n");
     } else if (f.retryable === true) {
       setTimeout(register, 500); // delay-budget retry (never a surfaced denial)
     } else {
@@ -490,8 +487,6 @@ function reClaim() {
   send("register", { mode: "claim", pid, starttime, ...(claimSecret ? { secret: claimSecret } : {}) }, (f) => {
     if (f.ok === true) {
       registered = true;
-      const r = f.result || {};
-      if (r["surface-secret"]) process.stderr.write("C:ok:" + (r.grade || "?") + " S:" + r["surface-secret"] + "\\n");
     } else if (f.retryable === true) { setTimeout(reClaim, 500); }
   });
 }

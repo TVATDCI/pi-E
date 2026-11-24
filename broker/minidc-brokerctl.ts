@@ -1,5 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// broker/minidc-brokerctl — the thin CLI over the broker (design §7.2, §2 P4/P5).
+// broker/minidc-brokerctl — the thin CLI over the broker (design §7.2, §2 P4/P5;
+// R2 v2 certification legs per broker/minidc-certify.ts).
 //   status                       — OPEN, unauthenticated, non-sensitive
 //   register --role <captain|firstmate> --pid <pid> --spawn-backend <b>
 //                                — sudo-anchored (control socket; §4.4.2 pre-pinned mint;
@@ -10,20 +11,30 @@
 //                                   over the supervisor's own registered bridge connection)
 //   unregister [--entitlement-id <id>]
 //                                — control socket
-//   append-trail --slug <s> --entry-file <f|->  — ancestry-authorized (§4.4.3): reads the
-//                                surface secret + presenter pid/starttime from the env
-//                                (MINIDC_SURFACE_SECRET/MINIDC_PID/MINIDC_STARTTIME — set by
-//                                the supervisor session env, inherited by its tool-children)
+//   certify --backend <b> --exe <path> --adapter <path>
+//                                — sudo (CAPTAIN authority, R1/R2/R3): the SOLE writer of
+//                                   certification records — verifies the installed backend
+//                                   against the repo-approved digest list, checks
+//                                   broker-protocol compatibility, binds the desk-local
+//                                   installation ID, records the generation atomically
+//   certify --revoke --backend <b>
+//                                — sudo (captain): tombstones the backend's records
 //   trail-tail --slug <s> [--n 20]   — sudo (captain ad-hoc reads; §2 consequence)
 //   list-grants --slug <s>           — sudo
 //   write-rules --file <f|->         — sudo (captain authority)
 // There is NO read-rules command — not ever (§4.3.2 no-CLI-reads law).
+// The ancestry append-trail command is GONE (superseded by the R2 v2 presenter
+// family: open-claim / delegate-claim over the main socket — kernel identity,
+// never environment variables).
 // Test seam: --socket PATH overrides the main socket; --control-socket PATH the control
-// socket (also FM_DC_STORE_ROOT remaps to the test socket per the P4 note). No env-based
-// sockets in production paths beyond that documented test remap.
+// socket (also FM_DC_STORE_ROOT remaps to the test socket per the P4 note); --root and
+// --approved remap the certify state/approved paths. No env-based sockets in production
+// paths beyond that documented test remap.
 
 import * as net from "node:net";
 import * as fs from "node:fs";
+import { join } from "node:path";
+import { certifyBackend, revokeBackend } from "./minidc-certify.ts";
 
 const argv = process.argv.slice(2);
 
@@ -34,7 +45,8 @@ commands:
   register --role <captain|firstmate> --pid <N> --spawn-backend <B> [--ttl-ms N]
   register --enroll-worker --slug <S> --spawn-backend <B>
   unregister [--entitlement-id <ID>]
-  append-trail --slug <S> --entry-file <F|->
+  certify --backend <B> --exe <PATH> --adapter <PATH> [--root DIR] [--approved FILE] [--socket P]
+  certify --revoke --backend <B> [--root DIR]
   trail-tail --slug <S> [--n N]
   list-grants --slug <S>
   write-rules --file <F|->`);
@@ -51,6 +63,7 @@ function has(name: string): boolean {
 
 const DEFAULT_SOCKET = "/run/minidc-broker/socket";
 const DEFAULT_CONTROL = "/run/minidc-broker/control.sock";
+const DEFAULT_STATE_DIR = "/var/lib/minidc-broker/state";
 
 function socketPath(main: boolean): string {
   if (main) {
@@ -64,6 +77,10 @@ function socketPath(main: boolean): string {
     return DEFAULT_SOCKET;
   }
   return arg("--control-socket") ?? DEFAULT_CONTROL;
+}
+
+function stateDir(): string {
+  return arg("--root") ? join(arg("--root") as string, "state") : DEFAULT_STATE_DIR;
 }
 
 function call(path: string, frame: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -150,31 +167,37 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  if (cmd === "append-trail") {
-    const slug = arg("--slug");
-    const file = arg("--entry-file");
-    if (!slug || !file) usage();
-    const raw = file === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(file, "utf8");
-    let entry: unknown;
-    try { entry = JSON.parse(raw); } catch { console.error("entry-file is not JSON"); return 2; }
-    const secret = process.env["MINIDC_SURFACE_SECRET"] ?? "";
-    const pid = Number(process.env["MINIDC_PID"] ?? "0");
-    const stt = process.env["MINIDC_STARTTIME"] ?? "";
-    if (!secret || !pid || !stt) {
-      console.error("append-trail requires MINIDC_SURFACE_SECRET, MINIDC_PID, MINIDC_STARTTIME (supervisor session env)");
-      return 2;
+  if (cmd === "certify") {
+    const backend = arg("--backend");
+    if (!backend) usage();
+    const dir = stateDir();
+    if (has("--revoke")) {
+      const r = await revokeBackend({ backend, stateDir: dir, requireRoot: true });
+      if (r.ok === true) {
+        console.log(`revoked: ${backend} (${r.revoked} generation${r.revoked === 1 ? "" : "s"} tombstoned)`);
+        return 0;
+      }
+      console.error(`revoke failed: ${r.err}`);
+      return 1;
     }
-    const r = await call(socketPath(true), {
-      id: nextId++,
-      op: "append-trail",
-      args: { slug, entry, pid, starttime: stt, "surface-secret": secret },
+    const exe = arg("--exe");
+    const adapter = arg("--adapter");
+    if (!exe || !adapter) usage();
+    const approved = arg("--approved") ?? join(dir, "approved-backends.json");
+    const r = await certifyBackend({
+      backend, exePath: exe, adapterPath: adapter,
+      stateDir: dir, approvedListPath: approved,
+      socketPath: socketPath(true), requireRoot: true,
     });
-    if (r["ok"] === true) {
-      const res = r["result"] as Record<string, unknown>;
-      console.log(`appended (actor=${res["actor"]})`);
+    if (r.ok === true) {
+      const rec = r.receipt;
+      console.log(`certified: backend=${rec.backend} generation=${rec["generation-id"]}`);
+      console.log(`  exe=${rec["exe-digest"]} adapter=${rec["adapter-digest"]}`);
+      console.log(`  protocol-revision=${rec["protocol-revision"]} installation-id=${rec["installation-id"]}`);
+      if (rec.superseded) console.log("  (superseded a previous live generation for this backend)");
       return 0;
     }
-    console.error(`append-trail failed: ${r["error"]}${r["reason"] ? ` (${r["reason"]})` : ""}`);
+    console.error(`certify failed: ${r.err} (no partial grant written)`);
     return 1;
   }
 
