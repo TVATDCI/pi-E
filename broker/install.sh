@@ -14,7 +14,10 @@
 #
 # Usage (production, root):  ./install.sh [--mode broker|legacy] [--rollback]
 #                            [--repair-mode] [--repair-mounts]
-#   --mode legacy   choose legacy mode: writes ONLY the advisory marker (§4.7)
+#   --mode legacy   choose legacy mode: the full TRANSACTIONAL flip (D2+D3, the
+#                   2026-11-24 soak defects) — a standing broker install is torn
+#                   down to the legacy end state and the legacy rules path is
+#                   guaranteed to carry a valid rules file (§4.7 as amended)
 #   --rollback      run the deadline-bound rollback (or the no-ledger finalization)
 #   --repair-mode   reconcile install-mode records from the authoritative ledger
 #   --repair-mounts re-run the mount-helper activation protocol
@@ -374,7 +377,7 @@ phase_p4_backing_tree() {
   # recursive ownership AND per-type mode pass over the writable namespaces (a chown-only
   # P4 is insufficient — daemon locking/appends need the group bits; §4.1)
   recursive_pass "$BACKING_ROOT/store"
-  recursive_pass "$BACKING_ROOT/rules"
+  rules_pass # D4 (soak defect 4): the rules tree takes the READABLE pass — the rules are the floor sessions LOAD through the attached view
   recursive_pass "$BACKING_ROOT/state/runtime"
   if [[ -z "$TEST_ROOT" ]]; then
     chown root:minidc-broker "$STATE_DIR/certified-backends.json" "$STATE_DIR/approved-backends.json" "$STATE_DIR/installation-id" "$ATTESTATION" "$MOUNT_HEALTH"
@@ -401,6 +404,25 @@ recursive_pass() { # per-type mode enforcement accompanies the (root) chown — 
   fi
   find "$dir" -type d -exec chmod 02770 {} +
   find "$dir" -type f -exec chmod 0660 {} +
+}
+
+rules_pass() { # D4 (soak defect 4): the rules tree carries the READABLE-view modes.
+  # The rules are the safety floor every session must LOAD through the attached
+  # view, and the view IS the backing inode (bind) — 02770/0660 there meant the
+  # target user got EACCES ⇒ "no rules loaded" ⇒ bash denied for ALL new sessions.
+  # Mode law: dirs 0775 / files 0664 — other-class gets the read+traverse the
+  # target user needs (the brief's world-readable blessing), while the minidc-broker
+  # GROUP keeps rwx/rw so the daemon's write-rules op (temp+rename into the dir)
+  # still works. The setgid bit may survive chmod (the kernel preserves it for
+  # in-group callers — verified empirically) and is TOLERATED: it only steers
+  # group inheritance on daemon-written files. The STORE/state passes keep 02770/0660.
+  local dir="$BACKING_ROOT/rules"
+  [[ -d "$dir" ]] || return 0
+  if [[ -z "$TEST_ROOT" ]]; then
+    chown -R root:minidc-broker "$dir"
+  fi
+  find "$dir" -type d -exec chmod 0775 {} +
+  find "$dir" -type f -exec chmod 0664 {} +
 }
 
 # finding 7 fix: original ownership/mode SNAPSHOT at P0 (pre-move), persisted in the
@@ -747,8 +769,69 @@ do_repair_mode() {
 
 do_repair_mounts() {
   [[ -x "$MOUNT_HELPER" ]] || DIE "repair-mounts: helper not installed"
+  # D4: converge the rules-tree modes BEFORE the re-attach — the attached view
+  # carries the backing inode's modes, so an old install's 02770/0660 tree must
+  # not survive a repair re-run (the soak's EACCES shape).
+  rules_pass
   "$MOUNT_HELPER" || DIE "repair-mounts: helper activation failed (see $MOUNT_HEALTH)"
-  LOG "repair-mounts: activation re-run"
+  LOG "repair-mounts: activation re-run (rules-view modes converged)"
+}
+
+# ─── legacy mode selection (D2+D3 — the 2026-11-24 soak defects) ─────────────
+# The OLD marker-only flip is GONE. Under the client's closed-world tuple law a
+# mode command may exit ONLY in a state the session client classifies LEGACY:
+# no broker evidence anywhere (attestation/observables structurally absent),
+# marker=legacy, and a valid rules file at the legacy path (D2 — sessions
+# fail-close with "no rules loaded" without one).
+do_mode_legacy() {
+  if [[ -f "$LEDGER" ]]; then
+    # D3: record the operator's choice as the LEDGER TRUTH first — a crashed or
+    # aborted flip leaves every resolver (--repair-mode, the re-run) converging
+    # on legacy, never back to broker against the operator's word.
+    json_set "$LEDGER" "install-mode" '"legacy"'
+    LOG "mode flip: legacy recorded as ledger truth — tearing the broker install down"
+    do_rollback
+  elif [[ -e "$BACKING_ROOT" || -S "$RUN_DIR/socket" ]] || [[ "$(read_marker)" == "broker" ]]; then
+    # no ledger but broker residue/orphan marker — the finalization sweeps it
+    no_ledger_finalization "mode-legacy"
+  fi
+  mkdir -p "$(dirname "$MARKER")"
+  printf 'legacy' > "$MARKER"
+  materialize_legacy_rules
+  # D3: the exit gate — no mode command leaves a conflict/unavailable desk
+  local tuple; tuple="$(observe_tuple)"
+  [[ "$(tuple_verdict "$tuple")" == "LEGACY" ]] || DIE "--mode legacy: exit tuple not LEGACY: $tuple (marker/attestation/observables inconsistent — re-run resumes; --repair-mode reconciles)"
+  LOG "legacy mode selected (rules guaranteed at the legacy path)"
+}
+
+# D2: the legacy rules path must never be empty or shadowed while the marker says
+# legacy. Source = the tracked mini-dc-rules.yaml from the checkout the installer
+# runs from (the same bytes a supervisor git-restore lands). Idempotent: a valid
+# non-empty regular file is KEPT (the rollback's finding-7 restore may have landed
+# the desk's own bytes — better truth); an EMPTY regular file is converged; a
+# symlink/directory is named and refused (never auto-clobber unverifiable material).
+materialize_legacy_rules() {
+  local src
+  src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/mini-dc-rules.yaml"
+  if [[ -L "$LEGACY_RULES" ]]; then
+    DIE "--mode legacy: legacy rules path is a SYMLINK — resolve manually (never auto-clobber): $LEGACY_RULES"
+  fi
+  if [[ -e "$LEGACY_RULES" ]] && [[ ! -f "$LEGACY_RULES" ]]; then
+    DIE "--mode legacy: legacy rules path occupied by a non-regular entry — resolve manually: $LEGACY_RULES"
+  fi
+  if [[ -f "$LEGACY_RULES" && -s "$LEGACY_RULES" ]]; then
+    LOG "legacy rules already present at the legacy path (kept)"
+    return 0
+  fi
+  [[ -f "$src" ]] || DIE "--mode legacy: tracked rules source missing from the checkout: $src"
+  mkdir -p "$(dirname "$LEGACY_RULES")"
+  cp -f "$src" "$LEGACY_RULES" || DIE "--mode legacy: rules materialization failed (write)"
+  if [[ -z "$TEST_ROOT" ]]; then
+    chown "$TARGET_USER" "$LEGACY_RULES" || DIE "--mode legacy: rules chown to the target user failed"
+  fi
+  chmod 0644 "$LEGACY_RULES"
+  [[ -f "$LEGACY_RULES" && -s "$LEGACY_RULES" ]] || DIE "--mode legacy: rules materialization verify failed"
+  LOG "legacy rules materialized from the tracked checkout: $LEGACY_RULES"
 }
 
 # ─── fresh/resume dispatch ────────────────────────────────────────────────────
@@ -785,16 +868,25 @@ do_install() {
   if [[ "$(phase_state P7)" != "complete" ]]; then
     phase_p7_commit
   fi
+  # D3: a mode-selection invocation exits ONLY in a client-consistent state. With
+  # the install complete, converge the advisory marker to the ledger's truth — the
+  # production drift (a legacy-valued marker over a live broker install) classified
+  # CONFLICT at every session start — then gate the exit on the tuple verdict.
+  if [[ "$(json_get "$LEDGER" "installed")" == "true" ]] && [[ "$(read_marker)" != "broker" ]]; then
+    printf 'broker' > "$MARKER"
+    LOG "install exit: advisory marker reconciled to ledger truth (broker)"
+  fi
+  local tuple; tuple="$(observe_tuple)"
+  [[ "$(tuple_verdict "$tuple")" == "BROKER" ]] || DIE "install exit: mode tuple not BROKER: $tuple (--repair-mode reconciles)"
 }
 
 main() {
   case "${1:-}" in
     --mode)
       if [[ "${2:-}" == "legacy" ]]; then
-        # legacy mode: ONLY the advisory marker — no root surfaces, ever (§4.7)
-        mkdir -p "$(dirname "$MARKER")"
-        printf 'legacy' > "$MARKER"
-        LOG "legacy mode selected (tuple 12; advisory marker only)"
+        # legacy mode: the full transactional flip (D2+D3 — the marker-only law
+        # is gone; every exit is a client-consistent LEGACY desk)
+        do_mode_legacy
         exit 0
       fi
       if [[ "${2:-}" != "broker" ]]; then

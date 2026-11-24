@@ -1,5 +1,6 @@
 // extensions/tests/minidc-install.test.ts — the R2 install.sh unit matrix (design §8).
 // Run: node --experimental-strip-types minidc-install.test.ts
+// run-tests-timeout: 120000
 //
 // Drives broker/install.sh in its TEST MODE (MINIDC_INSTALL_TEST_ROOT scratch tree;
 // systemctl/findmnt/fuser/brokerctl/mount-helper are harness stubs in $T/bin). Covers:
@@ -10,12 +11,16 @@
 // finalization (idempotence, residue sweep, orphan-marker removal), resume after a
 // P3 crash, the rules:null variant, legacy mode, repair-mode reconciliation, and
 // code-shape pins (ledger-first discard; no post-unlink ledger write; no --now).
+// Soak-defect matrix (2026-11-24): D2 (legacy flip materializes/restores the rules
+// file), D3 (every mode command exits tuple-consistent — BROKER/LEGACY, never
+// CONFLICT), D4 (readable rules-view modes + the old-install repair heal).
 // Root-dependent legs (real systemd, real mounts, chown, the compiled helper's live
 // syscalls) are install-stage validation — named in the build report.
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as yamlParse } from "yaml";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const INSTALL = join(REPO, "broker", "install.sh");
@@ -215,6 +220,24 @@ function findAside(): string | null {
   } catch { /* none */ }
   return null;
 }
+// D3 (soak defect 3): the session client's §4.6.5a closed-world tuple, mirrored
+// root-side (exactly install.sh's observe_tuple/tuple_verdict pair). Every
+// mode-selection invocation must EXIT in a state this classifies BROKER or
+// LEGACY — never CONFLICT ("run sudo install.sh --repair-mode") and never a
+// shape the client would call UNAVAILABLE.
+function tupleOf(): { marker: string; att: string; obs: string; verdict: string } {
+  const marker = readMarker();
+  let att = "absent";
+  try {
+    const d = JSON.parse(fs.readFileSync(join(STATE, "install-attestation.json"), "utf8")) as { "install-mode"?: string };
+    if (d["install-mode"] === "broker" || d["install-mode"] === "legacy") att = d["install-mode"];
+  } catch { /* structurally absent (the attestation's only home is the backing tree) */ }
+  const obs = fs.existsSync(BACKING) || fs.existsSync(join(T, "run", "minidc-broker", "socket")) ? "present" : "absent";
+  let verdict = "CONFLICT";
+  if (att === "broker" && obs === "present" && (marker === "broker" || marker === "absent")) verdict = "BROKER";
+  else if (marker !== "broker" && att !== "broker" && obs === "absent") verdict = "LEGACY";
+  return { marker, att, obs, verdict };
+}
 
 function main(): void {
   // ═══ full fresh install ═══
@@ -232,7 +255,15 @@ function main(): void {
     check("backing store moved in (slug present)", fs.existsSync(join(BACKING, "store", "slugA", "trail.jsonl")));
     check("P4 mode pass: slug dir 02770", modeOf(join(BACKING, "store", "slugA")) === 0o2770);
     check("P4 mode pass: trail file 0660", modeOf(join(BACKING, "store", "slugA", "trail.jsonl")) === 0o660);
-    check("P4 mode pass: rules file 0660", modeOf(join(BACKING, "rules", "rules.yaml")) === 0o660);
+    // D4 (soak defect 4): the rules tree carries the READABLE-view modes — the rules
+    // are the safety floor sessions LOAD through the attached view (same inode as the
+    // backing), so 02770/0660 there was the EACCES that denied bash for every new
+    // broker-mode session. Dirs 0775 / files 0664: other-class reads for the target
+    // user, minidc-broker group keeps rwx/rw for the daemon's write-rules op. The
+    // setgid bit is TOLERATED (the kernel preserves it for in-group chmod callers) —
+    // assertions are on the low 9 bits. The STORE keeps the hard 02770/0660 boundary.
+    check("P4 mode pass: rules dir 0775-class (D4: readable view; setgid tolerated)", (modeOf(join(BACKING, "rules"))! & 0o777) === 0o775);
+    check("P4 mode pass: rules file 0664 (D4: readable view)", modeOf(join(BACKING, "rules", "rules.yaml")) === 0o664);
     check("state direct entries 0640", modeOf(join(STATE, "mount-health.json")) === 0o640 && modeOf(join(STATE, "install-attestation.json")) === 0o640);
     // R2 v2 P4 state entries: certification store v2-empty, desk-local installation
     // ID, and the repo-approved digest list's installed root-owned copy (R1/R3)
@@ -272,6 +303,16 @@ function main(): void {
     const healthRaw = fs.existsSync(join(STATE, "mount-health.json")) ? fs.readFileSync(join(STATE, "mount-health.json"), "utf8") : "(missing)";
     if (!healthRaw.includes('"healthy":true')) console.log("    [debug] health:", healthRaw, "| journal:", JSON.stringify(fs.readFileSync(JOURNAL, "utf8")));
     check("mount-health healthy after awaited activation", healthRaw.includes('"healthy":true'));
+    // D4 (soak defect 4), post-activation: the RULES view readable by the target user
+    // while the STORE view stays hard-locked. TEST MODE realizes MODES only (chown is
+    // root-only); with production ownership root:minidc-broker the other-bits are
+    // exactly what grants the target user access through the attached view.
+    check("D4: rules.yaml world-readable through the view (other-read set)", (modeOf(join(BACKING, "rules", "rules.yaml"))! & 0o004) === 0o004);
+    check("D4: rules view dir traversable by any user (other r-x)", (modeOf(join(BACKING, "rules"))! & 0o005) === 0o005);
+    check("D4: rules view dir keeps daemon write-rules capability (group rwx)", (modeOf(join(BACKING, "rules"))! & 0o070) === 0o070);
+    check("D4: store view dir stays hard-locked (zero other-bits)", (modeOf(join(BACKING, "store"))! & 0o007) === 0);
+    check("D4: store file zero other-bits", (modeOf(join(BACKING, "store", "slugA", "trail.jsonl"))! & 0o007) === 0);
+    check("D4: the rules VIEW path exists post-activation (the mounted target)", fs.existsSync(join(HOME, ".pi", "agent", "mini-dc-rules")));
     check("created-stubs mirrored into the ledger AFTER activation (step 4b)", (ledgerDoc["created-stubs"] ?? []).length === 2);
     check("marker-pre recorded as absent (valid pre-install shape)", JSON.stringify(ledgerDoc["marker-pre"] ?? {}).includes('"present":false'));
   }
@@ -387,14 +428,95 @@ function main(): void {
     runInstall(["--rollback"]);
     legacyDesk(false);
     const leg = runInstall(["--mode", "legacy"]);
-    check("--mode legacy writes ONLY the advisory marker", leg.status === 0 && readMarker() === "legacy" && !fs.existsSync(BACKING) && !fs.existsSync(LEDGER));
+    check("--mode legacy (fresh desk): marker written, no broker surfaces minted", leg.status === 0 && readMarker() === "legacy" && !fs.existsSync(BACKING) && !fs.existsSync(LEDGER));
+    check("D2: fresh-desk legacy flip materializes the TRACKED rules at the legacy path",
+      fs.existsSync(LEGACY_RULES) && fs.readFileSync(LEGACY_RULES, "utf8") === fs.readFileSync(join(REPO, "mini-dc-rules.yaml"), "utf8"));
+    check("D3: tuple after the fresh-desk legacy flip is LEGACY (client-consistent exit)", tupleOf().verdict === "LEGACY");
+    const leg2 = runInstall(["--mode", "legacy"]);
+    check("D2: legacy flip IDEMPOTENT — re-run exits 0 keeping the valid rules file", leg2.status === 0 && fs.existsSync(LEGACY_RULES) && fs.statSync(LEGACY_RULES).size > 0);
     legacyDesk();
     runInstall();
     // live ledger ⇒ repair-mode reconciles to the ledger's truth (marker broker kept)
     fs.writeFileSync(MARKER, "legacy"); // a drifted marker over a live install
     const rep = runInstall(["--repair-mode"]);
     check("--repair-mode with a live ledger reconciles the marker to ledger truth (broker)", rep.status === 0 && readMarker() === "broker");
+    check("D3: tuple after --repair-mode agrees (BROKER)", tupleOf().verdict === "BROKER");
     check("repair never weakens a healthy broker install (tuple 1 intact)", fs.existsSync(join(BACKING, "store", "slugA")));
+    runInstall(["--rollback"]);
+  }
+
+  // ═══ D2+D3: the 2026-11-24 production shape — broker install → --mode legacy ═══
+  {
+    section("D2+D3: broker install → --mode legacy (the soak's mode-transition defects)");
+    legacyDesk(); // the desk WITH its own rules file (the migrated-away shape)
+    runInstall(); // broker-mode install: migrates store + rules into the backing tree
+    check("precondition: the install flipped the desk to a client-consistent BROKER", tupleOf().verdict === "BROKER");
+    check("precondition: the legacy path was migrated away (the D2 hole)", !fs.existsSync(LEGACY_RULES));
+    const flip = runInstall(["--mode", "legacy"]);
+    if (flip.status !== 0) console.log("    mode-legacy output:", so(flip.stdout) + so(flip.stderr));
+    check("D3: --mode legacy over a live install exits 0 (one transaction, no residue)", flip.status === 0);
+    check("D3: tuple after the flip is LEGACY — no conflict/unavailable classification", tupleOf().verdict === "LEGACY");
+    check("D3: marker=legacy, attestation structurally absent, observables absent", tupleOf().marker === "legacy" && tupleOf().att === "absent" && tupleOf().obs === "absent");
+    check("D3: no ledger or backing namespace lingers (ledger-first discard ran)", !fs.existsSync(LEDGER) && !fs.existsSync(BACKING));
+    check("D2: the legacy path carries a rules file after the flip", fs.existsSync(LEGACY_RULES) && fs.statSync(LEGACY_RULES).size > 0);
+    // a fresh-session-shaped read: the legacy client loads + parses the rules file
+    let sessionRead = false;
+    try {
+      const doc = yamlParse(fs.readFileSync(LEGACY_RULES, "utf8")) as { bashToolPatterns?: unknown };
+      sessionRead = Array.isArray(doc.bashToolPatterns);
+    } catch { sessionRead = false; }
+    check("D2: fresh-session-shaped read succeeds (yaml parses, bashToolPatterns present)", sessionRead);
+    check("D2: restored rules are the desk's OWN bytes (rollback restore wins over repo bytes)",
+      fs.existsSync(LEGACY_RULES) && fs.readFileSync(LEGACY_RULES, "utf8") === "bashToolPatterns:\n  - pattern: 'x\\d*'\n    reason: fixture\nzeroAccessPaths: []\nreadOnlyPaths: []\n");
+    check("store home restored at its true path", fs.existsSync(join(STORE, "slugA", "trail.jsonl")));
+    check("no rules-view stub lingers at the legacy desk (never shadowed)", !fs.existsSync(join(HOME, ".pi", "agent", "mini-dc-rules")));
+    check("no aside lingers", findAside() === null);
+  }
+
+  // ═══ D2: the rules-absent install variant — materialization from the checkout ═══
+  {
+    section("D2: rules:null install → --mode legacy materializes tracked rules");
+    legacyDesk(false); // a desk that never had a legacy rules file
+    runInstall();
+    runInstall(["--mode", "legacy"]);
+    check("D2: rules-absent desk gets the TRACKED rules bytes at the legacy path on flip",
+      fs.existsSync(LEGACY_RULES) && fs.readFileSync(LEGACY_RULES, "utf8") === fs.readFileSync(join(REPO, "mini-dc-rules.yaml"), "utf8"));
+    check("D3: tuple after the flip is LEGACY", tupleOf().verdict === "LEGACY");
+  }
+
+  // ═══ D3: the drifted-marker heal — --mode broker exits consistent ═══
+  {
+    section("D3: drifted legacy marker over a live install (the production conflict)");
+    legacyDesk();
+    runInstall();
+    fs.writeFileSync(MARKER, "legacy"); // the exact production drift shape
+    check("precondition: drifted marker over a live install classifies CONFLICT", tupleOf().verdict === "CONFLICT");
+    const heal = runInstall(["--mode", "broker"]);
+    if (heal.status !== 0) console.log("    heal output:", so(heal.stdout) + so(heal.stderr));
+    check("D3: --mode broker reconciles the marker to ledger truth and exits BROKER", heal.status === 0 && tupleOf().verdict === "BROKER");
+    check("D3: marker converged to broker", readMarker() === "broker");
+    runInstall(["--rollback"]);
+  }
+
+  // ═══ D4: repair-mounts re-converges the readable rules-view modes ═══
+  {
+    section("D4: --repair-mounts re-converges rules-view modes (old-install heal)");
+    legacyDesk();
+    runInstall();
+    // The OLD-INSTALL shape as an explicit fixture: the base revision (f8ef9c4)
+    // planted the rules tree 02770/0660 via its recursive_pass — the exact EACCES
+    // shape of the soak. Reproducing history at runtime (git archive of the base
+    // commit) proved environment-fragile: CI checks out shallow merge refs without
+    // the parent objects, the spawn threw, and this fully-synchronous file's
+    // buffered stdout vanished with it (PR-50 CI: exit 1, zero output). The modes
+    // are planted directly on the fresh install's tree instead; the machinery
+    // under test — --repair-mounts' rules_pass convergence — runs for real either way.
+    fs.chmodSync(join(BACKING, "rules"), 0o2770);
+    fs.chmodSync(join(BACKING, "rules", "rules.yaml"), 0o660);
+    const rep = runInstall(["--repair-mounts"]);
+    if (rep.status !== 0) console.log("    repair-mounts output:", so(rep.stdout) + so(rep.stderr));
+    check("D4: --repair-mounts converges rules modes before the re-attach",
+      rep.status === 0 && modeOf(join(BACKING, "rules", "rules.yaml")) === 0o664 && (modeOf(join(BACKING, "rules"))! & 0o777) === 0o775);
     runInstall(["--rollback"]);
   }
 
@@ -451,7 +573,19 @@ function main(): void {
 
   fs.rmSync(T, { recursive: true, force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
-  process.exit(fail > 0 ? 1 : 0);
+  // CI-visibility hardening (PR-50 lesson): this file is fully synchronous, so its
+  // stdout stays userspace-buffered until the process yields — a hard process.exit()
+  // discards every ✓/✗ line on failure. exitCode lets node flush before the natural
+  // exit; same nonzero contract for the runner.
+  process.exitCode = fail > 0 ? 1 : 0;
 }
+
+// Crash-context guard, registered BEFORE main(): an uncaught error in a synchronous
+// script exits node before buffered stdout drains — the runner then sees a silent
+// nonzero exit. stderr writes are synchronous even to pipes, so this always lands.
+process.on("uncaughtException", (e) => {
+  process.stderr.write(`minidc-install.test.ts UNCAUGHT: ${(e as Error).stack ?? String(e)}\n`);
+  process.exitCode = 1;
+});
 
 main();
