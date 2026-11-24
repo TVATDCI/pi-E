@@ -569,6 +569,17 @@ function main(): void {
     check("rollback stops are --no-block invocations", rollbackBody.includes("stop --no-block"));
     check("stub mirroring runs only AFTER awaited activation (step 4b, not step 3)", INSTALL_SRC.indexOf("NO stub mirroring happens here") > 0 && INSTALL_SRC.indexOf("mirror_created_stubs\n") > INSTALL_SRC.indexOf("minidc-mounts.service active 90"));
     check("journal APPENDS only: no helper-side creation path (C helper pins it; installer creates it at P4)", INSTALL_SRC.includes("the helper APPENDS, never creates"));
+
+    // ═══ D6 pins (2026-11-24 activation soak: the certify rewrite must not ⋅
+    // drop the daemon-readable group — production evidence: root:root store,
+    // daemon read fail-closed to empty, all claims denied) ═══
+    const CERTIFY_SRC = fs.readFileSync(
+      new URL("../../broker/minidc-certify.ts", import.meta.url), "utf8");
+    const chownIdx = CERTIFY_SRC.indexOf("fs.chownSync(tmp, ref.uid, ref.gid)");
+    const renameIdx = CERTIFY_SRC.indexOf("fs.renameSync(tmp, path)");
+    check("D6: the store replace chowns the temp from the installation-id sibling BEFORE the rename (no unowned-file window)", chownIdx > 0 && renameIdx > chownIdx);
+    check("D6: the ownership reference is sibling-derived (lstat of installation-id)", CERTIFY_SRC.includes('fs.lstatSync(sibling)'));
+    check("D6: a missing/unreadable sibling REFUSES the write (loud, never silently unowned)", CERTIFY_SRC.includes("refusing to write without the ownership reference"));
   }
 
   fs.rmSync(T, { recursive: true, force: true });

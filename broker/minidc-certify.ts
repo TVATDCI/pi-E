@@ -204,9 +204,23 @@ export function readCertifiedStoreEffective(path: string): CertifiedStore {
 }
 
 /** Atomic whole-file replace (R2): O_EXCL temp in the same dir, fsync file + dir,
- *  rename. Mode 0640 — root-owned state entry, group-readable by the daemon. */
+ *  rename. Mode 0640 — root-owned state entry, group-readable by the daemon.
+ *  D6 (2026-11-24 activation soak): the replace must LAND the installer's
+ *  ownership discipline — uid+gid derived from the installation-id sibling —
+ *  or the daemon's group read is lost and the effective set fail-closes to
+ *  empty (every claim denied as uncertified-generation). The chown runs on
+ *  the temp BEFORE the rename so the daemon never observes an unowned file. */
 export function writeCertifiedStore(path: string, store: CertifiedStore): void {
   const dir = dirname(path);
+  const sibling = join(dir, "installation-id");
+  let ref: { uid: number; gid: number };
+  try {
+    const st = fs.lstatSync(sibling);
+    ref = { uid: st.uid, gid: st.gid };
+  } catch {
+    throw new Error(
+      `writeCertifiedStore: installation-id sibling unreadable (${sibling}) — refusing to write without the ownership reference`);
+  }
   const tmp = join(dir, `.tmp-certify-${process.pid}-${randomBytes(4).toString("hex")}`);
   const fd = fs.openSync(tmp, "wx", 0o640);
   try {
@@ -215,6 +229,7 @@ export function writeCertifiedStore(path: string, store: CertifiedStore): void {
   } finally {
     fs.closeSync(fd);
   }
+  fs.chownSync(tmp, ref.uid, ref.gid); // D6: sibling-derived ownership, pre-rename
   fs.renameSync(tmp, path);
   try {
     const dfd = fs.openSync(dir, "r");
