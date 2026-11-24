@@ -42,6 +42,7 @@ if [[ -n "$TEST_ROOT" ]]; then
   # test mode mirrors production: the helper installs at LIB_DIR — never inside bin/
   # (bin/ holds the harness's own stub binaries; the payload copy would clobber them)
   MOUNT_HELPER="$LIB_DIR/minidc-mount-helper"
+  PEERCRED_HELPER="$LIB_DIR/minidc-peercred-helper"
   NODE_BIN="$(command -v node)"
 else
   if [[ "$(id -u)" -ne 0 ]]; then
@@ -58,6 +59,7 @@ else
   FINDMNT="findmnt"
   FUSER="fuser"
   MOUNT_HELPER="$LIB_DIR/minidc-mount-helper"
+  PEERCRED_HELPER="$LIB_DIR/minidc-peercred-helper"
   NODE_BIN="$(readlink -f "$(command -v node)")"
 fi
 if [[ -z "${HOME_OF}" || ! -d "${HOME_OF}" ]]; then
@@ -203,6 +205,7 @@ write_units() {
         -e "s|@NODE_BIN@|$NODE_BIN|g" \
         -e "s|@LIB_DIR@|$LIB_DIR|g" \
         -e "s|@MOUNT_HELPER@|$MOUNT_HELPER|g" \
+        -e "s|@PEERCRED_HELPER@|$PEERCRED_HELPER|g" \
         "$SCRIPT_DIR_ONCE/units/$u" > "$UNIT_DIR/$u"
     if grep -q '@[A-Z_]*@' "$UNIT_DIR/$u"; then
       DIE "unit template substitution failed: $u still carries placeholders"
@@ -352,8 +355,13 @@ phase_p4_backing_tree() {
     mv "$staging/rules/rules.yaml" "$BACKING_ROOT/rules/rules.yaml" || DIE "P4: rules migration failed"
     rmdir "$staging/rules" 2>/dev/null || true
   fi
-  # root-owned 0640 state direct entries (certification empty set; attestation; health)
-  printf '{"backends":[]}\n' > "$STATE_DIR/certified-backends.json"
+  # root-owned 0640 state direct entries (certification empty set; attestation; health;
+  # R2 v2: the desk-local installation ID + the repo-approved digest list's installed
+  # root-owned copy — the effective approved source, worker-unwritable by ownership)
+  printf '{"version":2,"backends":[]}\n' > "$STATE_DIR/certified-backends.json"
+  head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$STATE_DIR/installation-id"
+  cp -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/approved-backends.json" "$STATE_DIR/approved-backends.json" \
+    || DIE "P4: approved-backends.json copy failed (repo-tracked source missing?)"
   printf '{"install-mode":"broker","transaction-id":"%s","attested-at":"%s"}\n' "$TXID" "$(now_iso)" > "$ATTESTATION"
   printf '{"healthy":false,"boot-id":null,"checked-at":null,"findings":["pre-activation"]}\n' > "$MOUNT_HEALTH"
   # daemon-writable runtime initial files (root-owned 0660 until first daemon transition)
@@ -369,15 +377,15 @@ phase_p4_backing_tree() {
   recursive_pass "$BACKING_ROOT/rules"
   recursive_pass "$BACKING_ROOT/state/runtime"
   if [[ -z "$TEST_ROOT" ]]; then
-    chown root:minidc-broker "$STATE_DIR/certified-backends.json" "$ATTESTATION" "$MOUNT_HEALTH"
-    chmod 0640 "$STATE_DIR/certified-backends.json" "$ATTESTATION" "$MOUNT_HEALTH"
+    chown root:minidc-broker "$STATE_DIR/certified-backends.json" "$STATE_DIR/approved-backends.json" "$STATE_DIR/installation-id" "$ATTESTATION" "$MOUNT_HEALTH"
+    chmod 0640 "$STATE_DIR/certified-backends.json" "$STATE_DIR/approved-backends.json" "$STATE_DIR/installation-id" "$ATTESTATION" "$MOUNT_HEALTH"
     chown root:root "$JOURNAL" "$LEDGER"; chmod 0600 "$JOURNAL" "$LEDGER"
     chown root:root "$STATE_DIR"; chmod 0755 "$STATE_DIR"
     chown root:root "$BACKING_ROOT"; chmod 0755 "$BACKING_ROOT"
   else
     # test mode realizes MODES only (chown is root-only — the ownership rows are
     # install-stage validation)
-    chmod 0640 "$STATE_DIR/certified-backends.json" "$ATTESTATION" "$MOUNT_HEALTH"
+    chmod 0640 "$STATE_DIR/certified-backends.json" "$STATE_DIR/approved-backends.json" "$STATE_DIR/installation-id" "$ATTESTATION" "$MOUNT_HEALTH"
     chmod 0600 "$JOURNAL" "$LEDGER"
     chmod 0755 "$STATE_DIR" "$BACKING_ROOT"
   fi
@@ -456,6 +464,9 @@ phase_p5_activate() {
   mkdir -p "$LIB_DIR/broker"
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   cp -f "$SCRIPT_DIR/minidc-broker.ts" "$LIB_DIR/broker/minidc-broker.ts"
+  # the installed daemon imports its certification sibling — they ship together
+  cp -f "$SCRIPT_DIR/minidc-certify.ts" "$LIB_DIR/broker/minidc-certify.ts"
+  cp -f "$SCRIPT_DIR/minidc-canary.ts" "$LIB_DIR/broker/minidc-canary.ts"
   if [[ -z "$TEST_ROOT" ]]; then
     # compile the fd-bound mount helper (D3 — raw syscalls need C; cc-checked, fail-closed)
     if ! command -v cc >/dev/null 2>&1; then
@@ -463,11 +474,21 @@ phase_p5_activate() {
     fi
     cc -O2 -Wall -o "$MOUNT_HELPER" "$SCRIPT_DIR/minidc-mount-helper.c" || DIE "P5: mount helper compile failed"
     chown root:root "$MOUNT_HELPER"; chmod 0755 "$MOUNT_HELPER"
+    # compile the peer-credential helper (R2 v2 / R4 — SO_PEERCRED needs C; same law)
+    cc -O2 -Wall -o "$PEERCRED_HELPER" "$SCRIPT_DIR/minidc-peercred-helper.c" || DIE "P5: peercred helper compile failed"
+    chown root:root "$PEERCRED_HELPER"; chmod 0755 "$PEERCRED_HELPER"
   else
     # test mode: the harness's helper stub lands at LIB_DIR (production compiles the
     # real C helper there — same destination)
     cp -f "$STUB_BIN/minidc-mount-helper.payload" "$LIB_DIR/minidc-mount-helper" 2>/dev/null || true
     chmod +x "$LIB_DIR/minidc-mount-helper" 2>/dev/null || true
+    # peercred helper: no stub machinery exists — compile for real when cc exists so
+    # the test tree exercises the true binary; absence degrades exactly like
+    # production-missing (presenter family fail-closed) and is not fatal here
+    if command -v cc >/dev/null 2>&1; then
+      cc -O2 -Wall -o "$PEERCRED_HELPER" "$SCRIPT_DIR/minidc-peercred-helper.c" 2>/dev/null || true
+      chmod 0755 "$PEERCRED_HELPER" 2>/dev/null || true
+    fi
   fi
   "$SYSTEMCTL" daemon-reload
   "$SYSTEMCTL" enable minidc-mounts.service minidc-broker.service >/dev/null 2>&1 || true

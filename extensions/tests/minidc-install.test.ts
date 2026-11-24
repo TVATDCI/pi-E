@@ -234,6 +234,23 @@ function main(): void {
     check("P4 mode pass: trail file 0660", modeOf(join(BACKING, "store", "slugA", "trail.jsonl")) === 0o660);
     check("P4 mode pass: rules file 0660", modeOf(join(BACKING, "rules", "rules.yaml")) === 0o660);
     check("state direct entries 0640", modeOf(join(STATE, "mount-health.json")) === 0o640 && modeOf(join(STATE, "install-attestation.json")) === 0o640);
+    // R2 v2 P4 state entries: certification store v2-empty, desk-local installation
+    // ID, and the repo-approved digest list's installed root-owned copy (R1/R3)
+    check("certified-backends.json seeded v2-empty 0640",
+      modeOf(join(STATE, "certified-backends.json")) === 0o640
+      && JSON.parse(fs.readFileSync(join(STATE, "certified-backends.json"), "utf8"))
+        .version === 2
+      && (JSON.parse(fs.readFileSync(join(STATE, "certified-backends.json"), "utf8")) as { backends: unknown[] }).backends.length === 0);
+    check("installation-id seeded: 128-bit (32 hex), 0640, fresh per install",
+      modeOf(join(STATE, "installation-id")) === 0o640 && /^[0-9a-f]{32}$/.test(fs.readFileSync(join(STATE, "installation-id"), "utf8").trim()));
+    check("approved-backends.json installed copy 0640, mirrors the repo-tracked source",
+      modeOf(join(STATE, "approved-backends.json")) === 0o640
+      && JSON.parse(fs.readFileSync(join(STATE, "approved-backends.json"), "utf8"))
+        .version === 1
+      && fs.readFileSync(join(STATE, "approved-backends.json"), "utf8")
+        === fs.readFileSync(join(REPO, "broker", "approved-backends.json"), "utf8"));
+    check("broker unit wires the compiled peercred helper path",
+      fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("--peercred-helper " + T + "/usr/lib/minidc/minidc-peercred-helper"));
     check("ledger 0600 root-only class", modeOf(LEDGER) === 0o600);
     check("units written with substituted paths", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes(T + "/var/lib/minidc-broker") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("@BACKING_ROOT@"));
     check("mounts unit carries ExecStop --stop + TimeoutStopSec=90", fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("ExecStop=") && fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("TimeoutStopSec=90"));
