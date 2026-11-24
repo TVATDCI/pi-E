@@ -1,5 +1,6 @@
 // extensions/tests/minidc-install.test.ts — the R2 install.sh unit matrix (design §8).
 // Run: node --experimental-strip-types minidc-install.test.ts
+// run-tests-timeout: 120000
 //
 // Drives broker/install.sh in its TEST MODE (MINIDC_INSTALL_TEST_ROOT scratch tree;
 // systemctl/findmnt/fuser/brokerctl/mount-helper are harness stubs in $T/bin). Covers:
@@ -15,7 +16,7 @@
 // CONFLICT), D4 (readable rules-view modes + the old-install repair heal).
 // Root-dependent legs (real systemd, real mounts, chown, the compiled helper's live
 // syscalls) are install-stage validation — named in the build report.
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -501,16 +502,17 @@ function main(): void {
   {
     section("D4: --repair-mounts re-converges rules-view modes (old-install heal)");
     legacyDesk();
-    // the OLD-INSTALL modes come from the machinery itself: run the base-revision
-    // (f8ef9c4) installer in the same scratch tree — its recursive_pass plants the
-    // 02770/0660 rules tree exactly as production desks got it (no hand-set chmods)
-    const oldInstall = join(T, "oldrepo", "broker", "install.sh");
-    fs.mkdirSync(join(T, "oldrepo"), { recursive: true });
-    execSync(`git archive f8ef9c4 broker | tar -x -C ${JSON.stringify(join(T, "oldrepo"))}`, { cwd: REPO, stdio: ["pipe", "pipe", "ignore"] });
-    const old = spawnSync("bash", [oldInstall], { encoding: "utf8", timeout: 30_000, env: { ...process.env, MINIDC_INSTALL_TEST_ROOT: T, MINIDC_TARGET_USER: "tester" } });
-    if (old.status !== 0) console.log("    base-install output:", so(old.stdout) + so(old.stderr));
-    check("D4 heal precondition: the base installer planted the old hard-locked rules modes",
-      old.status === 0 && modeOf(join(BACKING, "rules")) === 0o2770 && modeOf(join(BACKING, "rules", "rules.yaml")) === 0o660);
+    runInstall();
+    // The OLD-INSTALL shape as an explicit fixture: the base revision (f8ef9c4)
+    // planted the rules tree 02770/0660 via its recursive_pass — the exact EACCES
+    // shape of the soak. Reproducing history at runtime (git archive of the base
+    // commit) proved environment-fragile: CI checks out shallow merge refs without
+    // the parent objects, the spawn threw, and this fully-synchronous file's
+    // buffered stdout vanished with it (PR-50 CI: exit 1, zero output). The modes
+    // are planted directly on the fresh install's tree instead; the machinery
+    // under test — --repair-mounts' rules_pass convergence — runs for real either way.
+    fs.chmodSync(join(BACKING, "rules"), 0o2770);
+    fs.chmodSync(join(BACKING, "rules", "rules.yaml"), 0o660);
     const rep = runInstall(["--repair-mounts"]);
     if (rep.status !== 0) console.log("    repair-mounts output:", so(rep.stdout) + so(rep.stderr));
     check("D4: --repair-mounts converges rules modes before the re-attach",
@@ -571,7 +573,19 @@ function main(): void {
 
   fs.rmSync(T, { recursive: true, force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
-  process.exit(fail > 0 ? 1 : 0);
+  // CI-visibility hardening (PR-50 lesson): this file is fully synchronous, so its
+  // stdout stays userspace-buffered until the process yields — a hard process.exit()
+  // discards every ✓/✗ line on failure. exitCode lets node flush before the natural
+  // exit; same nonzero contract for the runner.
+  process.exitCode = fail > 0 ? 1 : 0;
 }
+
+// Crash-context guard, registered BEFORE main(): an uncaught error in a synchronous
+// script exits node before buffered stdout drains — the runner then sees a silent
+// nonzero exit. stderr writes are synchronous even to pipes, so this always lands.
+process.on("uncaughtException", (e) => {
+  process.stderr.write(`minidc-install.test.ts UNCAUGHT: ${(e as Error).stack ?? String(e)}\n`);
+  process.exitCode = 1;
+});
 
 main();
