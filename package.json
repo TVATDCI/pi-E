@@ -1,6 +1,7 @@
 {
   "name": "pi-agent-config",
   "private": true,
+  "type": "module",
   "description": "pi agent config repo (pi-E) \u2014 pinned extension deps",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",
