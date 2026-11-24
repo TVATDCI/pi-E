@@ -255,6 +255,16 @@ function main(): void {
     check("units written with substituted paths", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes(T + "/var/lib/minidc-broker") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("@BACKING_ROOT@"));
     check("mounts unit carries ExecStop --stop + TimeoutStopSec=90", fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("ExecStop=") && fs.readFileSync(join(UNIT_DIR, "minidc-mounts.service"), "utf8").includes("TimeoutStopSec=90"));
     check("broker unit: Type=simple + TimeoutStartSec=60 + TimeoutStopSec=30 + no Requires", fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Type=simple") && !fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8").includes("Requires="));
+    // ptrace-fix (R2 soak defect 1): the daemon must ptrace-read a CROSS-USER
+    // /proc/<pid>/exe to fingerprint the presenter's running artifact (R4) — the
+    // unit template carries ambient + bounding CAP_SYS_PTRACE in [Service]; the
+    // live cross-user proof is the pre/post-cert canary, this pins the template.
+    const brokerUnitBody = fs.readFileSync(join(UNIT_DIR, "minidc-broker.service"), "utf8");
+    const svcSection = brokerUnitBody.slice(brokerUnitBody.indexOf("[Service]"), brokerUnitBody.indexOf("[Install]"));
+    check("broker unit: AmbientCapabilities=CAP_SYS_PTRACE in [Service] (R4 running-artifact read)",
+      svcSection.includes("AmbientCapabilities=CAP_SYS_PTRACE"));
+    check("broker unit: CapabilityBoundingSet=CAP_SYS_PTRACE in [Service] (scoped to exactly that)",
+      svcSection.includes("CapabilityBoundingSet=CAP_SYS_PTRACE"));
     const ledgerDoc = JSON.parse(fs.readFileSync(LEDGER, "utf8")) as { "created-stubs"?: string[]; "marker-pre"?: { present?: boolean } }; // cleanup F1: the marker-pre index
     // P7 (commit) DELETES the aside copies per the design — post-commit rollback is
     // "reinstall from the manifest copies inside the backing tree itself"

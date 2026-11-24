@@ -24,6 +24,13 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=@BACKING_ROOT@/store @BACKING_ROOT@/rules @BACKING_ROOT@/state/runtime
 ReadOnlyPaths=@BACKING_ROOT@/state
+# R4 running-artifact measurement (ptrace-fix, R2 soak defect 1): the daemon
+# must readlink+read a CROSS-USER /proc/<pid>/exe to fingerprint the presenter's
+# live artifact — CAP_SYS_PTRACE grants exactly that ptrace-read; the bounding
+# set keeps it the daemon's only capability. NoNewPrivileges stays: systemd
+# applies ambient capabilities at exec, so no privileged child ever spawns.
+AmbientCapabilities=CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_SYS_PTRACE
 
 [Install]
 WantedBy=multi-user.target

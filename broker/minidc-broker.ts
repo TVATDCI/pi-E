@@ -1330,6 +1330,7 @@ export function createBroker(cfgIn: Partial<BrokerConfig> = {}): Broker {
         const exe = procExeDigest(peerPid);
         if ("err" in exe) {
           audit("presenter-denied", { op, why: exe.err, conn: c.id, pid: peerPid });
+          // name kept (grep-verified no consumer matches it on this path): registration-family gate contract shared with the delegate-claim twin — the reason carries the measurement detail
           return err(f.id, "E_DENIED_UNREGISTERED", { reason: exe.err });
         }
         // certification gate (R3): a LIVE generation of this backend whose exe digest
