@@ -83,6 +83,11 @@ crashes.json
 # (storeRoot() is ~/.pi/agent/mini-dc, which IS this repo's root on the live agent home)
 /mini-dc/
 
+# broker runtime state — never committed (installer advisory marker; protected-view
+# rules destination; see broker/README.md)
+/mini-dc-install-mode
+/mini-dc-rules/
+
 # ── R2 BROKER INSTALL RUNTIME STATE — desk-local, never tracked ─────────────
 # The approved digest list (broker/approved-backends.json) is TRACKED repo content
 # (changes only through captain-approved merged PRs). These install-runtime
