@@ -20,12 +20,14 @@
 
 import * as net from "node:net";
 import * as fs from "node:fs";
-import { join, isAbsolute } from "node:path";
+import { join, isAbsolute, dirname } from "node:path";
 import * as os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 
-const { accessSync, constants } = fs;
+const { tmpdir } = os;
+
+const { accessSync, constants, readFileSync, writeFileSync, mkdtempSync, rmSync, appendFileSync } = fs;
 
 // ═══════════════ paths + seams ════════════════════════════════════════════════
 export interface BrokerPaths {
@@ -296,8 +298,16 @@ let observationState: ModeObservation | null = null;
 // stuck-but-alive owner answers within its own 3 s op budget or the call degrades.
 interface OwnerState {
   proc: ChildProcess;
-  outFd: number | null; // the stdout pipe fd (internal handle; anonymous pipe —
-  // NOT name-enumerable in /tmp: no same-uid process can inject a response line)
+  // defect-8 revisions (TNT verdicts): responses AND requests ride per-owner
+  // FILES in an unguessable 0700 mkdtemp dir. pi's runtime exposes no usable
+  // child-stdio fds, AND a stream write needs an event-loop turn the caller's
+  // synchronous poll never grants — the caller was blocking delivery of its
+  // own request. appendFileSync both ways is syscall-true; the caller-assigned
+  // id in each line is the correlation an injector cannot forge without the
+  // next sequence number.
+  respFile: string;
+  reqFile: string;
+  respOffset: number;
   dead: boolean;
 }
 let owner: OwnerState | null = null;
@@ -315,6 +325,17 @@ export function brokerClientActive(): boolean {
 export function bridgeGrade(): string | null {
   return bridgeGradeValue;
 }
+/** Defect-8 diagnostics: the packaged-pi op-path state (outFd seam etc.). */
+export function bridgeDebug(): Record<string, unknown> {
+  const st = owner;
+  const so: any = st ? (st.proc as any).stdout : null;
+  let respTail = null;
+  try { respTail = st ? readFileSync(st.respFile, "utf8").slice(-220) : null; } catch { respTail = "unreadable"; }
+  return {
+    ready: bridgeReady, dead: st ? st.dead : null, respFile: st ? st.respFile : null, respTail,
+    soCtor: so ? so.constructor?.name : null,
+  };
+}
 export function bridgeConnected(): boolean {
   return brokerClientActive();
 }
@@ -330,37 +351,71 @@ function selfStatOf(pid: number): string {
 
 let bridgeEnvs: Record<string, string | undefined> = {};
 
-// ── defect 8 (2026-11-25, TNT root-cause handoff): under packaged Pi,
-// process.execPath is the Pi application, not Node — and Pi treats -e as an
-// extension-file option, so an owner launched that way evaluates NOTHING: a
-// live process that never connects, never registers, never consumes (silent
-// by construction; no denial ever reaches the audit). The owner MUST launch
-// under a trusted Node binary. Resolution: MINIDC_NODE_BIN when it names an
-// absolute, executable path; else the desk's mise-managed node (the same
-// binary family the certified generation approves — the broker's own R4
-// running-artifact law remains the trust enforcement, this resolution is
-// correctness). NEVER process.execPath, never a loose PATH lookup, never a
-// silent fallback: an unusable runtime is a prompt, safe failure.
+// ── defect 8 (2026-11-25, TNT root-cause handoff + review round): under
+// packaged Pi, process.execPath is the Pi application, not Node — and Pi
+// treats -e as an extension-file option, so an owner launched that way
+// evaluates NOTHING: a live process that never connects, never registers,
+// never consumes (silent by construction; no denial ever reaches the audit).
+// The owner MUST launch under the AUTHORIZED Node runtime, and trust must be
+// established BEFORE the enrollment credential is passed to the child (the
+// broker's own checks cannot protect that handoff).
+//
+// The authorized runtime lives in a root-owned trust file the installer
+// writes (/etc/minidc/node-bin, mode 0444 — a source no session user can
+// change; install.sh resolves the node binary as root at install time).
+// MINIDC_NODE_BIN is honored ONLY when its target is byte-identical (sha256)
+// to the authorized runtime — an explicit selection that differs is REJECTED
+// loudly, never silently substituted. No HOME fallback, no PATH lookup, no
+// silent anything: unusable or unauthorized means one prompt line and no
+// owner (rules stay unavailable — the fail-closed law).
+let nodeTrustFileOverride: string | null = null;
+/** Test seam (the setBrokerPathsForTesting precedent): point the trust-file
+ *  read at a scratch file. NOT env-based — a worker must not be able to
+ *  relocate its own trust source. */
+export function setNodeTrustFileForTesting(path: string | null): void {
+  nodeTrustFileOverride = path;
+}
+function sha256FileQuiet(p: string): string | null {
+  try { return createHash("sha256").update(readFileSync(p)).digest("hex"); } catch { return null; }
+}
 function trustedNodeBin(): { bin: string } | { err: string } {
-  const home = process.env["HOME"] ?? "/home/vladi";
-  const candidates: string[] = [];
-  const envBin = process.env["MINIDC_NODE_BIN"];
-  if (envBin && isAbsolute(envBin)) candidates.push(envBin);
-  candidates.push(join(home, ".local/share/mise/installs/node/latest/bin/node"));
-  for (const c of candidates) {
-    try {
-      accessSync(c, constants.X_OK);
-      return { bin: c };
-    } catch { /* next candidate */ }
+  const trustFile = nodeTrustFileOverride ?? "/etc/minidc/node-bin";
+  let authorized: string;
+  try {
+    authorized = readFileSync(trustFile, "utf8").trim();
+  } catch {
+    return { err: `no authorized node runtime (trust file ${trustFile} unreadable — rerun the installer or create it as root)` };
   }
-  return { err: "no trusted node runtime — set MINIDC_NODE_BIN to an absolute, executable node path" };
+  if (!authorized || !isAbsolute(authorized)) {
+    return { err: `authorized node runtime malformed (trust file ${trustFile})` };
+  }
+  let chosen = authorized;
+  const envBin = process.env["MINIDC_NODE_BIN"];
+  if (envBin) {
+    // an explicit selection is legal ONLY when byte-identical to the
+    // authorized runtime (same sha256) — e.g. a symlink or alias to it;
+    // anything else is a loud rejection, never a substitution
+    const a = sha256FileQuiet(envBin);
+    const b = sha256FileQuiet(authorized);
+    if (!a || !b || a !== b) {
+      return { err: `MINIDC_NODE_BIN not authorized (differs from the trusted runtime; refusing to pass credentials to it)` };
+    }
+    chosen = envBin;
+  }
+  try {
+    accessSync(chosen, constants.X_OK);
+  } catch {
+    return { err: `authorized node runtime unusable (${chosen})` };
+  }
+  return { bin: chosen };
 }
 
 let bridgeLaunchErr: string | null = null;
 /** The defect-8 failure surface (task 3): missing runtime or an owner that
  *  died before ever registering surfaces ONE prompt line — never the env, the
  *  token, or the registration frame. Denial itself stays the existing law:
- *  a dead bridge means rules stay unavailable (fail-closed). */
+ *  a dead bridge means rules stay unavailable (fail-closed). Cleared per
+ *  owner attempt and on successful registration. */
 export function bridgeLaunchError(): string | null {
   return bridgeLaunchErr;
 }
@@ -370,24 +425,40 @@ function startBridge(env: Record<string, string | undefined>): void {
   // anonymous pipe): not name-enumerable anywhere, so no same-uid process can
   // inject a fabricated response line. The fd comes from the internal handle
   // (undocumented but stable); readSync on it works with EAGAIN poll-continue.
+  bridgeLaunchErr = null; // per-owner-attempt state (review finding 2)
   const nodeBin = trustedNodeBin();
   if ("err" in nodeBin) {
     bridgeLaunchErr = `mini-dc bridge: ${nodeBin.err}`;
-    return; // no owner: rules-load stays degraded, bash stays denied (fail-closed)
+    return; // no owner, no credential handoff: rules-load stays degraded (fail-closed)
   }
+  const respDir = mkdtempSync(join(tmpdir(), "minidc-bridge-"));
+  const respFile = join(respDir, "r");
+  const reqFile = join(respDir, "q");
+  writeFileSync(respFile, "", { mode: 0o600 });
+  writeFileSync(reqFile, "", { mode: 0o600 });
   const proc = spawn(nodeBin.bin, ["-e", OWNER_SOURCE], {
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["ignore", "ignore", "pipe"], // stderr stays a pipe: the grade marker (C:ok/C:fail) rides it; stdin/stdout are dead channels (revision 2)
     env: {
       ...process.env,
       MINIDC_SESSION_PID: String(process.pid),
       MINIDC_SESSION_STARTTIME: selfStatOf(process.pid),
       MINIDC_SOCKET: brokerPaths().socketPath,
+      MINIDC_RESP_FILE: respFile,
+      MINIDC_REQ_FILE: reqFile,
       ...(env["MINIDC_ENROLLMENT"] ? { MINIDC_ENROLLMENT: env["MINIDC_ENROLLMENT"] } : {}),
       ...(env["MINIDC_CLAIM_SECRET"] ? { MINIDC_CLAIM_SECRET: env["MINIDC_CLAIM_SECRET"] } : {}),
     },
   });
-  const st: OwnerState = { proc, outFd: null, dead: false };
+  const st: OwnerState = { proc, respFile, reqFile, respOffset: 0, dead: false };
   bridgeEnvs = env;
+  proc.on("error", (e: NodeJS.ErrnoException) => {
+    // review finding 2: async spawn failures (ENOENT etc.) must land in the
+    // same bounded, token-free diagnostic — not escape as an unhandled error
+    st.dead = true;
+    if (bridgeLaunchErr === null) {
+      bridgeLaunchErr = `mini-dc bridge: owner launch failed (${e.code ?? e.message})`;
+    }
+  });
   proc.on("exit", () => {
     st.dead = true;
     // defect-8 task 3: an owner that died WITHOUT ever registering surfaces
@@ -408,9 +479,9 @@ function startBridge(env: Record<string, string | undefined>): void {
       bridgeGradeValue = null;
     }
   });
-  // no 'data' listener on stdout: the stream stays paused, the fd stays ours alone
-  const handle = (proc.stdout as unknown as { _handle?: { fd?: number } | null })._handle;
-  st.outFd = typeof handle?.fd === "number" ? handle.fd : null;
+  // no 'data' listener on stdout (legacy mirror only); the response channel is
+  // the per-owner respFile (see OwnerState) — cleaned up best-effort on exit
+  proc.on("exit", () => { try { rmSync(dirname(st.respFile), { recursive: true, force: true }); } catch { /* best effort */ } });
   owner = st;
   bridgeReady = true;
 }
@@ -476,7 +547,19 @@ let stopped = false;
 // fix2 new-finding-1: responses ride STDOUT — an anonymous pipe, not a
 // name-enumerable fifo; only the parent holds the read end
 function writeResp(obj) {
+  // defect-8 revision 2 (TNT response-timing verdict): the response rides the
+  // per-owner file; the stdout mirror is kept for node-run diagnostics only.
+  // The REQUEST side is also a file (the caller's appendFileSync is a real
+  // syscall — a pipe write would need an event-loop turn the caller's
+  // synchronous poll loop never grants: the caller was blocking delivery of
+  // its own request. Proven by TNT's inert-child control.)
   try { process.stdout.write(JSON.stringify(obj) + "\\n"); } catch (e) { /* reader gone */ }
+  try {
+    if (process.env.MINIDC_RESP_FILE) {
+      const fs2 = require("node:fs");
+      fs2.appendFileSync(process.env.MINIDC_RESP_FILE, JSON.stringify(obj) + "\\n");
+    }
+  } catch (e) { /* file gone — stdout mirror already attempted */ }
 }
 function send(op, args, cb) {
   if (!sock || !connected) { cb({ ok: false, error: "E_UNAVAILABLE", reason: "owner-disconnected" }); return; }
@@ -539,14 +622,41 @@ function reClaim() {
     } else if (f.retryable === true) { setTimeout(reClaim, 500); }
   });
 }
-// op pump: one JSON line per op from stdin; answer on the fifo
-const readline = require("node:readline");
-const rl = readline.createInterface({ input: process.stdin });
-rl.on("line", (line) => {
-  if (line.trim() === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} process.exit(0); }
-  let req; try { req = JSON.parse(line); } catch (e) { writeResp({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }); return; }
-  send(req.op, req.args, (f) => writeResp(f));
-});
+// request pump (revision 2): the caller appends JSON lines to the REQUEST
+// file (appendFileSync — a real syscall, lands immediately); the owner tails
+// it with its OWN free event loop. The old stdin pipe is GONE: a stream write
+// needs a parent event-loop turn the caller's sync poll never grants.
+(function requestPump() {
+  const fs3 = require("node:fs");
+  const reqFile = process.env.MINIDC_REQ_FILE;
+  if (!reqFile) return;
+  let offset = 0;
+  function pump() {
+    let text;
+    try { text = fs3.readFileSync(reqFile, "utf8"); } catch (e) { return; }
+    const unread = text.slice(offset);
+    let i;
+    let consumed = 0;
+    let deferred = false;
+    while ((i = unread.indexOf("\\n", consumed)) >= 0) {
+      const line = unread.slice(consumed, i);
+      consumed = i + 1;
+      if (!line.trim()) continue;
+      let req; try { req = JSON.parse(line); } catch (e) { writeResp({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }); continue; }
+      if (req.op === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} process.exit(0); }
+      if (!registered) {
+        // respawn race: a request can land before the connect+claim round-trip
+        // completes — defer it (re-pump after a beat) instead of answering
+        // owner-disconnected; the caller's budget still bounds the wait
+        deferred = true;
+        break;
+      }
+      send(req.op, req.args, (f) => writeResp({ ...f, id: req.id })); // echo the CALLER's id (id-matched responses)
+    }
+    if (consumed > 0 && !deferred) offset += Buffer.byteLength(unread.slice(0, consumed), "utf8");
+  }
+  setInterval(pump, 2);
+})();
 // the 15 s background re-claim loop (§4.4.6): rebinds after daemon restarts while idle
 setInterval(() => { if (!connected) return; if (!registered) reClaim(); }, 15000);
 connect();
@@ -560,6 +670,7 @@ export interface BridgeResult<T = unknown> {
   reason?: string;
 }
 
+let bridgeCallSeq = 1;
 export function bridgeCall(
   op: string,
   args: Record<string, unknown>,
@@ -569,41 +680,46 @@ export function bridgeCall(
   // fix2 new-finding-2: a dead owner RESPAWNS here (one attempt per call) — the
   // session recovers on the next op instead of degrading forever
   const st0 = owner;
-  const st = st0 && !st0.dead && st0.outFd !== null ? st0 : ensureOwner();
-  if (!st || st.outFd === null) return null;
+  const st = st0 && !st0.dead ? st0 : ensureOwner();
+  if (!st) return null;
+  const id = bridgeCallSeq++;
   try {
-    st.proc.stdin?.write(`${JSON.stringify({ op, args })}\n`);
-    // poll the owner's STDOUT pipe (fix2: anonymous, not name-enumerable — no
-    // same-uid response injection); the OWNER is a separate process (immune to
-    // the Node main-thread stall); owner death ⇒ readSync returns EOF.
+    // revision 2 (TNT verdict): the REQUEST rides appendFileSync — a real
+    // syscall that lands immediately. The old stream write needed an
+    // event-loop turn this synchronous poll loop never grants (the caller
+    // was blocking delivery of its own request).
+    appendFileSync(st.reqFile, `${JSON.stringify({ id, op, args })}\n`);
+    // defect-8 revision: poll the per-owner RESPONSE FILE (pi's runtime exposes
+    // no usable child-stdout fd; see OwnerState). The caller-assigned id makes
+    // a forged MATCHED response require guessing the next sequence number —
+    // the injection-hardening successor to the anonymous-pipe property.
     const deadline = Date.now() + timeoutMs;
-    let line = "";
-    const chunk = Buffer.alloc(1 << 16);
     for (;;) {
-      let n: number;
+      let text = "";
       try {
-        n = fs.readSync(st.outFd, chunk, 0, chunk.length, null);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "EAGAIN") {
-          if (Date.now() > deadline) return null; // budget spent — degraded
-          sleepSyncMs(2);
-          continue;
-        }
-        if ((e as NodeJS.ErrnoException).code === "EINTR") continue;
-        throw e; // pipe gone
+        text = readFileSync(st.respFile, "utf8");
+      } catch {
+        if (Date.now() > deadline) return null;
+        sleepSyncMs(2);
+        continue;
       }
-      if (n <= 0) { st.dead = true; return null; } // EOF — owner died
-      line += chunk.toString("utf8", 0, n);
-      const i = line.indexOf("\n");
-      if (i >= 0) {
-        const raw = line.slice(0, i);
+      const unread = text.slice(st.respOffset);
+      const ni = unread.indexOf("\n");
+      if (ni >= 0) {
+        const raw = unread.slice(0, ni);
+        st.respOffset += Buffer.byteLength(unread.slice(0, ni + 1), "utf8");
         try {
-          return JSON.parse(raw) as BridgeResult;
+          const f = JSON.parse(raw) as { id?: number } & BridgeResult;
+          if (f.id === id) return f;
+          // a line for a DIFFERENT id (a previous timed-out op's late reply or
+          // an injected line with a wrong id): skip it — never a match, never a guess
+          continue;
         } catch {
-          return null; // malformed — degraded, never a guess
+          continue; // malformed line — skipped, not fatal
         }
       }
-      if (Date.now() > deadline) return null; // owner overran its own budget — degraded
+      if (Date.now() > deadline) return null; // budget spent — degraded
+      sleepSyncMs(2);
     }
   } catch {
     return null; // pipe gone — degraded, never a hang
@@ -618,7 +734,8 @@ export function ownerProcForTest(): ChildProcess | null {
 export function shutdownBrokerClient(): void {
   const st = owner;
   if (st) {
-    try { st.proc.stdin?.write("shutdown\n"); } catch { /* gone */ }
+    // revision 2: the request channel is the reqFile — the shutdown word rides it
+    try { appendFileSync(st.reqFile, "{\"op\":\"shutdown\"}\n"); } catch { /* gone */ }
     setTimeout(() => { try { st.proc.kill("SIGKILL"); } catch { /* gone */ } }, 250).unref?.();
     owner = null;
   }
@@ -709,6 +826,20 @@ export function writeRulesViaBroker(content: string): boolean {
 
 // Library module (imported by mini-damage-control.ts + tests), not a standalone
 // extension. The no-op default factory satisfies the extension loader's default-
-// export contract — same pattern as background-helpers.ts.
-export default function () {}
+// export contract — same pattern as background-helpers.ts. When the packaged-Pi
+// regression loads this file DIRECTLY under -e, the module-scope driver hook
+// (registered by the appended test tail BEFORE the loader invokes this factory)
+// turns the default factory into the test's session-start driver — ONE default
+// export, no loader-dependent duplicates (review finding 4).
+let bridgeDriver: ((pi: any) => void) | null = null;
+/** Test seam (the setBrokerPathsForTesting precedent): the -e regression
+ *  registers its driver here; production leaves it null. */
+export function registerBridgeDriverForTesting(fn: ((pi: any) => void) | null): void {
+  bridgeDriver = fn;
+}
+export default function (pi?: { on?: unknown }) {
+  if (bridgeDriver !== null && pi && typeof (pi as any).on === "function") {
+    bridgeDriver(pi as any);
+  }
+}
 

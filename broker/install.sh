@@ -573,6 +573,22 @@ phase_p6_verify() {
   fi
   local tuple; tuple="$(observe_tuple)"
   [[ "$(tuple_verdict "$tuple")" == "BROKER" ]] || DIE "P6: mode tuple not BROKER: $tuple"
+  # defect-8 revision (2026-11-25, review finding 1): the AUTHORIZED node
+  # runtime, as resolved by root at install time, lands in a root-owned
+  # world-readable trust file — the session-side owner launch reads it as
+  # its only trust source (MINIDC_NODE_BIN is honored only byte-identical
+  # to this entry). A source no session user can change.
+  if [[ -z "$TEST_ROOT" ]]; then
+    mkdir -p /etc/minidc
+    printf '%s\n' "$NODE_BIN" > /etc/minidc/node-bin.tmp
+    chown root:root /etc/minidc/node-bin.tmp
+    chmod 0444 /etc/minidc/node-bin.tmp
+    mv -f /etc/minidc/node-bin.tmp /etc/minidc/node-bin
+    LOG "P6: authorized node runtime recorded (/etc/minidc/node-bin -> $NODE_BIN)"
+  else
+    mkdir -p "$TEST_ROOT/etc/minidc"
+    printf '%s\n' "$NODE_BIN" > "$TEST_ROOT/etc/minidc/node-bin"
+  fi
   phase_complete P6
   LOG "P6 complete (root-side hash + tuple verified)"
 }

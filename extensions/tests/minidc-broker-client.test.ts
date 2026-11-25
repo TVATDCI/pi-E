@@ -15,6 +15,7 @@ import {
   readMarkerValue,
   observeInstallMode,
   setBrokerPathsForTesting,
+  setNodeTrustFileForTesting,
   MODE_UNAVAILABLE_ERROR,
   MODE_CONFLICT_ERROR,
   initBrokerClient,
@@ -68,6 +69,10 @@ const paths: BrokerPaths = {
 };
 fs.mkdirSync(join(T, "home", ".pi", "agent"), { recursive: true });
 setBrokerPathsForTesting(paths);
+// defect-8 revision: the owner launch reads the AUTHORIZED runtime from a
+// trust file — node-run tests stage their own (process.execPath IS node here)
+setNodeTrustFileForTesting(join(T, "node-bin"));
+fs.writeFileSync(join(T, "node-bin"), `${process.execPath}\n`);
 
 function writeMarker(v: "broker" | "legacy" | null): void {
   if (v === null) { try { fs.unlinkSync(paths.markerPath); } catch { /* absent */ } }
