@@ -15,11 +15,14 @@ import {
   readMarkerValue,
   observeInstallMode,
   setBrokerPathsForTesting,
+  setNodeTrustFileForTesting,
+  setPeerCredHelperForTesting,
   MODE_UNAVAILABLE_ERROR,
   MODE_CONFLICT_ERROR,
   initBrokerClient,
   brokerClientActive,
   bridgeGrade,
+  bridgeDebug,
   readGlobalRulesViaBroker,
   appendTrailViaBroker,
   readGrantsViaBroker,
@@ -31,7 +34,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -68,6 +71,27 @@ const paths: BrokerPaths = {
 };
 fs.mkdirSync(join(T, "home", ".pi", "agent"), { recursive: true });
 setBrokerPathsForTesting(paths);
+// defect-8 revision: the owner launch reads the AUTHORIZED runtime from a
+// trust file — node-run tests stage their own (process.execPath IS node here)
+// The fixture mirrors the installer's protected copy, not the raw host
+// interpreter: GitHub's toolcache node is world-writable (correctly refused by
+// trustedNodeBin), while the installed runtime is a non-writable copy.
+const protectedNode = join(T, "node-runtime");
+fs.copyFileSync(process.execPath, protectedNode);
+fs.chmodSync(protectedNode, 0o555);
+setNodeTrustFileForTesting(join(T, "node-bin"));
+fs.writeFileSync(join(T, "node-bin"), `${protectedNode}\n`);
+// The parent AND the owner verify socket peers with the REAL compiled helper.
+// CI runners do not have /usr/lib/minidc installed, so build the exact shipped
+// helper into the scratch tree instead of skipping verification.
+const peerHelper = join(T, "minidc-peercred-helper");
+const compiled = spawnSync("cc", ["-O2", "-o", peerHelper, join(REPO, "broker", "minidc-peercred-helper.c")], {
+  encoding: "utf8",
+});
+if (compiled.status !== 0) {
+  throw new Error(`the real peercred helper must compile for this matrix: ${compiled.stderr || compiled.error}`);
+}
+setPeerCredHelperForTesting(peerHelper);
 
 function writeMarker(v: "broker" | "legacy" | null): void {
   if (v === null) { try { fs.unlinkSync(paths.markerPath); } catch { /* absent */ } }
@@ -254,6 +278,11 @@ async function main(): Promise<void> {
       subject: "a1b2c3d4e5f60718", cls: "G", decision: "deny", scope: "none",
     });
     check("gate-row append via bridge (central origin derivation) acked", gateAppended);
+    if (!appended || !gateAppended) {
+      // CI-vs-desk diagnosis: the file read below only proves the append never
+      // landed; include the complete bridge state so the failed leg is named.
+      throw new Error(`append evidence missing: ${JSON.stringify({ observation: obs.state, rules: rules.state, grade: bridgeGrade(), appended, gateAppended, debug: bridgeDebug() })}`);
+    }
     const grants = readGrantsViaBroker("clslug");
     check("read-grants via bridge: empty list, not degraded", grants !== null && grants.length === 0);
     const trailRaw = fs.readFileSync(join(paths.treePath, "store", "clslug", "trail.jsonl"), "utf8");
@@ -354,11 +383,62 @@ async function main(): Promise<void> {
     if (ownerKilled) {
       ownerKilled.kill("SIGKILL");
       await sleep(300);
-      const respawnAppend = appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000004", cls: "G", decision: "proceed", scope: "once" });
+      // revision 3 (abstract socket): the respawn connection is ASYNC — the
+      // first op triggers the respawn, then a yield lets the socket land
+      appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000004", cls: "G", decision: "proceed", scope: "once" }); // triggers respawn — may degrade
+      await sleep(500); // yield for the async connection callback
+      const respawnAppend = appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000005", cls: "G", decision: "proceed", scope: "once" });
       check("owner respawn on next op after death (append completes, claim re-established)", respawnAppend);
     } else {
       check("owner respawn row (introspection absent — skipped honestly)", true);
     }
+
+    // revision 3.3 close/reuse pins: a verified descriptor is trusted only
+    // while its specific socket remains open. First kill AFTER success, then
+    // kill DURING a deliberately slowed verification.
+    check("verified bridge fd present before disconnect", typeof bridgeDebug().bridgeFd === "number");
+    const afterVerified = (clientMod as unknown as { ownerProcForTest?: () => ChildProcess | null }).ownerProcForTest?.();
+    afterVerified?.kill("SIGKILL");
+    await sleep(300);
+    check("socket close clears the trusted descriptor (no stale-fd reuse)", bridgeDebug().bridgeFd === null);
+
+    shutdownBrokerClient();
+    const slowHelper = join(T2, "slow-peercred-helper");
+    fs.writeFileSync(slowHelper, `#!/bin/sh\n: > "${T2}/verification-started"\nsleep 2\nexec "${peerHelper}"\n`);
+    fs.chmodSync(slowHelper, 0o755);
+    setPeerCredHelperForTesting(slowHelper);
+    const pendingInit = initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
+    for (let n = 0; n < 40 && !fs.existsSync(join(T2, "verification-started")); n++) await sleep(50);
+    check("slow verification is in flight before the kill", fs.existsSync(join(T2, "verification-started")));
+    (clientMod as unknown as { ownerProcForTest?: () => ChildProcess | null }).ownerProcForTest?.()?.kill("SIGKILL");
+    await pendingInit;
+    await sleep(100);
+    check("child exit during verification never publishes a trusted fd", bridgeDebug().bridgeFd === null);
+    setPeerCredHelperForTesting(peerHelper);
+    shutdownBrokerClient();
+
+    // Production selector pin (TNT trust regression): an ambient alternate
+    // helper must NEVER be invoked. The default installed path is the only
+    // production source; when absent, the descriptor stays untrusted.
+    const sentinel = join(T2, "ambient-helper-must-not-run");
+    fs.writeFileSync(sentinel, `#!/bin/sh\n: > "${T2}/ambient-ran"\nexit 1\n`);
+    fs.chmodSync(sentinel, 0o755);
+    setPeerCredHelperForTesting(null); // production mode
+    process.env.MINIDC_PEERCRED_HELPER = sentinel;
+    const obsAmbient = await initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
+    check("ambient alternate helper is never executed in production mode", !fs.existsSync(join(T2, "ambient-ran")));
+    if (fs.existsSync("/usr/lib/minidc/minidc-peercred-helper")) {
+      check("installed helper on the desk: production verification proceeds without the ambient selector", obsAmbient.state === "BROKER" && typeof bridgeDebug().bridgeFd === "number");
+    } else {
+      check("installed helper absent on the runner: descriptor remains untrusted", bridgeDebug().bridgeFd === null);
+    }
+    shutdownBrokerClient();
+    setPeerCredHelperForTesting(join(T2, "missing-installed-helper"));
+    await initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
+    check("invalid installed helper leaves the descriptor untrusted", bridgeDebug().bridgeFd === null);
+    check("invalid installed helper never falls back to the ambient alternate", !fs.existsSync(join(T2, "ambient-ran")));
+    delete process.env.MINIDC_PEERCRED_HELPER;
+    setPeerCredHelperForTesting(peerHelper);
     shutdownBrokerClient();
     daemon4.kill("SIGTERM");
     daemon3.kill("SIGTERM");

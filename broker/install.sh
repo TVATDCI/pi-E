@@ -573,6 +573,23 @@ phase_p6_verify() {
   fi
   local tuple; tuple="$(observe_tuple)"
   [[ "$(tuple_verdict "$tuple")" == "BROKER" ]] || DIE "P6: mode tuple not BROKER: $tuple"
+  # revision 3.2 (TNT round 5, blocker 2): the node binary is COPIED to a
+  # root-owned protected location — the trust file points to the copy, not
+  # the user-writable source (mise path). A worker cannot replace the copy.
+  if [[ -z "$TEST_ROOT" ]]; then
+    mkdir -p /etc/minidc
+    cp -f "$NODE_BIN" /usr/lib/minidc/node-bin
+    chown root:root /usr/lib/minidc/node-bin
+    chmod 0555 /usr/lib/minidc/node-bin
+    printf '%s\n' "/usr/lib/minidc/node-bin" > /etc/minidc/node-bin.tmp
+    chown root:root /etc/minidc/node-bin.tmp
+    chmod 0444 /etc/minidc/node-bin.tmp
+    mv -f /etc/minidc/node-bin.tmp /etc/minidc/node-bin
+    LOG "P6: authorized node runtime COPIED to /usr/lib/minidc/node-bin (root-owned 0555)"
+  else
+    mkdir -p "$TEST_ROOT/etc/minidc" "$TEST_ROOT/usr/lib/minidc" 2>/dev/null || true
+    printf '%s\n' "$NODE_BIN" > "$TEST_ROOT/etc/minidc/node-bin"
+  fi
   phase_complete P6
   LOG "P6 complete (root-side hash + tuple verified)"
 }
@@ -764,6 +781,22 @@ do_repair_mode() {
   if [[ "$mode" != "broker" ]]; then mode="broker"; fi
   printf '{"install-mode":"%s","transaction-id":"%s","attested-at":"%s"}\n' "$mode" "$(json_get "$LEDGER" "transaction-id" | tr -d '"')" "$(now_iso)" > "$ATTESTATION"
   printf '%s' "$mode" > "$MARKER"
+  # revision 3.2: --repair-mode copies the binary to the protected location
+  # (same as P6) and points the trust file at the copy
+  if [[ -z "$TEST_ROOT" ]]; then
+    mkdir -p /etc/minidc
+    cp -f "$NODE_BIN" /usr/lib/minidc/node-bin
+    chown root:root /usr/lib/minidc/node-bin
+    chmod 0555 /usr/lib/minidc/node-bin
+    printf '%s\n' "/usr/lib/minidc/node-bin" > /etc/minidc/node-bin.tmp
+    chown root:root /etc/minidc/node-bin.tmp
+    chmod 0444 /etc/minidc/node-bin.tmp
+    mv -f /etc/minidc/node-bin.tmp /etc/minidc/node-bin
+    LOG "repair-mode: authorized node runtime COPIED to /usr/lib/minidc/node-bin (root-owned 0555)"
+  else
+    mkdir -p "$TEST_ROOT/etc/minidc"
+    printf '%s\n' "$NODE_BIN" > "$TEST_ROOT/etc/minidc/node-bin"
+  fi
   LOG "repair-mode: attestation + marker reconciled to ledger truth ($mode)"
 }
 

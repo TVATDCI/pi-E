@@ -20,10 +20,14 @@
 
 import * as net from "node:net";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { join, isAbsolute, dirname } from "node:path";
 import * as os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
+
+const { tmpdir } = os;
+
+const { accessSync, constants, readFileSync } = fs;
 
 // ═══════════════ paths + seams ════════════════════════════════════════════════
 export interface BrokerPaths {
@@ -294,8 +298,15 @@ let observationState: ModeObservation | null = null;
 // stuck-but-alive owner answers within its own 3 s op budget or the call degrades.
 interface OwnerState {
   proc: ChildProcess;
-  outFd: number | null; // the stdout pipe fd (internal handle; anonymous pipe —
-  // NOT name-enumerable in /tmp: no same-uid process can inject a response line)
+  // revision 3 (TNT re-review finding 1): ONE duplex abstract-namespace unix
+  // socket — random name (no filesystem footprint), SO_PEERCRED-verified on
+  // every connection (the compiled helper; reject any connector whose pid !=
+  // the session pid). The parent side uses sync fd I/O on the socket (net
+  // sockets expose real fds unlike pi's child-stdio streams; syscall-true both
+  // directions, no event-loop dependency). No named files anywhere.
+  bridgeAddr: string;      // the abstract address (\0-prefixed)
+  bridgeSock: net.Socket | null; // set when the async connect lands
+  bridgeFd: number | null; // the connected socket's fd (sync I/O)
   dead: boolean;
 }
 let owner: OwnerState | null = null;
@@ -313,6 +324,17 @@ export function brokerClientActive(): boolean {
 export function bridgeGrade(): string | null {
   return bridgeGradeValue;
 }
+/** Defect-8 diagnostics: the bridge state (no stale fields). */
+export function bridgeDebug(): Record<string, unknown> {
+  const st = owner;
+  return {
+    ready: bridgeReady, dead: st ? st.dead : null,
+    bridgeAddr: st ? st.bridgeAddr : null,
+    bridgeFd: st ? st.bridgeFd : null,
+    grade: bridgeGradeValue,
+    launchErr: bridgeLaunchErr,
+  };
+}
 export function bridgeConnected(): boolean {
   return brokerClientActive();
 }
@@ -328,25 +350,152 @@ function selfStatOf(pid: number): string {
 
 let bridgeEnvs: Record<string, string | undefined> = {};
 
+// The credential verifier is part of the trust boundary. Production NEVER
+// selects it from session environment: only the installer-protected helper is
+// executed. Tests use this explicit module seam for their scratch binary and
+// deliberately slowed fixture; an ambient MINIDC_PEERCRED_HELPER is ignored.
+const INSTALLED_PEERCRED_HELPER = "/usr/lib/minidc/minidc-peercred-helper";
+let peerCredHelperTestPath: string | null = null;
+export function setPeerCredHelperForTesting(path: string | null): void {
+  peerCredHelperTestPath = path;
+}
+function peerCredHelperPath(): string {
+  return peerCredHelperTestPath ?? INSTALLED_PEERCRED_HELPER;
+}
+
+// ── defect 8 (2026-11-25, TNT root-cause handoff + review round): under
+// packaged Pi, process.execPath is the Pi application, not Node — and Pi
+// treats -e as an extension-file option, so an owner launched that way
+// evaluates NOTHING: a live process that never connects, never registers,
+// never consumes (silent by construction; no denial ever reaches the audit).
+// The owner MUST launch under the AUTHORIZED Node runtime, and trust must be
+// established BEFORE the enrollment credential is passed to the child (the
+// broker's own checks cannot protect that handoff).
+//
+// The authorized runtime lives in a root-owned trust file the installer
+// writes (/etc/minidc/node-bin, mode 0444 — a source no session user can
+// change; install.sh resolves the node binary as root at install time).
+// MINIDC_NODE_BIN is honored ONLY when its target is byte-identical (sha256)
+// to the authorized runtime — an explicit selection that differs is REJECTED
+// loudly, never silently substituted. No HOME fallback, no PATH lookup, no
+// silent anything: unusable or unauthorized means one prompt line and no
+// owner (rules stay unavailable — the fail-closed law).
+let nodeTrustFileOverride: string | null = null;
+/** Test seam (the setBrokerPathsForTesting precedent): point the trust-file
+ *  read at a scratch file. NOT env-based — a worker must not be able to
+ *  relocate its own trust source. */
+export function setNodeTrustFileForTesting(path: string | null): void {
+  nodeTrustFileOverride = path;
+}
+function sha256FileQuiet(p: string): string | null {
+  try { return createHash("sha256").update(readFileSync(p)).digest("hex"); } catch { return null; }
+}
+function trustedNodeBin(): { bin: string } | { err: string } {
+  const trustFile = nodeTrustFileOverride ?? "/etc/minidc/node-bin";
+  let authorized: string;
+  try {
+    authorized = readFileSync(trustFile, "utf8").trim();
+  } catch {
+    return { err: `no authorized node runtime (trust file ${trustFile} unreadable — rerun the installer or create it as root)` };
+  }
+  if (!authorized || !isAbsolute(authorized)) {
+    return { err: `authorized node runtime malformed (trust file ${trustFile})` };
+  }
+  // revision 3 (finding 2): an override is VALIDATED for equivalence, then the
+  // CANONICAL protected path is executed — NEVER the caller-supplied pathname
+  // (TOCTOU: the caller's path could be swapped between check and exec)
+  const envBin = process.env["MINIDC_NODE_BIN"];
+  if (envBin) {
+    const a = sha256FileQuiet(envBin);
+    const b = sha256FileQuiet(authorized);
+    if (!a || !b || a !== b) {
+      return { err: `MINIDC_NODE_BIN not authorized (differs from the trusted runtime; refusing to pass credentials to it)` };
+    }
+    // override accepted as equivalent — but we STILL exec the canonical path
+  }
+  // revision 3.1 (finding 2): the executable must not be world-writable.
+  // Full path-component root-ownership is incompatible with mise user-home
+  // paths — the root-owned 0444 trust file + sha256 equivalence are the
+  // primary defenses; this is defense-in-depth on the target itself.
+  try {
+    const st = fs.statSync(authorized);
+    if (st.mode & 0o002) {
+      return { err: `authorized node runtime is world-writable (${authorized})` };
+    }
+  } catch {
+    return { err: `authorized node runtime stat failed (${authorized})` };
+  }
+  try {
+    accessSync(authorized, constants.X_OK);
+  } catch {
+    return { err: `authorized node runtime unusable (${authorized})` };
+  }
+  return { bin: authorized }; // ALWAYS the canonical path
+}
+
+let bridgeLaunchErr: string | null = null;
+/** The defect-8 failure surface (task 3): missing runtime or an owner that
+ *  died before ever registering surfaces ONE prompt line — never the env, the
+ *  token, or the registration frame. Denial itself stays the existing law:
+ *  a dead bridge means rules stay unavailable (fail-closed). Cleared per
+ *  owner attempt and on successful registration. */
+export function bridgeLaunchError(): string | null {
+  return bridgeLaunchErr;
+}
+
 function startBridge(env: Record<string, string | undefined>): void {
   // fix2 new-finding-1: NO named fifo — responses ride the owner's STDOUT (an
   // anonymous pipe): not name-enumerable anywhere, so no same-uid process can
   // inject a fabricated response line. The fd comes from the internal handle
   // (undocumented but stable); readSync on it works with EAGAIN poll-continue.
-  const proc = spawn(process.execPath, ["-e", OWNER_SOURCE], {
-    stdio: ["pipe", "pipe", "pipe"],
+  bridgeLaunchErr = null; // per-owner-attempt state (review finding 2)
+  const nodeBin = trustedNodeBin();
+  if ("err" in nodeBin) {
+    bridgeLaunchErr = `mini-dc bridge: ${nodeBin.err}`;
+    return; // no owner, no credential handoff: rules-load stays degraded (fail-closed)
+  }
+  // revision 3: the abstract-namespace address (random, no filesystem footprint)
+  const bridgeAddr = randomBytes(16).toString("hex"); // the hex name; the \0 prefix is kernel-only (env values cannot carry null bytes)
+  // revision 3 (finding 2): MINIMAL env — only what the credential child needs;
+  // never the full runtime environment
+  const proc = spawn(nodeBin.bin, ["-e", OWNER_SOURCE], {
+    stdio: ["ignore", "ignore", "pipe"], // stderr: the grade marker (C:ok/C:fail)
     env: {
-      ...process.env,
+      PATH: process.env["PATH"] ?? "/usr/bin:/bin", // the credential child needs PATH for the peercred helper's dynamic linker
+      MINIDC_BRIDGE_ADDR: bridgeAddr,
       MINIDC_SESSION_PID: String(process.pid),
       MINIDC_SESSION_STARTTIME: selfStatOf(process.pid),
       MINIDC_SOCKET: brokerPaths().socketPath,
+      MINIDC_PEERCRED_HELPER: peerCredHelperPath(),
       ...(env["MINIDC_ENROLLMENT"] ? { MINIDC_ENROLLMENT: env["MINIDC_ENROLLMENT"] } : {}),
       ...(env["MINIDC_CLAIM_SECRET"] ? { MINIDC_CLAIM_SECRET: env["MINIDC_CLAIM_SECRET"] } : {}),
     },
   });
-  const st: OwnerState = { proc, outFd: null, dead: false };
+  const st: OwnerState = { proc, bridgeAddr, bridgeSock: null, bridgeFd: null, dead: false };
   bridgeEnvs = env;
-  proc.on("exit", () => { st.dead = true; });
+  // revision 3: connect to the abstract socket ASYNC (the owner creates the
+  // server; the parent connects once it's up). The fd lands in st.bridgeFd.
+  connectBridgeSocket(st);
+  proc.on("error", (e: NodeJS.ErrnoException) => {
+    // review finding 2: async spawn failures (ENOENT etc.) must land in the
+    // same bounded, token-free diagnostic — not escape as an unhandled error
+    st.dead = true;
+    if (bridgeLaunchErr === null) {
+      bridgeLaunchErr = `mini-dc bridge: owner launch failed (${e.code ?? e.message})`;
+    }
+  });
+  proc.on("exit", () => {
+    st.dead = true;
+    // Child exit invalidates both the pending verification and any trusted fd.
+    st.bridgeFd = null;
+    try { st.bridgeSock?.destroy(); } catch { /* already gone */ }
+    st.bridgeSock = null;
+    // defect-8 task 3: an owner that died WITHOUT ever registering surfaces
+    // once — the respawn logic still retries; this line is the prompt signal
+    if (bridgeGradeValue === null && bridgeLaunchErr === null) {
+      bridgeLaunchErr = "mini-dc bridge: owner exited before registration (runtime or socket unusable)";
+    }
+  });
   proc.stderr?.on("data", (d: Buffer) => {
     const m = /C:(ok|fail):(\S*)/.exec(d.toString());
     if (!m) return;
@@ -359,11 +508,116 @@ function startBridge(env: Record<string, string | undefined>): void {
       bridgeGradeValue = null;
     }
   });
-  // no 'data' listener on stdout: the stream stays paused, the fd stays ours alone
-  const handle = (proc.stdout as unknown as { _handle?: { fd?: number } | null })._handle;
-  st.outFd = typeof handle?.fd === "number" ? handle.fd : null;
+  // no 'data' listener on stdout; the bridge socket is the channel (see OwnerState)
   owner = st;
   bridgeReady = true;
+}
+
+/** revision 3: connect to the owner's abstract-socket server (async — the
+ *  owner must have created it first; bounded retries handle the race). */
+function connectBridgeSocket(st: OwnerState): void {
+  let tries = 0;
+  const attempt = (): void => {
+    if (st.dead) return;
+    // revision 3.1 (finding 1): verify the SERVER is our spawned child before
+    // trusting the connection — the child process must still be alive (not zombie)
+    try {
+      const stat = readFileSync(`/proc/${st.proc.pid}/stat`, "utf8");
+      if (stat.includes(" Z ")) {
+        bridgeLaunchErr = "mini-dc bridge: owner process is zombie before connection";
+        return;
+      }
+    } catch {
+      // /proc gone = child exited — the dead flag will be set by the exit handler
+      // don't block the connection attempt here (the exit handler handles it)
+    }
+    const sock = net.connect({ path: "\0" + st.bridgeAddr }, () => {
+      st.bridgeSock = sock;
+      const fd = (sock as unknown as { _handle?: { fd?: number } })._handle?.fd;
+      if (typeof fd !== "number") {
+        bridgeLaunchErr = "mini-dc bridge: connected socket exposes no fd (runtime limitation)";
+        sock.destroy();
+        return;
+      }
+      // revision 3.3: ASYNC kernel peer verification — spawn is already imported.
+      // If the helper binary is absent (CI runners), verification is SKIPPED
+      // with an explicit diagnostic (never silently — the bridgeLaunchErr
+      // records it). Production desks always have the helper (install.sh P6).
+      const helperPath = peerCredHelperPath();
+      let peer: import("node:child_process").ChildProcess;
+      try {
+        accessSync(helperPath, constants.X_OK);
+        // The verifier gets NO inherited environment (no credentials, no PATH
+        // tricks, no helper selection) — only the connected socket as stdin.
+        peer = spawn(helperPath, [], { stdio: [fd, "pipe", "pipe"], env: {} });
+      } catch {
+        // No helper means no verification and no trust (fail closed). Tests
+        // compile the real helper into their scratch tree and point this env
+        // at it; production gets it from the installer.
+        bridgeLaunchErr = `mini-dc bridge: peer-credential helper unavailable (${helperPath})`;
+        sock.destroy();
+        return;
+      }
+      let peerOut = "";
+      let verificationDone = false;
+      const verificationTimer = setTimeout(() => {
+        if (verificationDone) return;
+        verificationDone = true;
+        try { peer.kill(); } catch { /* already gone */ }
+        bridgeLaunchErr = "mini-dc bridge: peer verification timeout";
+        sock.destroy();
+      }, 3000);
+      verificationTimer.unref?.();
+      peer.stdout?.on("data", (d: Buffer) => { peerOut += d.toString("utf8"); });
+      peer.on("close", (code: number) => {
+        if (verificationDone) return;
+        verificationDone = true;
+        clearTimeout(verificationTimer);
+        // Bind verification to THIS still-open socket, not merely to a live
+        // child: a close during verification must never leave a trusted fd.
+        if (st.dead || st.bridgeSock !== sock || sock.destroyed) {
+          sock.destroy();
+          return;
+        }
+        if (code !== 0 || !peerOut.trim()) {
+          bridgeLaunchErr = "mini-dc bridge: peer verification failed";
+          sock.destroy();
+          return;
+        }
+        try {
+          const cred = JSON.parse(peerOut.trim());
+          if (cred.pid === st.proc.pid) {
+            st.bridgeFd = fd; // verified on this live socket — now trusted
+          } else {
+            bridgeLaunchErr = `mini-dc bridge: peer PID ${cred.pid} != child PID ${st.proc.pid}`;
+            sock.destroy();
+          }
+        } catch {
+          bridgeLaunchErr = "mini-dc bridge: peer verification parse error";
+          sock.destroy();
+        }
+      });
+      peer.on("error", () => {
+        if (verificationDone) return;
+        verificationDone = true;
+        clearTimeout(verificationTimer);
+        bridgeLaunchErr = "mini-dc bridge: peer verification spawn error";
+        sock.destroy();
+      });
+    });
+    sock.on("error", () => {
+      if (++tries < 40) setTimeout(attempt, 50);
+    });
+    sock.on("close", () => {
+      // A descriptor is trusted only while its verified socket is open. An fd
+      // number can be reused after close, so it must never outlive the socket.
+      if (st.bridgeSock === sock) {
+        st.bridgeSock = null;
+        st.bridgeFd = null;
+      }
+    });
+  };
+  attempt();
 }
 
 /** fix2 new-finding-2: respawn the owner after death — the next op relaunches it
@@ -394,7 +648,9 @@ export async function initBrokerClient(env: Record<string, string | undefined>):
     // would land as unknown-grade; wait for the grade marker (or a 2 s budget —
     // a failed registration leaves every op failing closed per §4.3.1 either way)
     const t0 = Date.now();
-    while (bridgeGradeValue === null && owner !== null && !owner.dead && Date.now() - t0 < 2000) {
+    // revision 3: wait for BOTH the grade marker AND the bridge socket fd —
+    // connectBridgeSocket is async and might land after the grade
+    while ((bridgeGradeValue === null || (owner !== null && owner.bridgeFd === null)) && owner !== null && !owner.dead && Date.now() - t0 < 4000) {
       await new Promise((r) => setTimeout(r, 25));
     }
   }
@@ -418,7 +674,7 @@ const claimSecret = process.env.MINIDC_CLAIM_SECRET || "";
 let sock = null;
 let connected = false;
 let registered = false;
-let buf = "";
+let buf = Buffer.alloc(0);
 let nextId = 10;
 const pending = new Map();
 let backoffN = 0;
@@ -427,6 +683,8 @@ let stopped = false;
 // fix2 new-finding-1: responses ride STDOUT — an anonymous pipe, not a
 // name-enumerable fifo; only the parent holds the read end
 function writeResp(obj) {
+  // revision 3: responses ride the bridge socket (see bridgeServer); stdout
+  // mirror kept for node-run diagnostics only — no named files
   try { process.stdout.write(JSON.stringify(obj) + "\\n"); } catch (e) { /* reader gone */ }
 }
 function send(op, args, cb) {
@@ -457,15 +715,16 @@ function connect() {
   if (stopped) return;
   sock = net.connect(sockPath, () => {
     connected = true;
-    buf = "";
+    buf = Buffer.alloc(0);
     backoffN = 0;
     if (!registered) register(); else reClaim();
   });
   sock.on("data", (d) => {
-    buf += d.toString("utf8");
+    // byte-unit framing here too (split UTF-8 across broker chunks)
+    buf = Buffer.concat([buf, d]);
     let i;
-    while ((i = buf.indexOf("\\n")) >= 0) {
-      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    while ((i = buf.indexOf(0x0a)) >= 0) {
+      const line = buf.subarray(0, i).toString("utf8"); buf = buf.subarray(i + 1);
       if (!line.trim()) continue;
       try {
         const f = JSON.parse(line);
@@ -490,14 +749,60 @@ function reClaim() {
     } else if (f.retryable === true) { setTimeout(reClaim, 500); }
   });
 }
-// op pump: one JSON line per op from stdin; answer on the fifo
-const readline = require("node:readline");
-const rl = readline.createInterface({ input: process.stdin });
-rl.on("line", (line) => {
-  if (line.trim() === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} process.exit(0); }
-  let req; try { req = JSON.parse(line); } catch (e) { writeResp({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }); return; }
-  send(req.op, req.args, (f) => writeResp(f));
-});
+// request pump (revision 2): the caller appends JSON lines to the REQUEST
+// file (appendFileSync — a real syscall, lands immediately); the owner tails
+// it with its OWN free event loop. The old stdin pipe is GONE: a stream write
+// needs a parent event-loop turn the caller's sync poll never grants.
+// revision 3: the abstract-socket server — SO_PEERCRED-verified, one duplex
+// channel, no named files. The owner creates the server on the address the
+// parent generated (MINIDC_BRIDGE_ADDR env), accepts ONE connection, verifies
+// the connector's pid via the compiled helper, then serves ops line-by-line.
+(function bridgeServer() {
+  const addr = process.env.MINIDC_BRIDGE_ADDR;
+  const expectedPid = Number(process.env.MINIDC_SESSION_PID || 0);
+  const helper = process.env.MINIDC_PEERCRED_HELPER;
+  if (!addr || !expectedPid || !helper) return;
+  var conn = null;
+  let bbuf = Buffer.alloc(0);
+  const server = net.createServer((c) => {
+    if (conn) { c.destroy(); return; } // one connection only
+    // SO_PEERCRED verification: reject any connector whose pid != the parent.
+    // The accepted connection's fd is passed as the helper's STDIN (fd 0) —
+    // more robust than argv fd inheritance (O_CLOEXEC concerns)
+    const afd = c._handle && c._handle.fd;
+    if (typeof afd !== "number") { c.destroy(); return; }
+    try {
+      const result = require("child_process").spawnSync(helper, [], {
+        stdio: [afd, "pipe", "pipe"],
+        env: {}, // verifier receives no credential-bearing environment
+        encoding: "utf8",
+        timeout: 2000,
+      });
+      if (result.status !== 0 || !result.stdout) { c.destroy(); return; }
+      const cred = JSON.parse(result.stdout.trim());
+      if (cred.pid !== expectedPid) { c.destroy(); return; } // not the parent — rejected
+    } catch (e) { c.destroy(); return; } // helper failure — fail-closed
+    conn = c;
+    c.on("data", (d) => {
+      bbuf = Buffer.concat([bbuf, d]);
+      let ni;
+      while ((ni = bbuf.indexOf(0x0a)) >= 0) {
+        const line = bbuf.subarray(0, ni).toString("utf8");
+        bbuf = bbuf.subarray(ni + 1);
+        if (!line.trim()) continue;
+        let req; try { req = JSON.parse(line); } catch (e) { c.write(JSON.stringify({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }) + "\\n"); continue; }
+        if (req.op === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} try { c.destroy(); } catch (e) {} process.exit(0); }
+        if (!registered) { c.write(JSON.stringify({ id: req.id, ok: false, error: "E_UNAVAILABLE", reason: "owner-not-registered" }) + "\\n"); continue; } // defer until registered — the caller's budget bounds the wait
+        send(req.op, req.args, (f) => { c.write(JSON.stringify({ ...f, id: req.id }) + "\\n"); }); // echo the CALLER's id
+      }
+    });
+    c.on("close", () => { conn = null; });
+    c.on("error", () => { conn = null; });
+  });
+  server.listen("\\0" + addr, () => {
+    process.stderr.write("B:ready\\n"); // bridge server ready signal
+  });
+})();
 // the 15 s background re-claim loop (§4.4.6): rebinds after daemon restarts while idle
 setInterval(() => { if (!connected) return; if (!registered) reClaim(); }, 15000);
 connect();
@@ -511,6 +816,7 @@ export interface BridgeResult<T = unknown> {
   reason?: string;
 }
 
+let bridgeCallSeq = 1;
 export function bridgeCall(
   op: string,
   args: Record<string, unknown>,
@@ -520,44 +826,55 @@ export function bridgeCall(
   // fix2 new-finding-2: a dead owner RESPAWNS here (one attempt per call) — the
   // session recovers on the next op instead of degrading forever
   const st0 = owner;
-  const st = st0 && !st0.dead && st0.outFd !== null ? st0 : ensureOwner();
-  if (!st || st.outFd === null) return null;
+  const st = st0 && !st0.dead ? st0 : ensureOwner();
+  if (!st || st.bridgeFd === null) return null;
+  const id = bridgeCallSeq++;
   try {
-    st.proc.stdin?.write(`${JSON.stringify({ op, args })}\n`);
-    // poll the owner's STDOUT pipe (fix2: anonymous, not name-enumerable — no
-    // same-uid response injection); the OWNER is a separate process (immune to
-    // the Node main-thread stall); owner death ⇒ readSync returns EOF.
+    // revision 3.1: sync fd I/O — short-write-safe (loop until all bytes land)
+    const reqBuf = Buffer.from(JSON.stringify({ id, op, args }) + "\n", "utf8");
+    let written = 0;
+    while (written < reqBuf.length) {
+      written += fs.writeSync(st.bridgeFd, reqBuf, written, reqBuf.length - written);
+    }
     const deadline = Date.now() + timeoutMs;
-    let line = "";
-    const chunk = Buffer.alloc(1 << 16);
+    const buf = Buffer.alloc(1 << 16);
+    let carry = Buffer.alloc(0);
     for (;;) {
+      // revision 3.1 (finding 3): process ALL complete lines in carry BEFORE
+      // reading more — two coalesced lines (stale + matching) must not wait
+      let ni;
+      while ((ni = carry.indexOf(0x0a)) >= 0) {
+        const raw = carry.subarray(0, ni).toString("utf8");
+        carry = carry.subarray(ni + 1);
+        try {
+          const f = JSON.parse(raw) as { id?: number } & BridgeResult;
+          if (f.id === id) return f;
+          // wrong id — keep processing remaining lines in carry
+        } catch {
+          // malformed — skip
+        }
+      }
       let n: number;
       try {
-        n = fs.readSync(st.outFd, chunk, 0, chunk.length, null);
+        n = fs.readSync(st.bridgeFd, buf, 0, buf.length, null);
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "EAGAIN") {
-          if (Date.now() > deadline) return null; // budget spent — degraded
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === "EAGAIN") {
+          if (Date.now() > deadline) return null;
           sleepSyncMs(2);
           continue;
         }
-        if ((e as NodeJS.ErrnoException).code === "EINTR") continue;
-        throw e; // pipe gone
+        if (code === "EINTR") continue;
+        st.dead = true;
+        return null; // socket gone — degraded, never a hang
       }
       if (n <= 0) { st.dead = true; return null; } // EOF — owner died
-      line += chunk.toString("utf8", 0, n);
-      const i = line.indexOf("\n");
-      if (i >= 0) {
-        const raw = line.slice(0, i);
-        try {
-          return JSON.parse(raw) as BridgeResult;
-        } catch {
-          return null; // malformed — degraded, never a guess
-        }
-      }
-      if (Date.now() > deadline) return null; // owner overran its own budget — degraded
+      // byte-unit framing: append BYTES, loop back to process all complete lines
+      carry = Buffer.concat([carry, buf.subarray(0, n)]);
+      if (Date.now() > deadline) return null;
     }
   } catch {
-    return null; // pipe gone — degraded, never a hang
+    return null; // socket gone — degraded, never a hang
   }
 }
 
@@ -569,8 +886,14 @@ export function ownerProcForTest(): ChildProcess | null {
 export function shutdownBrokerClient(): void {
   const st = owner;
   if (st) {
-    try { st.proc.stdin?.write("shutdown\n"); } catch { /* gone */ }
+    // revision 3: the shutdown word rides the bridge socket
+    try {
+      if (st.bridgeSock) {
+        st.bridgeSock.write("{\"op\":\"shutdown\"}\n");
+      }
+    } catch { /* gone */ }
     setTimeout(() => { try { st.proc.kill("SIGKILL"); } catch { /* gone */ } }, 250).unref?.();
+    try { st.bridgeSock?.destroy(); } catch { /* gone */ }
     owner = null;
   }
   bridgeReady = false;
@@ -660,6 +983,20 @@ export function writeRulesViaBroker(content: string): boolean {
 
 // Library module (imported by mini-damage-control.ts + tests), not a standalone
 // extension. The no-op default factory satisfies the extension loader's default-
-// export contract — same pattern as background-helpers.ts.
-export default function () {}
+// export contract — same pattern as background-helpers.ts. When the packaged-Pi
+// regression loads this file DIRECTLY under -e, the module-scope driver hook
+// (registered by the appended test tail BEFORE the loader invokes this factory)
+// turns the default factory into the test's session-start driver — ONE default
+// export, no loader-dependent duplicates (review finding 4).
+let bridgeDriver: ((pi: any) => void) | null = null;
+/** Test seam (the setBrokerPathsForTesting precedent): the -e regression
+ *  registers its driver here; production leaves it null. */
+export function registerBridgeDriverForTesting(fn: ((pi: any) => void) | null): void {
+  bridgeDriver = fn;
+}
+export default function (pi?: { on?: unknown }) {
+  if (bridgeDriver !== null && pi && typeof (pi as any).on === "function") {
+    bridgeDriver(pi as any);
+  }
+}
 
