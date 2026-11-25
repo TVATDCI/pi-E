@@ -69,6 +69,11 @@ registerBridgeDriverForTesting((pi: any) => {
         await new Promise((r) => setTimeout(r, 250));
       }
       out.push("grade=" + (bridgeGrade() ?? "null"));
+      // non-ASCII control: two consecutive operations, both directions; the
+      // fake broker splits the first response inside the é UTF-8 sequence.
+      const e1 = bridgeCall("echo", { text: "café" });
+      const e2 = bridgeCall("echo", { text: "π-2" });
+      out.push("cafe=" + ((e1 as any)?.result?.text === "café" && (e2 as any)?.result?.text === "π-2" ? "ok" : "bad"));
     } catch (e) {
       out.push("threw=" + (e as Error).message);
     }
@@ -76,6 +81,8 @@ registerBridgeDriverForTesting((pi: any) => {
     try {
       (fs as any).writeFileSync(process.env.TEST_RESULT_FILE as string, out.join("\\n") + "\\n");
     } catch { /* evidence lost — the broker-side assertions still bind */ }
+    // RPC mode needs no provider prompt: finish after recording the evidence.
+    setTimeout(() => process.exit(0), 0);
   });
 });
 `;
@@ -89,7 +96,8 @@ function buildExt(dir: string): string {
 
 interface Ctx {
   dir: string; ext: string; sock: string; trust: string; result: string;
-  frames: { line: string; f: any }[]; consumeCount: () => number; server: net.Server;
+  frames: { line: string; f: any }[]; deniedRegisters: number[];
+  consumeCount: () => number; server: net.Server;
 }
 async function setup(name: string): Promise<Ctx> {
   const dir = mkdtempSync(join(tmpdir(), `owner-launch-${name}-`));
@@ -102,6 +110,7 @@ async function setup(name: string): Promise<Ctx> {
   const trust = join(dir, "node-bin");
   const result = join(dir, "result.txt");
   const frames: { line: string; f: any }[] = [];
+  const deniedRegisters: number[] = [];
   const server = net.createServer((c) => {
     let buf = "";
     let connRegistered = false; // TNT verification demand: read-rules binds to a VALIDATED register on THIS connection
@@ -129,6 +138,7 @@ async function setup(name: string): Promise<Ctx> {
             connRegistered = true;
             c.write(JSON.stringify({ id: f.id, ok: true, result: { grade: "worker", slug: "pi-E", "entitlement-id": "test-eid" } }) + "\n");
           } else {
+            deniedRegisters.push(f.id);
             c.write(JSON.stringify({ id: f.id, ok: false, error: "E_DENIED_UNREGISTERED" }) + "\n");
           }
         } else if (f.op === "read-rules") {
@@ -137,6 +147,16 @@ async function setup(name: string): Promise<Ctx> {
           } else {
             c.write(JSON.stringify({ id: f.id, ok: false, error: "E_DENIED_UNREGISTERED", reason: "not-registered" }) + "\n");
           }
+        } else if (f.op === "echo") {
+          // café framing control: split the response INSIDE a multibyte char
+          const payload = Buffer.from(JSON.stringify({ id: f.id, ok: true, result: { text: f.args?.text } }) + "\n", "utf8");
+          const split = payload.indexOf(Buffer.from("é", "utf8")) + 1;
+          if (split > 0) {
+            c.write(payload.subarray(0, split));
+            setTimeout(() => c.write(payload.subarray(split)), 10);
+          } else {
+            c.write(payload);
+          }
         } else {
           c.write(JSON.stringify({ id: f.id, ok: true, result: {} }) + "\n");
         }
@@ -144,7 +164,7 @@ async function setup(name: string): Promise<Ctx> {
     });
   });
   await new Promise<void>((resolve) => server.listen(sock, resolve));
-  return { dir, ext: buildExt(dir), sock, trust, result, frames, consumeCount: () => frames.filter((x) => x.f?.op === "register" && x.f?.args?.mode === "consume").length, server };
+  return { dir, ext: buildExt(dir), sock, trust, result, frames, deniedRegisters, consumeCount: () => frames.filter((x) => x.f?.op === "register" && x.f?.args?.mode === "consume").length, server };
 }
 
 function spawnPi(ctx: Ctx, token: string, extraEnv: Record<string, string> = {}) {
@@ -153,7 +173,9 @@ function spawnPi(ctx: Ctx, token: string, extraEnv: Record<string, string> = {})
   // AFTER session_start has already fired
   const env: Record<string, string> = {
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-    HOME: process.env.HOME ?? "/home/vladi", // packaged pi requires its real ~/.pi to boot; isolation substance = -ne + scratch cwd + this stripped env (stated in the PR)
+    HOME: join(ctx.dir, "home"), // hermetic: no real HOME, config, or credentials
+    PI_CODING_AGENT_DIR: join(ctx.dir, "agent-config"),
+    PI_OFFLINE: "1",
     TMPDIR: join(ctx.dir, "home"),
     LANG: "C.UTF-8",
     PI_PURPOSE: "defect-8 owner-launch regression",
@@ -167,7 +189,8 @@ function spawnPi(ctx: Ctx, token: string, extraEnv: Record<string, string> = {})
     TEST_RESULT_FILE: ctx.result,
     ...extraEnv,
   };
-  const child = spawn(PI_BIN, ["-ne", "-e", ctx.ext, "-p", "ack"], { env, cwd: ctx.dir, stdio: ["ignore", "ignore", "pipe"], detached: true });
+  // RPC mode: session_start drives the evidence without a provider prompt.
+  const child = spawn(PI_BIN, ["-ne", "--offline", "--mode", "rpc", "-e", ctx.ext], { env, cwd: ctx.dir, stdio: ["ignore", "ignore", "pipe"], detached: true });
   child.stderr?.resume?.(); // always drain: an undrained pipe blocks the child\u0027s writes
   return child;
 }
@@ -208,6 +231,8 @@ async function run() {
     else bad(`client grade evidence: ${res.replace(/\n/g, "; ").slice(0, 200)}`);
     if (/rules=\d+/.test(res)) ok("broker-sourced rules loaded through the bridge");
     else bad(`client rules evidence: ${res.replace(/\n/g, "; ").slice(0, 300)}`);
+    if (/cafe=ok/.test(res)) ok("split-UTF-8 + two consecutive ops round-trip intact (café control)");
+    else bad(`café framing evidence: ${res.replace(/\n/g, "; ").slice(0, 300)}`);
     fs.rmSync(ctx.dir, { recursive: true, force: true });
   }
 
@@ -225,11 +250,17 @@ async function run() {
     });
     for (let n = 0; n < 8 && ctx.consumeCount() === 0; n++) await new Promise((r) => setTimeout(r, 400));
     ctx.server.close();
-    const res = fs.existsSync(ctx.result) ? readFileSync(ctx.result, "utf8") : "";
-    if (/grade=null/.test(res) || !/grade=worker/.test(res)) ok("rejected enrollment: no grade observed (denied)");
-    else bad(`rejected enrollment still graded: ${res.slice(0, 150)}`);
-    if (!/rules=\d+/.test(res)) ok("rejected enrollment: rules stay unavailable (fail-closed)");
-    else bad("rules loaded despite rejection");
+    if (ctx.deniedRegisters.length === 1) ok("the broker explicitly rejected the invalid enrollment on the connection");
+    else bad(`expected one explicit registration rejection, saw ${ctx.deniedRegisters.length}`);
+    if (!fs.existsSync(ctx.result)) {
+      bad("missing client denial evidence is a FAILURE, not a pass");
+    } else {
+      const res = readFileSync(ctx.result, "utf8");
+      if (/grade=null/.test(res)) ok("rejected enrollment: client observed null grade (explicit denial)");
+      else bad(`rejected enrollment client denial evidence: ${res.replace(/\n/g, "; ").slice(0, 200)}`);
+      if (/rules=unavailable/.test(res)) ok("rejected enrollment: rules stay unavailable (fail-closed)");
+      else bad(`rejected enrollment rules evidence: ${res.replace(/\n/g, "; ").slice(0, 200)}`);
+    }
     fs.rmSync(ctx.dir, { recursive: true, force: true });
   }
 

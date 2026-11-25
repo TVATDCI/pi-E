@@ -21,6 +21,7 @@ import {
   initBrokerClient,
   brokerClientActive,
   bridgeGrade,
+  bridgeDebug,
   readGlobalRulesViaBroker,
   appendTrailViaBroker,
   readGrantsViaBroker,
@@ -32,7 +33,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -73,6 +74,17 @@ setBrokerPathsForTesting(paths);
 // trust file — node-run tests stage their own (process.execPath IS node here)
 setNodeTrustFileForTesting(join(T, "node-bin"));
 fs.writeFileSync(join(T, "node-bin"), `${process.execPath}\n`);
+// The parent AND the owner verify socket peers with the REAL compiled helper.
+// CI runners do not have /usr/lib/minidc installed, so build the exact shipped
+// helper into the scratch tree instead of skipping verification.
+const peerHelper = join(T, "minidc-peercred-helper");
+const compiled = spawnSync("cc", ["-O2", "-o", peerHelper, join(REPO, "broker", "minidc-peercred-helper.c")], {
+  encoding: "utf8",
+});
+if (compiled.status !== 0) {
+  throw new Error(`the real peercred helper must compile for this matrix: ${compiled.stderr || compiled.error}`);
+}
+process.env.MINIDC_PEERCRED_HELPER = peerHelper;
 
 function writeMarker(v: "broker" | "legacy" | null): void {
   if (v === null) { try { fs.unlinkSync(paths.markerPath); } catch { /* absent */ } }
@@ -368,6 +380,29 @@ async function main(): Promise<void> {
     } else {
       check("owner respawn row (introspection absent — skipped honestly)", true);
     }
+
+    // revision 3.3 close/reuse pins: a verified descriptor is trusted only
+    // while its specific socket remains open. First kill AFTER success, then
+    // kill DURING a deliberately slowed verification.
+    check("verified bridge fd present before disconnect", typeof bridgeDebug().bridgeFd === "number");
+    const afterVerified = (clientMod as unknown as { ownerProcForTest?: () => ChildProcess | null }).ownerProcForTest?.();
+    afterVerified?.kill("SIGKILL");
+    await sleep(300);
+    check("socket close clears the trusted descriptor (no stale-fd reuse)", bridgeDebug().bridgeFd === null);
+
+    shutdownBrokerClient();
+    const slowHelper = join(T2, "slow-peercred-helper");
+    fs.writeFileSync(slowHelper, `#!/bin/sh\n: > "${T2}/verification-started"\nsleep 2\nexec "${peerHelper}"\n`);
+    fs.chmodSync(slowHelper, 0o755);
+    process.env.MINIDC_PEERCRED_HELPER = slowHelper;
+    const pendingInit = initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
+    for (let n = 0; n < 40 && !fs.existsSync(join(T2, "verification-started")); n++) await sleep(50);
+    check("slow verification is in flight before the kill", fs.existsSync(join(T2, "verification-started")));
+    (clientMod as unknown as { ownerProcForTest?: () => ChildProcess | null }).ownerProcForTest?.()?.kill("SIGKILL");
+    await pendingInit;
+    await sleep(100);
+    check("child exit during verification never publishes a trusted fd", bridgeDebug().bridgeFd === null);
+    process.env.MINIDC_PEERCRED_HELPER = peerHelper;
     shutdownBrokerClient();
     daemon4.kill("SIGTERM");
     daemon3.kill("SIGTERM");

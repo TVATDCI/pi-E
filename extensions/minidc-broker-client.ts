@@ -453,7 +453,7 @@ function startBridge(env: Record<string, string | undefined>): void {
       MINIDC_SESSION_PID: String(process.pid),
       MINIDC_SESSION_STARTTIME: selfStatOf(process.pid),
       MINIDC_SOCKET: brokerPaths().socketPath,
-      MINIDC_PEERCRED_HELPER: "/usr/lib/minidc/minidc-peercred-helper",
+      MINIDC_PEERCRED_HELPER: process.env.MINIDC_PEERCRED_HELPER || "/usr/lib/minidc/minidc-peercred-helper",
       ...(env["MINIDC_ENROLLMENT"] ? { MINIDC_ENROLLMENT: env["MINIDC_ENROLLMENT"] } : {}),
       ...(env["MINIDC_CLAIM_SECRET"] ? { MINIDC_CLAIM_SECRET: env["MINIDC_CLAIM_SECRET"] } : {}),
     },
@@ -473,6 +473,10 @@ function startBridge(env: Record<string, string | undefined>): void {
   });
   proc.on("exit", () => {
     st.dead = true;
+    // Child exit invalidates both the pending verification and any trusted fd.
+    st.bridgeFd = null;
+    try { st.bridgeSock?.destroy(); } catch { /* already gone */ }
+    st.bridgeSock = null;
     // defect-8 task 3: an owner that died WITHOUT ever registering surfaces
     // once — the respawn logic still retries; this line is the prompt signal
     if (bridgeGradeValue === null && bridgeLaunchErr === null) {
@@ -522,14 +526,44 @@ function connectBridgeSocket(st: OwnerState): void {
         sock.destroy();
         return;
       }
-      // revision 3.3: ASYNC kernel peer verification — spawn is already imported
-      const peer = spawn("/usr/lib/minidc/minidc-peercred-helper", [], {
-        stdio: [fd, "pipe", "pipe"],
-      });
+      // revision 3.3: ASYNC kernel peer verification — spawn is already imported.
+      // If the helper binary is absent (CI runners), verification is SKIPPED
+      // with an explicit diagnostic (never silently — the bridgeLaunchErr
+      // records it). Production desks always have the helper (install.sh P6).
+      const helperPath = process.env.MINIDC_PEERCRED_HELPER || "/usr/lib/minidc/minidc-peercred-helper";
+      let peer: import("node:child_process").ChildProcess;
+      try {
+        accessSync(helperPath, constants.X_OK);
+        peer = spawn(helperPath, [], { stdio: [fd, "pipe", "pipe"] });
+      } catch {
+        // No helper means no verification and no trust (fail closed). Tests
+        // compile the real helper into their scratch tree and point this env
+        // at it; production gets it from the installer.
+        bridgeLaunchErr = `mini-dc bridge: peer-credential helper unavailable (${helperPath})`;
+        sock.destroy();
+        return;
+      }
       let peerOut = "";
+      let verificationDone = false;
+      const verificationTimer = setTimeout(() => {
+        if (verificationDone) return;
+        verificationDone = true;
+        try { peer.kill(); } catch { /* already gone */ }
+        bridgeLaunchErr = "mini-dc bridge: peer verification timeout";
+        sock.destroy();
+      }, 3000);
+      verificationTimer.unref?.();
       peer.stdout?.on("data", (d: Buffer) => { peerOut += d.toString("utf8"); });
       peer.on("close", (code: number) => {
-        if (st.dead) { sock.destroy(); return; }
+        if (verificationDone) return;
+        verificationDone = true;
+        clearTimeout(verificationTimer);
+        // Bind verification to THIS still-open socket, not merely to a live
+        // child: a close during verification must never leave a trusted fd.
+        if (st.dead || st.bridgeSock !== sock || sock.destroyed) {
+          sock.destroy();
+          return;
+        }
         if (code !== 0 || !peerOut.trim()) {
           bridgeLaunchErr = "mini-dc bridge: peer verification failed";
           sock.destroy();
@@ -538,7 +572,7 @@ function connectBridgeSocket(st: OwnerState): void {
         try {
           const cred = JSON.parse(peerOut.trim());
           if (cred.pid === st.proc.pid) {
-            st.bridgeFd = fd; // verified — the fd is now trusted
+            st.bridgeFd = fd; // verified on this live socket — now trusted
           } else {
             bridgeLaunchErr = `mini-dc bridge: peer PID ${cred.pid} != child PID ${st.proc.pid}`;
             sock.destroy();
@@ -549,12 +583,23 @@ function connectBridgeSocket(st: OwnerState): void {
         }
       });
       peer.on("error", () => {
+        if (verificationDone) return;
+        verificationDone = true;
+        clearTimeout(verificationTimer);
         bridgeLaunchErr = "mini-dc bridge: peer verification spawn error";
         sock.destroy();
       });
     });
     sock.on("error", () => {
       if (++tries < 40) setTimeout(attempt, 50);
+    });
+    sock.on("close", () => {
+      // A descriptor is trusted only while its verified socket is open. An fd
+      // number can be reused after close, so it must never outlive the socket.
+      if (st.bridgeSock === sock) {
+        st.bridgeSock = null;
+        st.bridgeFd = null;
+      }
     });
   };
   attempt();
@@ -614,7 +659,7 @@ const claimSecret = process.env.MINIDC_CLAIM_SECRET || "";
 let sock = null;
 let connected = false;
 let registered = false;
-let buf = "";
+let buf = Buffer.alloc(0);
 let nextId = 10;
 const pending = new Map();
 let backoffN = 0;
@@ -655,15 +700,16 @@ function connect() {
   if (stopped) return;
   sock = net.connect(sockPath, () => {
     connected = true;
-    buf = "";
+    buf = Buffer.alloc(0);
     backoffN = 0;
     if (!registered) register(); else reClaim();
   });
   sock.on("data", (d) => {
-    buf += d.toString("utf8");
+    // byte-unit framing here too (split UTF-8 across broker chunks)
+    buf = Buffer.concat([buf, d]);
     let i;
-    while ((i = buf.indexOf("\\n")) >= 0) {
-      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    while ((i = buf.indexOf(0x0a)) >= 0) {
+      const line = buf.subarray(0, i).toString("utf8"); buf = buf.subarray(i + 1);
       if (!line.trim()) continue;
       try {
         const f = JSON.parse(line);
