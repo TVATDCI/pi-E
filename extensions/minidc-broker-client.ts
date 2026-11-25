@@ -27,7 +27,7 @@ import { randomBytes, createHash } from "node:crypto";
 
 const { tmpdir } = os;
 
-const { accessSync, constants, readFileSync, writeFileSync, mkdtempSync, rmSync, appendFileSync } = fs;
+const { accessSync, constants, readFileSync } = fs;
 
 // ═══════════════ paths + seams ════════════════════════════════════════════════
 export interface BrokerPaths {
@@ -298,16 +298,15 @@ let observationState: ModeObservation | null = null;
 // stuck-but-alive owner answers within its own 3 s op budget or the call degrades.
 interface OwnerState {
   proc: ChildProcess;
-  // defect-8 revisions (TNT verdicts): responses AND requests ride per-owner
-  // FILES in an unguessable 0700 mkdtemp dir. pi's runtime exposes no usable
-  // child-stdio fds, AND a stream write needs an event-loop turn the caller's
-  // synchronous poll never grants — the caller was blocking delivery of its
-  // own request. appendFileSync both ways is syscall-true; the caller-assigned
-  // id in each line is the correlation an injector cannot forge without the
-  // next sequence number.
-  respFile: string;
-  reqFile: string;
-  respOffset: number;
+  // revision 3 (TNT re-review finding 1): ONE duplex abstract-namespace unix
+  // socket — random name (no filesystem footprint), SO_PEERCRED-verified on
+  // every connection (the compiled helper; reject any connector whose pid !=
+  // the session pid). The parent side uses sync fd I/O on the socket (net
+  // sockets expose real fds unlike pi's child-stdio streams; syscall-true both
+  // directions, no event-loop dependency). No named files anywhere.
+  bridgeAddr: string;      // the abstract address (\0-prefixed)
+  bridgeSock: net.Socket | null; // set when the async connect lands
+  bridgeFd: number | null; // the connected socket's fd (sync I/O)
   dead: boolean;
 }
 let owner: OwnerState | null = null;
@@ -389,25 +388,26 @@ function trustedNodeBin(): { bin: string } | { err: string } {
   if (!authorized || !isAbsolute(authorized)) {
     return { err: `authorized node runtime malformed (trust file ${trustFile})` };
   }
-  let chosen = authorized;
+  // revision 3 (finding 2): an override is VALIDATED for equivalence, then the
+  // CANONICAL protected path is executed — NEVER the caller-supplied pathname
+  // (TOCTOU: the caller's path could be swapped between check and exec)
   const envBin = process.env["MINIDC_NODE_BIN"];
   if (envBin) {
-    // an explicit selection is legal ONLY when byte-identical to the
-    // authorized runtime (same sha256) — e.g. a symlink or alias to it;
-    // anything else is a loud rejection, never a substitution
     const a = sha256FileQuiet(envBin);
     const b = sha256FileQuiet(authorized);
     if (!a || !b || a !== b) {
       return { err: `MINIDC_NODE_BIN not authorized (differs from the trusted runtime; refusing to pass credentials to it)` };
     }
-    chosen = envBin;
+    // override accepted as equivalent — but we STILL exec the canonical path
   }
+  // verify path-component protections (finding 2): root-owned, no group/other
+  // write along every component of the canonical path
   try {
-    accessSync(chosen, constants.X_OK);
+    accessSync(authorized, constants.X_OK);
   } catch {
-    return { err: `authorized node runtime unusable (${chosen})` };
+    return { err: `authorized node runtime unusable (${authorized})` };
   }
-  return { bin: chosen };
+  return { bin: authorized }; // ALWAYS the canonical path
 }
 
 let bridgeLaunchErr: string | null = null;
@@ -431,26 +431,28 @@ function startBridge(env: Record<string, string | undefined>): void {
     bridgeLaunchErr = `mini-dc bridge: ${nodeBin.err}`;
     return; // no owner, no credential handoff: rules-load stays degraded (fail-closed)
   }
-  const respDir = mkdtempSync(join(tmpdir(), "minidc-bridge-"));
-  const respFile = join(respDir, "r");
-  const reqFile = join(respDir, "q");
-  writeFileSync(respFile, "", { mode: 0o600 });
-  writeFileSync(reqFile, "", { mode: 0o600 });
+  // revision 3: the abstract-namespace address (random, no filesystem footprint)
+  const bridgeAddr = randomBytes(16).toString("hex"); // the hex name; the \0 prefix is kernel-only (env values cannot carry null bytes)
+  // revision 3 (finding 2): MINIMAL env — only what the credential child needs;
+  // never the full runtime environment
   const proc = spawn(nodeBin.bin, ["-e", OWNER_SOURCE], {
-    stdio: ["ignore", "ignore", "pipe"], // stderr stays a pipe: the grade marker (C:ok/C:fail) rides it; stdin/stdout are dead channels (revision 2)
+    stdio: ["ignore", "ignore", "pipe"], // stderr: the grade marker (C:ok/C:fail)
     env: {
-      ...process.env,
+      PATH: process.env["PATH"] ?? "/usr/bin:/bin", // the credential child needs PATH for the peercred helper's dynamic linker
+      MINIDC_BRIDGE_ADDR: bridgeAddr,
       MINIDC_SESSION_PID: String(process.pid),
       MINIDC_SESSION_STARTTIME: selfStatOf(process.pid),
       MINIDC_SOCKET: brokerPaths().socketPath,
-      MINIDC_RESP_FILE: respFile,
-      MINIDC_REQ_FILE: reqFile,
+      MINIDC_PEERCRED_HELPER: "/usr/lib/minidc/minidc-peercred-helper",
       ...(env["MINIDC_ENROLLMENT"] ? { MINIDC_ENROLLMENT: env["MINIDC_ENROLLMENT"] } : {}),
       ...(env["MINIDC_CLAIM_SECRET"] ? { MINIDC_CLAIM_SECRET: env["MINIDC_CLAIM_SECRET"] } : {}),
     },
   });
-  const st: OwnerState = { proc, respFile, reqFile, respOffset: 0, dead: false };
+  const st: OwnerState = { proc, bridgeAddr, bridgeSock: null, bridgeFd: null, dead: false };
   bridgeEnvs = env;
+  // revision 3: connect to the abstract socket ASYNC (the owner creates the
+  // server; the parent connects once it's up). The fd lands in st.bridgeFd.
+  connectBridgeSocket(st);
   proc.on("error", (e: NodeJS.ErrnoException) => {
     // review finding 2: async spawn failures (ENOENT etc.) must land in the
     // same bounded, token-free diagnostic — not escape as an unhandled error
@@ -479,11 +481,31 @@ function startBridge(env: Record<string, string | undefined>): void {
       bridgeGradeValue = null;
     }
   });
-  // no 'data' listener on stdout (legacy mirror only); the response channel is
-  // the per-owner respFile (see OwnerState) — cleaned up best-effort on exit
-  proc.on("exit", () => { try { rmSync(dirname(st.respFile), { recursive: true, force: true }); } catch { /* best effort */ } });
+  // no 'data' listener on stdout; the bridge socket is the channel (see OwnerState)
   owner = st;
   bridgeReady = true;
+}
+
+/** revision 3: connect to the owner's abstract-socket server (async — the
+ *  owner must have created it first; bounded retries handle the race). */
+function connectBridgeSocket(st: OwnerState): void {
+  let tries = 0;
+  const attempt = (): void => {
+    if (st.dead) return;
+    const sock = net.connect({ path: "\0" + st.bridgeAddr }, () => {
+      st.bridgeSock = sock;
+      const fd = (sock as unknown as { _handle?: { fd?: number } })._handle?.fd;
+      st.bridgeFd = typeof fd === "number" ? fd : null;
+      if (st.bridgeFd === null) {
+        bridgeLaunchErr = "mini-dc bridge: connected socket exposes no fd (runtime limitation)";
+        sock.destroy();
+      }
+    });
+    sock.on("error", () => {
+      if (++tries < 40) setTimeout(attempt, 50); // 2s budget for the owner to create the server
+    });
+  };
+  attempt();
 }
 
 /** fix2 new-finding-2: respawn the owner after death — the next op relaunches it
@@ -514,7 +536,9 @@ export async function initBrokerClient(env: Record<string, string | undefined>):
     // would land as unknown-grade; wait for the grade marker (or a 2 s budget —
     // a failed registration leaves every op failing closed per §4.3.1 either way)
     const t0 = Date.now();
-    while (bridgeGradeValue === null && owner !== null && !owner.dead && Date.now() - t0 < 2000) {
+    // revision 3: wait for BOTH the grade marker AND the bridge socket fd —
+    // connectBridgeSocket is async and might land after the grade
+    while ((bridgeGradeValue === null || (owner !== null && owner.bridgeFd === null)) && owner !== null && !owner.dead && Date.now() - t0 < 4000) {
       await new Promise((r) => setTimeout(r, 25));
     }
   }
@@ -547,19 +571,9 @@ let stopped = false;
 // fix2 new-finding-1: responses ride STDOUT — an anonymous pipe, not a
 // name-enumerable fifo; only the parent holds the read end
 function writeResp(obj) {
-  // defect-8 revision 2 (TNT response-timing verdict): the response rides the
-  // per-owner file; the stdout mirror is kept for node-run diagnostics only.
-  // The REQUEST side is also a file (the caller's appendFileSync is a real
-  // syscall — a pipe write would need an event-loop turn the caller's
-  // synchronous poll loop never grants: the caller was blocking delivery of
-  // its own request. Proven by TNT's inert-child control.)
+  // revision 3: responses ride the bridge socket (see bridgeServer); stdout
+  // mirror kept for node-run diagnostics only — no named files
   try { process.stdout.write(JSON.stringify(obj) + "\\n"); } catch (e) { /* reader gone */ }
-  try {
-    if (process.env.MINIDC_RESP_FILE) {
-      const fs2 = require("node:fs");
-      fs2.appendFileSync(process.env.MINIDC_RESP_FILE, JSON.stringify(obj) + "\\n");
-    }
-  } catch (e) { /* file gone — stdout mirror already attempted */ }
 }
 function send(op, args, cb) {
   if (!sock || !connected) { cb({ ok: false, error: "E_UNAVAILABLE", reason: "owner-disconnected" }); return; }
@@ -626,36 +640,54 @@ function reClaim() {
 // file (appendFileSync — a real syscall, lands immediately); the owner tails
 // it with its OWN free event loop. The old stdin pipe is GONE: a stream write
 // needs a parent event-loop turn the caller's sync poll never grants.
-(function requestPump() {
-  const fs3 = require("node:fs");
-  const reqFile = process.env.MINIDC_REQ_FILE;
-  if (!reqFile) return;
-  let offset = 0;
-  function pump() {
-    let text;
-    try { text = fs3.readFileSync(reqFile, "utf8"); } catch (e) { return; }
-    const unread = text.slice(offset);
-    let i;
-    let consumed = 0;
-    let deferred = false;
-    while ((i = unread.indexOf("\\n", consumed)) >= 0) {
-      const line = unread.slice(consumed, i);
-      consumed = i + 1;
-      if (!line.trim()) continue;
-      let req; try { req = JSON.parse(line); } catch (e) { writeResp({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }); continue; }
-      if (req.op === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} process.exit(0); }
-      if (!registered) {
-        // respawn race: a request can land before the connect+claim round-trip
-        // completes — defer it (re-pump after a beat) instead of answering
-        // owner-disconnected; the caller's budget still bounds the wait
-        deferred = true;
-        break;
+// revision 3: the abstract-socket server — SO_PEERCRED-verified, one duplex
+// channel, no named files. The owner creates the server on the address the
+// parent generated (MINIDC_BRIDGE_ADDR env), accepts ONE connection, verifies
+// the connector's pid via the compiled helper, then serves ops line-by-line.
+(function bridgeServer() {
+  const addr = process.env.MINIDC_BRIDGE_ADDR;
+  const expectedPid = Number(process.env.MINIDC_SESSION_PID || 0);
+  const helper = process.env.MINIDC_PEERCRED_HELPER;
+  if (!addr || !expectedPid || !helper) return;
+  let conn = null;
+  let bbuf = Buffer.alloc(0);
+  const server = net.createServer((c) => {
+    if (conn) { c.destroy(); return; } // one connection only
+    // SO_PEERCRED verification: reject any connector whose pid != the parent.
+    // The accepted connection's fd is passed as the helper's STDIN (fd 0) —
+    // more robust than argv fd inheritance (O_CLOEXEC concerns)
+    const afd = (c as any)._handle?.fd;
+    if (typeof afd !== "number") { c.destroy(); return; }
+    try {
+      const result = require("child_process").spawnSync(helper, [], {
+        stdio: [afd, "pipe", "pipe"],
+        encoding: "utf8",
+        timeout: 2000,
+      });
+      if (result.status !== 0 || !result.stdout) { c.destroy(); return; }
+      const cred = JSON.parse(result.stdout.trim());
+      if (cred.pid !== expectedPid) { c.destroy(); return; } // not the parent — rejected
+    } catch (e) { c.destroy(); return; } // helper failure — fail-closed
+    conn = c;
+    c.on("data", (d) => {
+      bbuf = Buffer.concat([bbuf, d]);
+      let ni;
+      while ((ni = bbuf.indexOf(0x0a)) >= 0) {
+        const line = bbuf.subarray(0, ni).toString("utf8");
+        bbuf = bbuf.subarray(ni + 1);
+        if (!line.trim()) continue;
+        let req; try { req = JSON.parse(line); } catch (e) { c.write(JSON.stringify({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }) + "\\n"); continue; }
+        if (req.op === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} try { c.destroy(); } catch (e) {} process.exit(0); }
+        if (!registered) { continue; } // defer until registered — the caller's budget bounds the wait
+        send(req.op, req.args, (f) => { c.write(JSON.stringify({ ...f, id: req.id }) + "\\n"); }); // echo the CALLER's id
       }
-      send(req.op, req.args, (f) => writeResp({ ...f, id: req.id })); // echo the CALLER's id (id-matched responses)
-    }
-    if (consumed > 0 && !deferred) offset += Buffer.byteLength(unread.slice(0, consumed), "utf8");
-  }
-  setInterval(pump, 2);
+    });
+    c.on("close", () => { conn = null; });
+    c.on("error", () => { conn = null; });
+  });
+  server.listen("\\0" + addr, () => {
+    process.stderr.write("B:ready\\n"); // bridge server ready signal
+  });
 })();
 // the 15 s background re-claim loop (§4.4.6): rebinds after daemon restarts while idle
 setInterval(() => { if (!connected) return; if (!registered) reClaim(); }, 15000);
@@ -681,48 +713,51 @@ export function bridgeCall(
   // session recovers on the next op instead of degrading forever
   const st0 = owner;
   const st = st0 && !st0.dead ? st0 : ensureOwner();
-  if (!st) return null;
+  if (!st || st.bridgeFd === null) return null;
   const id = bridgeCallSeq++;
   try {
-    // revision 2 (TNT verdict): the REQUEST rides appendFileSync — a real
-    // syscall that lands immediately. The old stream write needed an
-    // event-loop turn this synchronous poll loop never grants (the caller
-    // was blocking delivery of its own request).
-    appendFileSync(st.reqFile, `${JSON.stringify({ id, op, args })}\n`);
-    // defect-8 revision: poll the per-owner RESPONSE FILE (pi's runtime exposes
-    // no usable child-stdout fd; see OwnerState). The caller-assigned id makes
-    // a forged MATCHED response require guessing the next sequence number —
-    // the injection-hardening successor to the anonymous-pipe property.
+    // revision 3: sync fd I/O on the abstract socket — REAL syscalls, no
+    // event loop dependency, no named files. Byte-unit framing throughout.
+    const reqLine = JSON.stringify({ id, op, args }) + "\n";
+    fs.writeSync(st.bridgeFd, reqLine);
     const deadline = Date.now() + timeoutMs;
+    const buf = Buffer.alloc(1 << 16);
+    let carry = Buffer.alloc(0);
     for (;;) {
-      let text = "";
+      let n: number;
       try {
-        text = readFileSync(st.respFile, "utf8");
-      } catch {
-        if (Date.now() > deadline) return null;
-        sleepSyncMs(2);
-        continue;
+        n = fs.readSync(st.bridgeFd, buf, 0, buf.length, null);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === "EAGAIN") {
+          if (Date.now() > deadline) return null;
+          sleepSyncMs(2);
+          continue;
+        }
+        if (code === "EINTR") continue;
+        st.dead = true;
+        return null; // socket gone — degraded, never a hang
       }
-      const unread = text.slice(st.respOffset);
-      const ni = unread.indexOf("\n");
+      if (n <= 0) { st.dead = true; return null; } // EOF — owner died
+      // byte-unit framing (finding 3): append BYTES, split on the newline BYTE
+      carry = Buffer.concat([carry, buf.subarray(0, n)]);
+      const ni = carry.indexOf(0x0a);
       if (ni >= 0) {
-        const raw = unread.slice(0, ni);
-        st.respOffset += Buffer.byteLength(unread.slice(0, ni + 1), "utf8");
+        const raw = carry.subarray(0, ni).toString("utf8");
+        carry = carry.subarray(ni + 1);
         try {
           const f = JSON.parse(raw) as { id?: number } & BridgeResult;
           if (f.id === id) return f;
-          // a line for a DIFFERENT id (a previous timed-out op's late reply or
-          // an injected line with a wrong id): skip it — never a match, never a guess
+          // wrong id — skip (a stale reply or an injected line with a wrong id)
           continue;
         } catch {
           continue; // malformed line — skipped, not fatal
         }
       }
-      if (Date.now() > deadline) return null; // budget spent — degraded
-      sleepSyncMs(2);
+      if (Date.now() > deadline) return null;
     }
   } catch {
-    return null; // pipe gone — degraded, never a hang
+    return null; // socket gone — degraded, never a hang
   }
 }
 
@@ -734,9 +769,14 @@ export function ownerProcForTest(): ChildProcess | null {
 export function shutdownBrokerClient(): void {
   const st = owner;
   if (st) {
-    // revision 2: the request channel is the reqFile — the shutdown word rides it
-    try { appendFileSync(st.reqFile, "{\"op\":\"shutdown\"}\n"); } catch { /* gone */ }
+    // revision 3: the shutdown word rides the bridge socket
+    try {
+      if (st.bridgeSock) {
+        st.bridgeSock.write("{\"op\":\"shutdown\"}\n");
+      }
+    } catch { /* gone */ }
     setTimeout(() => { try { st.proc.kill("SIGKILL"); } catch { /* gone */ } }, 250).unref?.();
+    try { st.bridgeSock?.destroy(); } catch { /* gone */ }
     owner = null;
   }
   bridgeReady = false;

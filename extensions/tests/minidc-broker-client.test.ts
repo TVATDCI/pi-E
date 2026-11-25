@@ -359,7 +359,11 @@ async function main(): Promise<void> {
     if (ownerKilled) {
       ownerKilled.kill("SIGKILL");
       await sleep(300);
-      const respawnAppend = appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000004", cls: "G", decision: "proceed", scope: "once" });
+      // revision 3 (abstract socket): the respawn connection is ASYNC — the
+      // first op triggers the respawn, then a yield lets the socket land
+      appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000004", cls: "G", decision: "proceed", scope: "once" }); // triggers respawn — may degrade
+      await sleep(500); // yield for the async connection callback
+      const respawnAppend = appendTrailViaBroker("idleslug", { v: 1, ts: new Date().toISOString(), actor: "firstmate", pane: null, task: null, subject: "0000000000000005", cls: "G", decision: "proceed", scope: "once" });
       check("owner respawn on next op after death (append completes, claim re-established)", respawnAppend);
     } else {
       check("owner respawn row (introspection absent — skipped honestly)", true);
