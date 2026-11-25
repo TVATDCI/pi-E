@@ -350,6 +350,19 @@ function selfStatOf(pid: number): string {
 
 let bridgeEnvs: Record<string, string | undefined> = {};
 
+// The credential verifier is part of the trust boundary. Production NEVER
+// selects it from session environment: only the installer-protected helper is
+// executed. Tests use this explicit module seam for their scratch binary and
+// deliberately slowed fixture; an ambient MINIDC_PEERCRED_HELPER is ignored.
+const INSTALLED_PEERCRED_HELPER = "/usr/lib/minidc/minidc-peercred-helper";
+let peerCredHelperTestPath: string | null = null;
+export function setPeerCredHelperForTesting(path: string | null): void {
+  peerCredHelperTestPath = path;
+}
+function peerCredHelperPath(): string {
+  return peerCredHelperTestPath ?? INSTALLED_PEERCRED_HELPER;
+}
+
 // ── defect 8 (2026-11-25, TNT root-cause handoff + review round): under
 // packaged Pi, process.execPath is the Pi application, not Node — and Pi
 // treats -e as an extension-file option, so an owner launched that way
@@ -453,7 +466,7 @@ function startBridge(env: Record<string, string | undefined>): void {
       MINIDC_SESSION_PID: String(process.pid),
       MINIDC_SESSION_STARTTIME: selfStatOf(process.pid),
       MINIDC_SOCKET: brokerPaths().socketPath,
-      MINIDC_PEERCRED_HELPER: process.env.MINIDC_PEERCRED_HELPER || "/usr/lib/minidc/minidc-peercred-helper",
+      MINIDC_PEERCRED_HELPER: peerCredHelperPath(),
       ...(env["MINIDC_ENROLLMENT"] ? { MINIDC_ENROLLMENT: env["MINIDC_ENROLLMENT"] } : {}),
       ...(env["MINIDC_CLAIM_SECRET"] ? { MINIDC_CLAIM_SECRET: env["MINIDC_CLAIM_SECRET"] } : {}),
     },
@@ -530,11 +543,13 @@ function connectBridgeSocket(st: OwnerState): void {
       // If the helper binary is absent (CI runners), verification is SKIPPED
       // with an explicit diagnostic (never silently — the bridgeLaunchErr
       // records it). Production desks always have the helper (install.sh P6).
-      const helperPath = process.env.MINIDC_PEERCRED_HELPER || "/usr/lib/minidc/minidc-peercred-helper";
+      const helperPath = peerCredHelperPath();
       let peer: import("node:child_process").ChildProcess;
       try {
         accessSync(helperPath, constants.X_OK);
-        peer = spawn(helperPath, [], { stdio: [fd, "pipe", "pipe"] });
+        // The verifier gets NO inherited environment (no credentials, no PATH
+        // tricks, no helper selection) — only the connected socket as stdin.
+        peer = spawn(helperPath, [], { stdio: [fd, "pipe", "pipe"], env: {} });
       } catch {
         // No helper means no verification and no trust (fail closed). Tests
         // compile the real helper into their scratch tree and point this env
@@ -759,6 +774,7 @@ function reClaim() {
     try {
       const result = require("child_process").spawnSync(helper, [], {
         stdio: [afd, "pipe", "pipe"],
+        env: {}, // verifier receives no credential-bearing environment
         encoding: "utf8",
         timeout: 2000,
       });

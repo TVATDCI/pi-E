@@ -16,6 +16,7 @@ import {
   observeInstallMode,
   setBrokerPathsForTesting,
   setNodeTrustFileForTesting,
+  setPeerCredHelperForTesting,
   MODE_UNAVAILABLE_ERROR,
   MODE_CONFLICT_ERROR,
   initBrokerClient,
@@ -90,7 +91,7 @@ const compiled = spawnSync("cc", ["-O2", "-o", peerHelper, join(REPO, "broker", 
 if (compiled.status !== 0) {
   throw new Error(`the real peercred helper must compile for this matrix: ${compiled.stderr || compiled.error}`);
 }
-process.env.MINIDC_PEERCRED_HELPER = peerHelper;
+setPeerCredHelperForTesting(peerHelper);
 
 function writeMarker(v: "broker" | "legacy" | null): void {
   if (v === null) { try { fs.unlinkSync(paths.markerPath); } catch { /* absent */ } }
@@ -405,7 +406,7 @@ async function main(): Promise<void> {
     const slowHelper = join(T2, "slow-peercred-helper");
     fs.writeFileSync(slowHelper, `#!/bin/sh\n: > "${T2}/verification-started"\nsleep 2\nexec "${peerHelper}"\n`);
     fs.chmodSync(slowHelper, 0o755);
-    process.env.MINIDC_PEERCRED_HELPER = slowHelper;
+    setPeerCredHelperForTesting(slowHelper);
     const pendingInit = initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
     for (let n = 0; n < 40 && !fs.existsSync(join(T2, "verification-started")); n++) await sleep(50);
     check("slow verification is in flight before the kill", fs.existsSync(join(T2, "verification-started")));
@@ -413,7 +414,31 @@ async function main(): Promise<void> {
     await pendingInit;
     await sleep(100);
     check("child exit during verification never publishes a trusted fd", bridgeDebug().bridgeFd === null);
-    process.env.MINIDC_PEERCRED_HELPER = peerHelper;
+    setPeerCredHelperForTesting(peerHelper);
+    shutdownBrokerClient();
+
+    // Production selector pin (TNT trust regression): an ambient alternate
+    // helper must NEVER be invoked. The default installed path is the only
+    // production source; when absent, the descriptor stays untrusted.
+    const sentinel = join(T2, "ambient-helper-must-not-run");
+    fs.writeFileSync(sentinel, `#!/bin/sh\n: > "${T2}/ambient-ran"\nexit 1\n`);
+    fs.chmodSync(sentinel, 0o755);
+    setPeerCredHelperForTesting(null); // production mode
+    process.env.MINIDC_PEERCRED_HELPER = sentinel;
+    const obsAmbient = await initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
+    check("ambient alternate helper is never executed in production mode", !fs.existsSync(join(T2, "ambient-ran")));
+    if (fs.existsSync("/usr/lib/minidc/minidc-peercred-helper")) {
+      check("installed helper on the desk: production verification proceeds without the ambient selector", obsAmbient.state === "BROKER" && typeof bridgeDebug().bridgeFd === "number");
+    } else {
+      check("installed helper absent on the runner: descriptor remains untrusted", bridgeDebug().bridgeFd === null);
+    }
+    shutdownBrokerClient();
+    setPeerCredHelperForTesting(join(T2, "missing-installed-helper"));
+    await initBrokerClient({ MINIDC_CLAIM_SECRET: fmSecret });
+    check("invalid installed helper leaves the descriptor untrusted", bridgeDebug().bridgeFd === null);
+    check("invalid installed helper never falls back to the ambient alternate", !fs.existsSync(join(T2, "ambient-ran")));
+    delete process.env.MINIDC_PEERCRED_HELPER;
+    setPeerCredHelperForTesting(peerHelper);
     shutdownBrokerClient();
     daemon4.kill("SIGTERM");
     daemon3.kill("SIGTERM");
