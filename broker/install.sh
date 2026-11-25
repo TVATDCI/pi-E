@@ -780,6 +780,19 @@ do_repair_mode() {
   if [[ "$mode" != "broker" ]]; then mode="broker"; fi
   printf '{"install-mode":"%s","transaction-id":"%s","attested-at":"%s"}\n' "$mode" "$(json_get "$LEDGER" "transaction-id" | tr -d '"')" "$(now_iso)" > "$ATTESTATION"
   printf '%s' "$mode" > "$MARKER"
+  # revision 3.1 (finding 2): --repair-mode also (re)provisions the authorized
+  # node runtime trust file for already-activated desks (no reinstall needed)
+  if [[ -z "$TEST_ROOT" ]]; then
+    mkdir -p /etc/minidc
+    printf '%s\n' "$NODE_BIN" > /etc/minidc/node-bin.tmp
+    chown root:root /etc/minidc/node-bin.tmp
+    chmod 0444 /etc/minidc/node-bin.tmp
+    mv -f /etc/minidc/node-bin.tmp /etc/minidc/node-bin
+    LOG "repair-mode: authorized node runtime recorded (/etc/minidc/node-bin -> $NODE_BIN)"
+  else
+    mkdir -p "$TEST_ROOT/etc/minidc"
+    printf '%s\n' "$NODE_BIN" > "$TEST_ROOT/etc/minidc/node-bin"
+  fi
   LOG "repair-mode: attestation + marker reconciled to ledger truth ($mode)"
 }
 
