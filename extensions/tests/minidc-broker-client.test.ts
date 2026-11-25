@@ -271,6 +271,11 @@ async function main(): Promise<void> {
       subject: "a1b2c3d4e5f60718", cls: "G", decision: "deny", scope: "none",
     });
     check("gate-row append via bridge (central origin derivation) acked", gateAppended);
+    if (!appended || !gateAppended) {
+      // CI-vs-desk diagnosis: the file read below only proves the append never
+      // landed; include the complete bridge state so the failed leg is named.
+      throw new Error(`append evidence missing: ${JSON.stringify({ observation: obs.state, rules: rules.state, grade: bridgeGrade(), appended, gateAppended, debug: bridgeDebug() })}`);
+    }
     const grants = readGrantsViaBroker("clslug");
     check("read-grants via bridge: empty list, not degraded", grants !== null && grants.length === 0);
     const trailRaw = fs.readFileSync(join(paths.treePath, "store", "clslug", "trail.jsonl"), "utf8");
