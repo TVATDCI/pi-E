@@ -20,10 +20,12 @@
 
 import * as net from "node:net";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { join, isAbsolute } from "node:path";
 import * as os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+
+const { accessSync, constants } = fs;
 
 // ═══════════════ paths + seams ════════════════════════════════════════════════
 export interface BrokerPaths {
@@ -328,12 +330,52 @@ function selfStatOf(pid: number): string {
 
 let bridgeEnvs: Record<string, string | undefined> = {};
 
+// ── defect 8 (2026-11-25, TNT root-cause handoff): under packaged Pi,
+// process.execPath is the Pi application, not Node — and Pi treats -e as an
+// extension-file option, so an owner launched that way evaluates NOTHING: a
+// live process that never connects, never registers, never consumes (silent
+// by construction; no denial ever reaches the audit). The owner MUST launch
+// under a trusted Node binary. Resolution: MINIDC_NODE_BIN when it names an
+// absolute, executable path; else the desk's mise-managed node (the same
+// binary family the certified generation approves — the broker's own R4
+// running-artifact law remains the trust enforcement, this resolution is
+// correctness). NEVER process.execPath, never a loose PATH lookup, never a
+// silent fallback: an unusable runtime is a prompt, safe failure.
+function trustedNodeBin(): { bin: string } | { err: string } {
+  const home = process.env["HOME"] ?? "/home/vladi";
+  const candidates: string[] = [];
+  const envBin = process.env["MINIDC_NODE_BIN"];
+  if (envBin && isAbsolute(envBin)) candidates.push(envBin);
+  candidates.push(join(home, ".local/share/mise/installs/node/latest/bin/node"));
+  for (const c of candidates) {
+    try {
+      accessSync(c, constants.X_OK);
+      return { bin: c };
+    } catch { /* next candidate */ }
+  }
+  return { err: "no trusted node runtime — set MINIDC_NODE_BIN to an absolute, executable node path" };
+}
+
+let bridgeLaunchErr: string | null = null;
+/** The defect-8 failure surface (task 3): missing runtime or an owner that
+ *  died before ever registering surfaces ONE prompt line — never the env, the
+ *  token, or the registration frame. Denial itself stays the existing law:
+ *  a dead bridge means rules stay unavailable (fail-closed). */
+export function bridgeLaunchError(): string | null {
+  return bridgeLaunchErr;
+}
+
 function startBridge(env: Record<string, string | undefined>): void {
   // fix2 new-finding-1: NO named fifo — responses ride the owner's STDOUT (an
   // anonymous pipe): not name-enumerable anywhere, so no same-uid process can
   // inject a fabricated response line. The fd comes from the internal handle
   // (undocumented but stable); readSync on it works with EAGAIN poll-continue.
-  const proc = spawn(process.execPath, ["-e", OWNER_SOURCE], {
+  const nodeBin = trustedNodeBin();
+  if ("err" in nodeBin) {
+    bridgeLaunchErr = `mini-dc bridge: ${nodeBin.err}`;
+    return; // no owner: rules-load stays degraded, bash stays denied (fail-closed)
+  }
+  const proc = spawn(nodeBin.bin, ["-e", OWNER_SOURCE], {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
@@ -346,7 +388,14 @@ function startBridge(env: Record<string, string | undefined>): void {
   });
   const st: OwnerState = { proc, outFd: null, dead: false };
   bridgeEnvs = env;
-  proc.on("exit", () => { st.dead = true; });
+  proc.on("exit", () => {
+    st.dead = true;
+    // defect-8 task 3: an owner that died WITHOUT ever registering surfaces
+    // once — the respawn logic still retries; this line is the prompt signal
+    if (bridgeGradeValue === null && bridgeLaunchErr === null) {
+      bridgeLaunchErr = "mini-dc bridge: owner exited before registration (runtime or socket unusable)";
+    }
+  });
   proc.stderr?.on("data", (d: Buffer) => {
     const m = /C:(ok|fail):(\S*)/.exec(d.toString());
     if (!m) return;

@@ -56,6 +56,7 @@ import {
   initBrokerClient,
   brokerClientActive,
   lastObservation,
+  bridgeLaunchError,
   readGlobalRulesViaBroker,
   appendTrailViaBroker,
   readTrailViaBroker,
@@ -2018,8 +2019,11 @@ export default function (pi: ExtensionAPI) {
     } else if (rules) {
       ctx.ui.notify(`🛡️ mini-dc: ${count} rules (${rulesSource})`, "info");
     } else {
+      // defect-8 task 3: a bridge launch/runtime failure surfaces its one
+      // prompt line (never env/token/frame) alongside the denial law below
+      const launchErr = bridgeLaunchError();
       ctx.ui.notify(
-        `🛡️ mini-dc: NO RULES LOADED — bash will be DENIED. Add ~/.pi/agent/mini-dc-rules.yaml (global) or .pi/mini-dc-rules.yaml (project).`,
+        `🛡️ mini-dc: NO RULES LOADED — bash will be DENIED.${launchErr ? ` ${launchErr}.` : ""} Add ~/.pi/agent/mini-dc-rules.yaml (global) or .pi/mini-dc-rules.yaml (project).`,
         "warning",
       );
     }
