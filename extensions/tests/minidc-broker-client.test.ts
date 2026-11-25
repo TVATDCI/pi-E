@@ -72,8 +72,14 @@ fs.mkdirSync(join(T, "home", ".pi", "agent"), { recursive: true });
 setBrokerPathsForTesting(paths);
 // defect-8 revision: the owner launch reads the AUTHORIZED runtime from a
 // trust file — node-run tests stage their own (process.execPath IS node here)
+// The fixture mirrors the installer's protected copy, not the raw host
+// interpreter: GitHub's toolcache node is world-writable (correctly refused by
+// trustedNodeBin), while the installed runtime is a non-writable copy.
+const protectedNode = join(T, "node-runtime");
+fs.copyFileSync(process.execPath, protectedNode);
+fs.chmodSync(protectedNode, 0o555);
 setNodeTrustFileForTesting(join(T, "node-bin"));
-fs.writeFileSync(join(T, "node-bin"), `${process.execPath}\n`);
+fs.writeFileSync(join(T, "node-bin"), `${protectedNode}\n`);
 // The parent AND the owner verify socket peers with the REAL compiled helper.
 // CI runners do not have /usr/lib/minidc installed, so build the exact shipped
 // helper into the scratch tree instead of skipping verification.
