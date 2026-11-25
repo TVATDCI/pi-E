@@ -517,11 +517,41 @@ function connectBridgeSocket(st: OwnerState): void {
     const sock = net.connect({ path: "\0" + st.bridgeAddr }, () => {
       st.bridgeSock = sock;
       const fd = (sock as unknown as { _handle?: { fd?: number } })._handle?.fd;
-      st.bridgeFd = typeof fd === "number" ? fd : null;
-      if (st.bridgeFd === null) {
+      if (typeof fd !== "number") {
         bridgeLaunchErr = "mini-dc bridge: connected socket exposes no fd (runtime limitation)";
         sock.destroy();
+        return;
       }
+      // revision 3.3: ASYNC kernel peer verification — spawn is already imported
+      const peer = spawn("/usr/lib/minidc/minidc-peercred-helper", [], {
+        stdio: [fd, "pipe", "pipe"],
+      });
+      let peerOut = "";
+      peer.stdout?.on("data", (d: Buffer) => { peerOut += d.toString("utf8"); });
+      peer.on("close", (code: number) => {
+        if (st.dead) { sock.destroy(); return; }
+        if (code !== 0 || !peerOut.trim()) {
+          bridgeLaunchErr = "mini-dc bridge: peer verification failed";
+          sock.destroy();
+          return;
+        }
+        try {
+          const cred = JSON.parse(peerOut.trim());
+          if (cred.pid === st.proc.pid) {
+            st.bridgeFd = fd; // verified — the fd is now trusted
+          } else {
+            bridgeLaunchErr = `mini-dc bridge: peer PID ${cred.pid} != child PID ${st.proc.pid}`;
+            sock.destroy();
+          }
+        } catch {
+          bridgeLaunchErr = "mini-dc bridge: peer verification parse error";
+          sock.destroy();
+        }
+      });
+      peer.on("error", () => {
+        bridgeLaunchErr = "mini-dc bridge: peer verification spawn error";
+        sock.destroy();
+      });
     });
     sock.on("error", () => {
       if (++tries < 40) setTimeout(attempt, 50);
@@ -589,7 +619,6 @@ let nextId = 10;
 const pending = new Map();
 let backoffN = 0;
 let stopped = false;
-var pendingReqs = []; // revision 3.1: deferred requests (module scope for register() callback access)
 
 // fix2 new-finding-1: responses ride STDOUT — an anonymous pipe, not a
 // name-enumerable fifo; only the parent holds the read end
@@ -613,11 +642,6 @@ function register() {
     if (f.ok === true) {
       registered = true;
       enrollment = ""; // consumed: later re-claims ride identity
-      // revision 3.1: replay deferred requests
-      for (const pr of pendingReqs) {
-        send(pr.op, pr.args, (pf) => { if (conn) { conn.write(JSON.stringify({ ...pf, id: pr.id }) + "\\n"); } });
-      }
-      pendingReqs.length = 0;
       const r = f.result || {};
       process.stderr.write("C:ok:" + (r.grade ? r.grade : "?") + "\\n");
     } else if (f.retryable === true) {
@@ -706,7 +730,7 @@ function reClaim() {
         if (!line.trim()) continue;
         let req; try { req = JSON.parse(line); } catch (e) { c.write(JSON.stringify({ ok: false, error: "E_UNAVAILABLE", reason: "owner-bad-request" }) + "\\n"); continue; }
         if (req.op === "shutdown") { stopped = true; try { sock.destroy(); } catch (e) {} try { c.destroy(); } catch (e) {} process.exit(0); }
-        if (!registered) { pendingReqs.push(req); continue; } // defer until registered — the caller's budget bounds the wait
+        if (!registered) { c.write(JSON.stringify({ id: req.id, ok: false, error: "E_UNAVAILABLE", reason: "owner-not-registered" }) + "\\n"); continue; } // defer until registered — the caller's budget bounds the wait
         send(req.op, req.args, (f) => { c.write(JSON.stringify({ ...f, id: req.id }) + "\\n"); }); // echo the CALLER's id
       }
     });
